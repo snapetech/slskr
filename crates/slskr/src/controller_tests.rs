@@ -719,7 +719,7 @@ fn share_filters_honor_startup_case_mode_against_original_paths() {
     fs::remove_dir_all(root).unwrap();
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -1580,7 +1580,7 @@ async fn session_create_does_not_echo_api_token() {
     assert!(!response.body.contains("secret-token"));
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -1699,7 +1699,7 @@ async fn controller_api_differential_session_issue_and_revoke() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -3888,7 +3888,7 @@ async fn read_only_api_routes_return_contract_shapes() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -4024,7 +4024,7 @@ async fn controller_api_differential_bounded_activity_and_network_polling_routes
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -4121,7 +4121,7 @@ async fn controller_api_differential_native_network_stats_edge_contracts() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -4401,7 +4401,7 @@ async fn controller_api_differential_native_read_projection_runtime_contracts() 
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -4476,7 +4476,7 @@ async fn controller_api_differential_native_solid_status_edge_contracts() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -6721,7 +6721,7 @@ async fn capabilities_parse_uses_real_tag_and_version_grammar() {
     assert_eq!(no_flags_json["flagsValue"], 0);
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -7219,7 +7219,7 @@ async fn port_forwarding_uses_operator_pinned_gateway_when_frozen_pod_omits_pin(
     assert_eq!(stop.status, "200 OK");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -7319,7 +7319,7 @@ async fn controller_api_differential_portforwarding_start_readback() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -10470,7 +10470,7 @@ async fn session_control_routes_fail_when_manager_is_not_running() {
     assert_eq!(state.session.read().await.state, "connected");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -11682,7 +11682,7 @@ async fn controller_api_differential_automation_compat_routes_use_expected_shape
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -11853,7 +11853,7 @@ async fn controller_api_differential_peer_and_mesh_preview_stream_tickets_are_sh
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -12225,7 +12225,7 @@ async fn controller_api_differential_peer_stream_ticket_validation_and_limits() 
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -12909,7 +12909,7 @@ async fn transfer_cancellation_returns_frozen_statuses() {
 
 static APPLICATION_DUMP_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -13336,7 +13336,7 @@ async fn controller_api_differential_native_application_dump_gates_impl() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -14210,7 +14210,7 @@ async fn share_rebuild_routes_roll_back_when_persistence_fails() {
     }
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -14445,7 +14445,7 @@ async fn search_create_rejects_before_mutation_when_dispatch_is_unavailable() {
         .all(|event| event.kind != "search.started"));
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -14516,7 +14516,7 @@ async fn controller_api_differential_search_creation_rehydrates() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -16608,7 +16608,7 @@ async fn library_routes_roll_back_when_persistence_fails() {
     }
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -19332,7 +19332,7 @@ fn search_store_bounds_text_and_aggregate_results() {
     assert_eq!(store.total_results(), super::MAX_TOTAL_SEARCH_RESULTS);
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -19494,7 +19494,7 @@ async fn controller_api_differential_transfer_api_creates_updates_and_reports_st
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -20299,7 +20299,7 @@ async fn controller_transfer_position_requests_and_returns_the_remote_queue_plac
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -20642,7 +20642,7 @@ async fn controller_api_differential_transfer_report_contracts() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -28033,7 +28033,7 @@ async fn soulfind_bridge_wire_frames_match_target_parser_contract() {
     server.await.unwrap();
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(feature = "full-controller-tests", feature = "bounded-protocol-tests"))]
 async fn protocol_behaviors_differential_overlay_gateway_mesh_search() {
     use slskr_client::overlay::{
@@ -28270,7 +28270,7 @@ async fn send_mesh_sync_fixture_without_response(
     }
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(feature = "full-controller-tests", feature = "bounded-protocol-tests"))]
 async fn protocol_behaviors_differential_mesh_sync_private_runtime() {
     use base64::engine::general_purpose::STANDARD as BASE64;
@@ -28637,7 +28637,7 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
     timed_out && reconnected && server_pass
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(feature = "full-controller-tests", feature = "bounded-protocol-tests"))]
 async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     // These fields mirror BinaryReader/BinaryWriter in the frozen
@@ -28859,7 +28859,7 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     .expect("write bridge protocol evidence");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(feature = "full-controller-tests", feature = "bounded-protocol-tests"))]
 async fn protocol_behaviors_differential_virtual_soulfind_bridge_raw_frames() {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -29094,7 +29094,7 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_raw_frames() {
     .expect("write raw bridge frame evidence");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(feature = "full-controller-tests", feature = "bounded-protocol-tests"))]
 async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
     let (mut state, mut receiver) = test_state();
@@ -29270,7 +29270,7 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
     .expect("write bridge dispatch evidence");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(feature = "full-controller-tests", feature = "bounded-protocol-tests"))]
 async fn protocol_behaviors_differential_virtual_soulfind_bridge_malformed_frames() {
     let (mut state, _receiver) = test_state();
@@ -29576,7 +29576,7 @@ async fn bridge_search_and_download_use_real_oracle_shapes() {
     assert!(download_json.get("enqueued").is_none(), "{download_json}");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -29869,7 +29869,7 @@ async fn controller_api_differential_compatibility_aliases_reach_state_backed_ro
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -32035,7 +32035,7 @@ async fn transfer_reports_require_a_real_direction_not_a_silent_default() {
     }
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -32273,7 +32273,7 @@ async fn versioned_mesh_message_matches_typed_controller_validation() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -32636,7 +32636,7 @@ async fn controller_api_differential_mesh_message_runtime() {
     fs::remove_dir_all(root).expect("remove mesh controller fixture directory");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -32983,7 +32983,7 @@ async fn controller_api_differential_mesh_controller_edge_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -33236,7 +33236,7 @@ async fn controller_api_differential_mesh_runtime_and_nat_lifecycle() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -33477,7 +33477,7 @@ async fn controller_api_differential_mesh_merge_publish_restart_and_concurrency(
     fs::remove_dir_all(state_dir).expect("remove mesh merge/publish test state directory");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -35114,7 +35114,7 @@ async fn opinions_summary_requires_subject_and_computes_a_real_weighted_score() 
     assert_eq!(summary["opinions"].as_array().unwrap().len(), 3);
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -35187,7 +35187,7 @@ async fn controller_api_differential_podcore_content_metadata_requires_a_real_co
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -35362,7 +35362,7 @@ async fn controller_api_differential_podcore_content_metadata_uses_musicbrainz_r
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -35594,7 +35594,7 @@ async fn podcore_membership_and_message_stats_match_storage_contracts() {
     assert_eq!(messages_json["newestMessage"], "1970-01-01T00:00:02+00:00");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -35842,7 +35842,7 @@ async fn controller_api_differential_podcore_dht_stats_reflect_real_publications
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -35980,7 +35980,7 @@ async fn controller_api_differential_podcore_dht_metadata_reads_and_verifies_the
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -36372,7 +36372,7 @@ async fn podcore_routing_matches_message_router_contract_and_updates_real_stats(
     assert_eq!(missing_channel.status, "400 Bad Request");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -38840,7 +38840,7 @@ async fn podcore_maintenance_mutations_match_native_result_contracts() {
     }
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -39339,7 +39339,7 @@ async fn controller_api_differential_user_notes_lifecycle() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -41185,7 +41185,7 @@ async fn virtual_soulfind_v2_routes_honor_explicit_disabled_gate() {
     assert_eq!(response.body, r#""VirtualSoulfind v2 is disabled""#);
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -43835,7 +43835,7 @@ fn browse_store_bounds_text_and_aggregate_entries() {
     assert!(browse.get(&oversized_username).is_some());
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -44225,7 +44225,7 @@ async fn browse_response_api_accepts_controller_directory_payload() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -45892,7 +45892,7 @@ async fn rooms_api_joins_and_records_messages() {
     assert!(joined_filter.body.contains("\"filtered_count\":0"));
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -46041,7 +46041,7 @@ async fn controller_api_differential_joined_room_server_snapshot_populates_the_r
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -47388,7 +47388,7 @@ fn security_authorization_matrix_matches_declared_policy_for_every_frozen_route(
 /// of these prefixes -- not a hand-picked sample -- and writes a ledger
 /// `scripts/audit-parity-manifest.py` reads to promote proven
 /// `controller-api` cases out of `needs-proof`.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -47534,7 +47534,7 @@ async fn controller_api_differential_uuid_guarded_families_reject_malformed_firs
 /// compatibility profile. Credits `malformed-path-query-or-body` (the
 /// missing-required-query routes) and `missing-empty-or-conflict-state`
 /// (the always-404 routes) manifest cases.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -47726,7 +47726,7 @@ async fn controller_api_differential_versioned_get_contract_fixed_route_response
 /// "does not exist" branch, only that a real lookup happens and the
 /// real oracle-matching negative response comes back. Credits
 /// `missing-empty-or-conflict-state` manifest cases.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -47938,7 +47938,7 @@ async fn controller_api_differential_versioned_get_contract_missing_resource_res
 /// `read_only_api_routes_return_contract_shapes` already proves --
 /// written as its own independent differential (not a call into that
 /// test) so this evidence is genuinely re-derived, not just re-exported.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -48143,7 +48143,7 @@ async fn controller_api_differential_read_only_routes_have_real_contract_shapes(
 /// where that's what the frozen registries actually declare, per
 /// target -- several of these routes only exist under the slskdN
 /// compatibility profile.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -48397,7 +48397,7 @@ async fn controller_api_differential_runtime_control_routes_survive_persistence_
 /// `collection_routes_roll_back_when_persistence_fails` already prove.
 /// All 3 families are slskdN-only (slskd declares none of these
 /// routes), confirmed against the frozen registry before crediting.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -48683,7 +48683,7 @@ async fn controller_api_differential_contact_wishlist_collection_routes_survive_
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -49402,7 +49402,7 @@ async fn controller_api_differential_contacts_versioned_crud_persistence_and_con
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -49724,7 +49724,7 @@ async fn controller_api_differential_contacts_discovery_and_read_edges() {
 /// families this session also checked turned out to be slskR-only
 /// additions absent from both frozen oracles, so they're skipped here
 /// rather than crediting a nonexistent manifest case.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -50119,7 +50119,7 @@ async fn controller_api_differential_library_interests_nowplaying_messages_survi
 /// WarmCache/etc.) are stored in slskR's generic `controller_features`
 /// KV table instead of a dedicated table and need their own mapping
 /// decision, not attempted here.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -50320,7 +50320,7 @@ async fn persistence_lifecycle_differential_search_event_transfer_message_domain
 /// oracle only creates transfers via search-result-driven downloads,
 /// not a raw REST create endpoint; that case needs a different real
 /// creation path to prove, not attempted in this batch.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -50430,7 +50430,7 @@ async fn persistence_lifecycle_differential_transfers_domain_rehydrates_from_sql
 /// persists_and_rehydrates_records`, `social_and_security_state_
 /// persist_and_rehydrate_records`, and `compatibility_store_state_
 /// persists_and_rehydrates_records`.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -50758,7 +50758,7 @@ async fn persistence_lifecycle_differential_collections_notes_wishlist_sharing_d
 /// migration.  Prove the matching slskR table through the real wishlist
 /// routes and DatabaseManager methods, including the atomic writer used
 /// when an ignored rule also suppresses persisted search rows.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -50944,7 +50944,7 @@ async fn persistence_lifecycle_differential_wishlist_ignored_results_domain() {
 /// Messages. slskR stores the same observable state in its atomic pod and
 /// pod-channel files; exercise the production routes, reload those files,
 /// and verify cleanup and malformed-state failures.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -51321,7 +51321,7 @@ async fn persistence_lifecycle_differential_pod_core_file_state() {
 /// members reflects ban -> rename -> post message -> delete -> re-GET
 /// 404s). slskdN-only (confirmed against the frozen registry -- slskd
 /// declares none of these routes).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -51571,7 +51571,7 @@ async fn controller_api_differential_pod_management_routes_persist_crud_members_
 /// update item -> reorder -> re-GET items reflects reorder -> delete
 /// item -> delete collection). slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -52026,7 +52026,7 @@ async fn controller_api_differential_collections_items_crud_reorder_lifecycle() 
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -53088,7 +53088,7 @@ async fn controller_api_differential_collections_persistence_and_concurrency() {
 /// `versioned_hashdb_paging_matches_sequence_controller_contract`.
 /// All confirmed present in the frozen slskdN registry (slskd declares
 /// none of these).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -53346,7 +53346,7 @@ async fn controller_api_differential_activity_hashdb_and_transport_status_gets()
 /// routes' `nominal-status-headers-body` cases, independently
 /// re-derived from `mesh_rendezvous_api_discovers_users_and_mesh_
 /// capabilities`. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -53492,7 +53492,7 @@ async fn controller_api_differential_mesh_rendezvous_and_capabilities_gets() {
 /// controller cases.  The v0 DHT actions deliberately use their frozen
 /// no-body contracts, while blocklist and certificate-pin cases exercise
 /// real local state, reset behavior, and concurrent mutations.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -54255,7 +54255,7 @@ async fn controller_api_differential_dht_rendezvous_residuals() {
 /// independently re-derived from `swarm_analytics_routes_share_a_
 /// bounded_snapshot`'s real seeded-job dashboard/projection checks.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -54542,7 +54542,7 @@ async fn controller_api_differential_swarm_analytics_gets() {
 /// that already have direct contract tests but were not yet linked to the
 /// behavioral ledger: profile projection, share-grant token acknowledgement,
 /// and the default-disabled relay, mesh-rendezvous, and STUN guards.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -54720,7 +54720,7 @@ async fn controller_api_differential_compatibility_projection_tail() {
 /// fields, while mesh and DHT routes fail closed when those subsystems
 /// are disabled. This records only the still-open populated/missing
 /// manifest cases for the slskdN versioned aliases.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -54892,7 +54892,7 @@ async fn controller_api_differential_mesh_signal_runtime_switches() {
 /// of the versioned Soulfind bridge admin projection. The values come
 /// from a real advanced-networking configuration layer, not a response
 /// fixture, and are checked through the versioned route dispatcher.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -54957,7 +54957,7 @@ async fn controller_api_differential_bridge_config_populated_projection() {
 /// dashboard collection; this test seeds the equivalent production
 /// runtime collection and verifies the versioned projection carries the
 /// connected-client record rather than only the disabled empty baseline.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -55038,7 +55038,7 @@ async fn controller_api_differential_bridge_clients_populated_projection() {
 /// frozen slskdN controller wraps rooms in an object and exposes the
 /// scene-compatible `name`/`memberCount` fields; this exercises that
 /// target-specific projection from the real room store.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -55107,7 +55107,7 @@ async fn controller_api_differential_bridge_rooms_populated_projection() {
 /// empty-state, and populated-state cases, independently re-derived
 /// from real seeded pod/member/channel-message aggregation and runtime
 /// counter checks. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -55385,7 +55385,7 @@ async fn controller_api_differential_podcore_stats_gets() {
 /// router_contract_and_updates_real_stats`'s real bloom-filter
 /// deduplication, banned-member filtering, and validation checks.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -55716,7 +55716,7 @@ async fn controller_api_differential_podcore_routing() {
 /// independently re-derived from the real DHT/discovery/membership/
 /// routing/messages/backfill result-contract checks. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -56182,7 +56182,7 @@ async fn controller_api_differential_podcore_maintenance_mutations() {
 /// independently re-derived from the frozen PodChannelController status,
 /// validation, system-channel, and readback behavior. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -56564,7 +56564,7 @@ async fn controller_api_differential_podcore_channel_crud() {
 /// surfaces storage exceptions as 500 responses and the pod service
 /// preserves successful channel mutations across a fresh service load.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -57008,7 +57008,7 @@ async fn controller_api_differential_podcore_channel_lifecycle() {
 /// exact in the frozen oracle and slskR for an empty store: arrays for
 /// opinion/recommendation reads and an object for member affinities.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -57200,7 +57200,7 @@ async fn controller_api_differential_podcore_opinion_empty_gets() {
 /// statistics, recommendation, and affinity projections rather than
 /// only checking status codes. slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -57437,7 +57437,7 @@ async fn controller_api_differential_podcore_opinion_populated_gets() {
 /// subsequent content read proves that a successful publication is stored
 /// and observable through the sibling getter. slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -57575,7 +57575,7 @@ async fn controller_api_differential_podcore_opinion_publish() {
 /// The frozen services return successful zero-count result records when
 /// there is no cached opinion or membership state for a valid route.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -57766,7 +57766,7 @@ async fn controller_api_differential_podcore_opinion_actions() {
 /// has no cached opinion or membership state. The frozen services expose
 /// successful zero/empty DTOs for these valid routes rather than a 404.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -57965,7 +57965,7 @@ async fn controller_api_differential_podcore_opinion_missing_gets_and_actions() 
 /// its observable counters while preserving the oracle's boolean result
 /// DTO for a legacy signature in the default non-enforced mode. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -58062,7 +58062,7 @@ async fn controller_api_differential_podcore_signing_verify() {
 /// uuid_ids_usable_on_versioned_routes`'s real UUID-id and full
 /// create/read/update/delete lifecycle checks. slskdN-only (confirmed
 /// against the frozen registry: absent from the slskd policy file).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -58353,7 +58353,7 @@ async fn controller_api_differential_share_grants_crud() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -58899,7 +58899,7 @@ async fn controller_api_differential_share_grants_persistence_and_concurrency() 
 /// validation_and_result_dtos`'s real fuzzy-match/perceptual-hash/
 /// portability/retrieval/stats contract checks. slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -59289,7 +59289,7 @@ async fn controller_api_differential_mediacore_mutations() {
 /// reject missing request fields with 400 and return non-empty supported
 /// algorithm/strategy lists. slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -59634,7 +59634,7 @@ async fn controller_api_differential_mediacore_validation_tail() {
 /// and `mediacore_versioned_descriptor_delete_does_not_overflow_
 /// worker_stack`'s real published/cached/statistics record checks.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -60074,7 +60074,7 @@ async fn controller_api_differential_mediacore_descriptor_lifecycle() {
 /// `mediacore_fuzzy_matching_and_ipld_validation_use_persisted_state`'s
 /// real registered-content-id and persisted-perceptual-hash link-graph
 /// checks. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -60400,7 +60400,7 @@ async fn controller_api_differential_mediacore_ipld_and_fuzzy_find() {
 /// contracts`'s real empty-state response-shape checks for
 /// nonexistent resources. slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -60666,7 +60666,7 @@ async fn controller_api_differential_materialized_empty_state_gets() {
 /// the frozen controllers, so the malformed projection preserves the
 /// nominal 200 response and body shape. slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -60785,7 +60785,7 @@ async fn controller_api_differential_mediacore_stats_malformed_queries() {
 /// ignored by the frozen actions; traversal still rejects its required
 /// link-name parameter, and missing resources retain their oracle 404
 /// shapes. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -60932,7 +60932,7 @@ async fn controller_api_differential_mediacore_resource_malformed_queries() {
 /// wishlist lifecycle, overlay IP blocklisting, quarantine-jury
 /// request validation, and security IP bans. slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -61701,7 +61701,7 @@ async fn controller_api_differential_openapi_mutation_dtos_tail() {
 /// the single-collection GET and list-collections GET. slskdN-only
 /// (confirmed against the frozen registry: slskd has no Collections
 /// routes at all).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -61938,7 +61938,7 @@ async fn controller_api_differential_collections_ownership_scoping() {
 /// target -- not creditable, matching the documented pattern for
 /// slskR-internal aliases). slskdN-only (confirmed against the
 /// frozen registry: absent from the slskd policy file).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -62161,7 +62161,7 @@ async fn controller_api_differential_share_grants_ownership_scoping() {
 /// contract checks and `bridge_admin_clients_never_leaks_unrelated_
 /// peer_activity`'s real client-isolation check. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -62348,7 +62348,7 @@ async fn controller_api_differential_bridge_routes() {
 /// compatibility routes but ASP.NET API versioning rejects POST requests
 /// without an explicit version before binding the request body. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -62441,7 +62441,7 @@ async fn controller_api_differential_unversioned_bridge_version_validation() {
 /// exposed for compatibility, but the frozen API-versioning middleware
 /// rejects them before request binding when no version is supplied.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -62593,7 +62593,7 @@ async fn controller_api_differential_unversioned_mutation_version_validation() {
 /// package_reshapes_real_stored_run_fields`'s real synchronous-
 /// analysis and stored-run-field checks. slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -62776,7 +62776,7 @@ async fn controller_api_differential_songid_run_lifecycle() {
 /// and_reports_a_real_event`'s real membership-gated, forgery-
 /// resistant event lifecycle. slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -63050,7 +63050,7 @@ async fn controller_api_differential_listening_party_and_transports_status() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -63504,7 +63504,7 @@ async fn controller_api_differential_listening_party_open_cases() {
 /// `activitypub_music_actor_and_webfinger_match_target_discovery_
 /// contract`'s real actor/webfinger response-shape and content-type
 /// checks. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -63646,7 +63646,7 @@ async fn controller_api_differential_activitypub_actor_and_webfinger() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -64084,7 +64084,7 @@ async fn controller_api_differential_activitypub_open_cases_impl() {
 /// pagination checks (the v0-shaped response omits the legacy
 /// `offset`/`limit`/`fromSeqId`/`hasMore` echo fields the bare routes
 /// carry). slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -64220,7 +64220,7 @@ async fn controller_api_differential_hashdb_paging() {
 /// These cases are intentionally separate from the nominal and populated
 /// HashDb ledgers so the route-specific negative behavior is audited.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -64642,7 +64642,7 @@ async fn controller_api_differential_hashdb_validation_and_empty_contracts() {
 /// `versioned_discovery_graph_and_opinions_match_native_contracts`'s
 /// real seed-graph, opinion-validation, and honest-404 checks.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -64834,7 +64834,7 @@ async fn controller_api_differential_discovery_graph_and_opinions() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -65211,7 +65211,7 @@ async fn controller_api_differential_opinion_open_cases() {
 /// cases: request rejection, empty fallback construction, process-local
 /// behavior when SQLite is closed, reset behavior after reconstruction,
 /// and deterministic concurrent builds.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -65359,7 +65359,7 @@ async fn controller_api_differential_discovery_graph_edge_contracts() {
 /// autoreplace, destinations, DHT, hashdb optimize, nowplaying,
 /// integrations, transfers, library-health, and overlay-blocklist.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -65644,7 +65644,7 @@ async fn controller_api_differential_deterministic_openapi_mutations() {
 /// podcore large-DTO success-path checks) is a separate, still-open
 /// batch -- see session memory. slskdN-only (confirmed against the
 /// frozen registry route-by-route).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -65894,7 +65894,7 @@ async fn controller_api_differential_versioned_openapi_validation_rejections() {
 /// slskdN-only (confirmed against the frozen registry route-by-
 /// route; `virtualsoulfind/shadow-index/sync/merge` has no registry
 /// entry in either target and is skipped as genuinely unwireable).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -66387,7 +66387,7 @@ async fn controller_api_differential_versioned_openapi_large_dtos() {
 /// checks. slskdN-only (confirmed against the frozen registry;
 /// `/api/v0/events/{eventType}` has no registry entry in either
 /// target and is skipped as genuinely unwireable).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -66759,7 +66759,7 @@ async fn controller_api_differential_versioned_auxiliary_mutations() {
 /// native_state_and_result_contracts`'s real SongID-confirmation
 /// gate, deduplication, and notification-routing checks. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -67093,7 +67093,7 @@ async fn controller_api_differential_release_radar() {
 /// health/dashboard/scan/remediation checks. slskdN-only (confirmed
 /// against the frozen registry route-by-route; `/api/library/items`
 /// itself has no registry entry and is used only as fixture setup).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -67669,7 +67669,7 @@ async fn controller_api_differential_library_health() {
 /// empty/error branches for the same real handlers, including the frozen
 /// `/api/v0/` aliases and the native `/api/v0/slskdn/` alias.  No database
 /// fault or external scan is used here; runtime-failure cases remain open.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -67989,7 +67989,7 @@ async fn controller_api_differential_library_health_versioned_edge_states() {
 /// `/api/profile/me`, etc.) with zero registry entry in either
 /// frozen target -- confirmed route-by-route, not creditable.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -68218,7 +68218,7 @@ async fn controller_api_differential_bridge_admin_and_federation_diagnostics() {
 /// interests`, `/api/source-feeds`, `/api/wishlist`) with zero
 /// registry entry in either frozen target -- confirmed, not
 /// creditable. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -68411,7 +68411,7 @@ async fn controller_api_differential_bridge_admin_stats_and_source_feed_preview(
 /// controller/channels` path in the source test maps to the real
 /// templated route `/api/v0/podcore/{podId}/channels`, not a
 /// separate unregistered path).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -68771,7 +68771,7 @@ async fn controller_api_differential_extended_controller_mutations() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -69213,7 +69213,7 @@ async fn controller_api_differential_native_ranking_contracts() {
 /// (reuses the shared `quarantine_signed_verdict_json` fixture
 /// builder, not the original test function). slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -69664,7 +69664,7 @@ async fn controller_api_differential_quarantine_jury() {
 /// These cases exercise empty and missing reads, malformed route tails,
 /// real persisted request/verdict/acceptance/route mutations, and
 /// concurrent idempotent operations against the same feature-state store.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -70494,7 +70494,7 @@ async fn controller_api_differential_quarantine_jury_open_cases() {
 /// original test's bare (non-`/api/v0/`) paths -- neither is
 /// registered in either target, used purely to seed real state, not
 /// credited. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -71270,7 +71270,7 @@ async fn controller_api_differential_primary_stream_ticket_lifecycle_impl() {
 /// unit test asserting this exact mapping), so either request path
 /// exercises the same registered route. slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -71872,7 +71872,7 @@ async fn controller_api_differential_port_forwarding() {
 /// a manual score override writes into the same store the automatic
 /// violation tracker reads. slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -72155,7 +72155,7 @@ async fn controller_api_differential_security_reputation() {
 /// without breaking signature validation -- unlike the earlier
 /// session bug with a copy-pasted fixed hash literal). slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -72776,7 +72776,7 @@ async fn controller_api_differential_realm_subject_indexes() {
 /// type gate, unsafe-approvedBy rejection, and idempotent-approval
 /// (a repeat approval never overwrites the original decision)
 /// checks. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -73128,7 +73128,7 @@ async fn controller_api_differential_musicbrainz_overlay_export() {
 /// (a real pod moderator/owner, not any member) can accept it, and
 /// leave/cancel follow the same real queued pattern. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -73568,7 +73568,7 @@ async fn controller_api_differential_pod_membership_workflow() {
 /// membership-required history reads (a non-member 403s even for a
 /// public pod), and `?since=` incremental-cursor pagination.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -73902,7 +73902,7 @@ async fn controller_api_differential_pod_channel_messages() {
 /// durable state, reloads, concurrent idempotent mutations, and confined
 /// persisted-file failures instead of crediting static success responses.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -74582,7 +74582,7 @@ async fn controller_api_differential_podcore_message_storage() {
 /// membership mutations for publish, update, delete, moderation, stats,
 /// and cleanup.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -75179,7 +75179,7 @@ async fn controller_api_differential_podcore_membership_storage() {
 /// runtime failures, reload behavior, and concurrent registry operations
 /// against the real controller-feature state file.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -75840,7 +75840,7 @@ async fn controller_api_differential_podcore_discovery_storage() {
 /// messages; the legacy unversioned compatibility routes retain their
 /// existing detailed errors.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -76658,7 +76658,7 @@ async fn controller_api_differential_podcore_join_leave_residuals() {
 /// cases intentionally assert reset semantics; concurrent deletes assert
 /// the frozen single-winner/not-found behavior.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -77129,7 +77129,7 @@ async fn controller_api_differential_security_ban_residuals() {
 /// 404/503 responses, while local projections are checked for their
 /// empty and populated shapes.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -77579,7 +77579,7 @@ async fn controller_api_differential_security_diagnostics_residuals() {
 /// interests, and capability projections. Disabled rendezvous operations
 /// intentionally retain the frozen 403 contract.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -78438,7 +78438,7 @@ async fn controller_api_differential_soulseek_discovery_residuals() {
 /// bounded local-state fallback explicit while avoiding an unbounded
 /// external Soulseek search in a hermetic test.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -79149,7 +79149,7 @@ async fn controller_api_differential_multisource_residuals() {
 /// these checks separate from the populated-state message and membership
 /// tests so the evidence maps to the exact malformed-path case.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -79562,7 +79562,7 @@ async fn controller_api_differential_podcore_route_value_validation() {
 /// on the remaining open malformed cases. The expected messages are the
 /// frozen slskdN controller contracts, not generic status-only checks.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -79709,7 +79709,7 @@ async fn controller_api_differential_podcore_request_validation() {
 /// slskdN-only (confirmed against the frozen registry; the bare
 /// `/api/hashdb/peers` compatibility-surface comparison in the
 /// source test has no registry entry and is not called here).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -79967,7 +79967,7 @@ async fn controller_api_differential_hashdb_history_backfill() {
 /// routes 404 on the slskd target -- independently confirms they are
 /// genuinely absent from slskd's registry, matching the frozen
 /// registry check).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -80410,7 +80410,7 @@ async fn virtual_soulfind_v2_target_negative_ledger() -> Vec<serde_json::Value> 
 /// catalogue). Found via a lowered call-density scan threshold
 /// (`count > 2`) after the `> 3` tier was exhausted. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -80668,7 +80668,7 @@ async fn controller_api_differential_virtual_soulfind_v2() {
 /// populated state, mutations, reset behavior, and concurrent requests.
 /// The ledger is deliberately separate from the original workflow proof
 /// so each frozen-controller case is independently exercised.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -81757,7 +81757,7 @@ async fn controller_api_differential_virtual_soulfind_v2_residuals() {
 /// Conflict), and real search-result projection into by-size/by-
 /// filename/summary views. slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -82013,7 +82013,7 @@ async fn controller_api_differential_source_discovery() {
 /// requested before start, and reports its full conflict DTO for an
 /// overlapping start.  These probes cover those boundaries plus the
 /// malformed, reset, restart, and concurrent request paths.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -82834,7 +82834,7 @@ async fn controller_api_differential_discovery_open_cases() {
 /// real_activity_not_hardcoded_zeros` (a forged-sender rejection
 /// still counts as a real failed verification, not silently
 /// dropped). slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -83579,7 +83579,7 @@ async fn controller_api_differential_pod_and_jury_stats() {
 /// enforced -- independently re-derived from `playback_feedback_and_
 /// diagnostics_reflect_the_real_buffer_state` with fresh fixture data.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -83879,7 +83879,7 @@ async fn controller_api_differential_playback_feedback_and_diagnostics() {
 /// independently exercised with fresh state, concurrent deletes and
 /// concurrent track updates; no response-only assertion is used for
 /// the mutations.  slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -84136,7 +84136,7 @@ async fn controller_api_differential_nowplaying_delete_and_playback_diagnostics_
 /// generic, Plex, and Jellyfin JSON, clears on stop/pause notifications,
 /// rejects empty or invalid payloads, and remains process-local rather
 /// than depending on SQLite.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -84867,7 +84867,7 @@ fn controller_api_differential_activitypub_outbox_and_undo() {
 /// was the only one of the 5 conversations cases with no existing
 /// evidence anywhere. slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -84947,7 +84947,7 @@ async fn controller_api_differential_conversations_delete_survives_persistence_f
 /// `/tmp/slskr-parity-evidence/controller-api/*.json` before writing:
 /// none of these 3 routes had any prior case credited. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -85069,7 +85069,7 @@ async fn controller_api_differential_spotify_oauth_authorize_and_callback() {
 /// (same stack-size reason documented on the ActivityPub
 /// differentials). slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -85282,7 +85282,7 @@ async fn controller_api_differential_spotify_connection_status_and_disconnect() 
 /// `/tmp/slskr-parity-evidence/controller-api/*.json` before
 /// writing: this route had no prior case credited. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -85595,7 +85595,7 @@ async fn controller_api_differential_mesh_http_gateway() {
 /// controller-api/*.json` before writing: neither route had any
 /// prior case credited. slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -85784,7 +85784,7 @@ async fn controller_api_differential_solid_status_and_webid_resolution() {
 /// controller-api/*.json` before writing: neither route had any
 /// prior case credited. slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -86119,7 +86119,7 @@ async fn controller_api_differential_pod_membership_self_publish() {
 /// frozen `MembershipPublishResult` shape, missing members fail as a
 /// service error, and the persisted member state reflects ban/unban/
 /// role changes. slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -86375,7 +86375,7 @@ async fn controller_api_differential_pod_membership_moderation_publish() {
 /// `malformed-path-query-or-body` credited from an earlier batch,
 /// but none had this case. slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -86449,7 +86449,7 @@ async fn controller_api_differential_transfer_reports_required_direction() {
 /// *.json` before writing: this route had zero prior case credited
 /// (checked every case, not just route presence). slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -86537,7 +86537,7 @@ async fn controller_api_differential_transfer_download_cancel() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -86644,7 +86644,7 @@ async fn controller_api_differential_transfer_upload_cancel() {
 /// per case: only `POST /api/v0/hashdb/optimize/profile`'s
 /// `malformed-path-query-or-body` had any prior credit. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -86850,7 +86850,7 @@ async fn controller_api_differential_analyzer_hashdb_and_telemetry() {
 /// Bulk differential proof for the frozen slskdN source-provider catalog.
 /// It checks both the disabled planning projection and the enabled
 /// activation rules rather than accepting the old three-provider shell.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87025,7 +87025,7 @@ async fn controller_api_differential_source_provider_catalog() {
 /// read SQLite; malformed extra segments remain unmatched on both route
 /// aliases while empty and closed-database state still returns the full
 /// catalog.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87130,7 +87130,7 @@ async fn controller_api_differential_source_provider_edge_contracts() {
 /// Bulk differential proof for the empty slskdN Soulseek recommendation
 /// DTOs. The versioned controller returns the protocol-shaped pair of
 /// arrays, even when there are no local or global recommendations.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87189,7 +87189,7 @@ async fn controller_api_differential_versioned_soulseek_recommendations() {
 /// The legacy handlers retain their compatibility envelopes, while the
 /// versioned routes expose the slskdN `ItemRecommendations` and
 /// `ItemSimilarUsers` property shapes.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87258,7 +87258,7 @@ async fn controller_api_differential_versioned_soulseek_item_discovery() {
 /// Differential proof for the empty versioned Soulseek similar-user
 /// collection. The legacy route keeps its mesh envelope; slskdN exposes
 /// the underlying `IReadOnlyCollection<SimilarUser>` directly.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87304,7 +87304,7 @@ async fn controller_api_differential_versioned_soulseek_similar_users() {
 /// Bulk differential proof for the slskdN auto-replace status DTO.
 /// The versioned controller exposes only the five fields below; the
 /// legacy compatibility route intentionally keeps its older projection.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87356,7 +87356,7 @@ async fn controller_api_differential_versioned_autoreplace_status() {
 /// Differential proof for the populated slskdN auto-replace status.  The
 /// controller must reflect the real enable mutation instead of returning
 /// the disabled baseline on every GET.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87408,7 +87408,7 @@ async fn controller_api_differential_versioned_autoreplace_populated_state() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -87737,7 +87737,7 @@ async fn controller_api_differential_native_autoreplace_edge_contracts() {
 /// edges.  These cases cover the controller's invalid-options failure
 /// projection, startup/config-file isolation from SQLite, validation's
 /// deliberately non-mutating lifecycle, and concurrent YAML replacement.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -88076,7 +88076,7 @@ async fn controller_api_differential_native_options_edge_contracts() {
 /// native controller reads and writes the durable event service, rejects
 /// invalid paging and synthetic-event requests, rolls back failed writes,
 /// and preserves records through rehydration and concurrent injection.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -88334,7 +88334,7 @@ async fn controller_api_differential_native_events_edge_contracts() {
 /// nested `statistics`) so the rows cannot be credited by a merely
 /// successful status code or by the legacy unversioned compatibility
 /// shapes.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -88463,7 +88463,7 @@ async fn controller_api_differential_versioned_mesh_health_and_signals() {
 /// edge rows.  Both DTOs are configuration/process projections, so their
 /// empty and closed-SQLite responses remain successful while malformed
 /// extra path segments are rejected by routing.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -88570,7 +88570,7 @@ async fn controller_api_differential_versioned_signals_edge_contracts() {
 /// Differential evidence for the slskdN swarm trace summary projection.
 /// The route is process-local/file-backed in the frozen controller, so a
 /// closed unrelated SQLite pool must not change its empty response.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -88748,7 +88748,7 @@ async fn controller_api_differential_traces_summary_contracts() {
 /// projections that previously only had route-presence proof.  The
 /// fairness cases use the same durable TrafficStats boundary as the
 /// frozen FairnessGuard, including its closed-database failure contract.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -88963,7 +88963,7 @@ async fn controller_api_differential_compatibility_info_and_fairness_contracts()
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89136,7 +89136,7 @@ async fn controller_api_differential_compatibility_user_browse_contracts() {
 /// evidence/controller-api/*.json` before writing, per case: zero
 /// prior credit on either route. slskdN-only (confirmed against
 /// the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89280,7 +89280,7 @@ async fn controller_api_differential_build_info_and_file_delete() {
 /// populating the real in-memory release state, so the evidence covers
 /// the controller's current snapshot rather than only a hardcoded empty
 /// response.  slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89427,7 +89427,7 @@ async fn controller_api_differential_application_version_state_contracts() {
 /// the same projection through unversioned `/api/application`; this slice
 /// exercises the registered `/api/v0/application` route itself and credits
 /// only its populated dynamic-state row.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89515,7 +89515,7 @@ async fn controller_api_differential_application_populated_versioned_state() {
 /// unversioned capability route intentionally share the frozen native
 /// controller surface here; the separate `/api/v0/capabilities` wire
 /// capability-file endpoint is not credited by this slice.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89616,7 +89616,7 @@ async fn controller_api_differential_populated_compatibility_status_and_capabili
 /// detail.  The rows are populated from slskR's real signed-capability
 /// store and assert the controller's public DTO fields, not merely a
 /// non-404 response.  slskdN-only (confirmed against the registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89733,7 +89733,7 @@ async fn controller_api_differential_versioned_capability_peer_projections() {
 /// Differential proof for the empty versioned capability-peer list. The
 /// populated projection is covered separately; this closes its nominal
 /// status/header/body case with the oracle's exact envelope.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -89784,7 +89784,7 @@ async fn controller_api_differential_versioned_capability_peers_nominal() {
 /// cases.  The frozen controller is backed by process-local capability
 /// service state, so a closed SQLite pool must not change its projections;
 /// parsing likewise has no durable side effects to restore on restart.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -90307,7 +90307,7 @@ async fn controller_api_differential_native_capabilities_contracts() {
 /// Differential proof for the versioned Identity/Profile controller.  The
 /// versioned surface is deliberately kept separate from slskR's legacy
 /// username-oriented `/api/profile/*` compatibility shell.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -90679,7 +90679,7 @@ async fn controller_api_differential_native_profile_contracts() {
 /// Differential proof for the empty/default versioned destination
 /// projections. The legacy destination records retain their compatibility
 /// fields, while slskdN returns the four-field `DestinationResponse` DTO.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -90744,7 +90744,7 @@ async fn controller_api_differential_versioned_destinations_nominal() {
 /// candidate projection. The compatibility route retains its historical
 /// `candidates` and `entries` aliases; slskdN exposes `count` and
 /// `candidates`.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -90794,7 +90794,7 @@ async fn controller_api_differential_versioned_backfill_candidates_nominal() {
 /// Differential proof for the empty versioned multi-source job list.
 /// This route already projects the oracle's `{ count, jobs }` envelope;
 /// the missing piece was an explicit nominal ledger row.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -90844,7 +90844,7 @@ async fn controller_api_differential_versioned_multisource_jobs_nominal() {
 /// Differential proof for the empty versioned swarm-trends DTO.  The
 /// oracle has no historical trend storage in this state, so the nominal
 /// response is the exact six-array envelope already returned by slskR.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -90898,7 +90898,7 @@ async fn controller_api_differential_versioned_swarm_trends_nominal() {
 /// Differential proof for the empty versioned swarm-analytics dashboard.
 /// The response is fully derived from an empty multi-source store and
 /// matches the oracle's zero metrics plus deterministic recommendations.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91002,7 +91002,7 @@ async fn controller_api_differential_versioned_swarm_dashboard_nominal() {
 /// Differential proof for an empty versioned transfer-history page.  An
 /// explicit future watermark makes the nominal DTO deterministic while
 /// exercising the real direction, cursor, and page-size validation path.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91059,7 +91059,7 @@ async fn controller_api_differential_versioned_transfer_history_nominal() {
 /// Differential proof for the two empty list projections in the
 /// versioned transfer controller.  Both are exact `[]` responses in the
 /// oracle's fresh state and in slskR's state-backed queue.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91117,7 +91117,7 @@ async fn controller_api_differential_versioned_transfer_empty_lists_nominal() {
 /// cursor is server-generated, so this checks the exact response envelope,
 /// zero direction counts, and empty transfer set rather than comparing the
 /// timestamp to a second process's clock.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91166,7 +91166,7 @@ async fn controller_api_differential_versioned_transfer_changes_nominal() {
 /// oracle returns a direction-keyed map whose state maps are empty when
 /// the transfer store has no completed records; the legacy route retains
 /// slskR's historical aggregate report.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91221,7 +91221,7 @@ async fn controller_api_differential_versioned_transfer_summary_nominal() {
 /// Differential proof for a deterministic empty versioned transfer
 /// histogram. The explicit future window avoids wall-clock-dependent
 /// bucket keys while exercising the oracle's gapless interval projection.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91279,7 +91279,7 @@ async fn controller_api_differential_versioned_transfer_histogram_nominal() {
 /// oracle groups completed records by direction and final state and
 /// carries the measured summary fields into both the summary and histogram
 /// projections.  Fixed Unix timestamps keep both responses deterministic.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91403,7 +91403,7 @@ async fn controller_api_differential_versioned_transfer_reports_populated_state(
 /// the in-memory destination store is the same state-backed projection
 /// used by the HTTP handlers.  slskdN-only (confirmed against the frozen
 /// registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91521,7 +91521,7 @@ async fn controller_api_differential_versioned_destinations_populated_state() {
 /// property, rejects null/empty/malformed bodies, derives its default
 /// destination from configuration even if the backing state is empty, and
 /// performs validation without persistence or database coupling.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -91820,7 +91820,7 @@ async fn controller_api_differential_native_destinations_edge_contracts() {
 /// of these 5 routes had `runtime-failure-and-timeout` credited
 /// (some had other cases already true). slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -92065,7 +92065,7 @@ async fn controller_api_differential_runtime_failure_security_and_shares() {
 /// against the evidence directory before writing: none of these
 /// cases had prior credit. slskdN-only (confirmed against the
 /// frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -92571,7 +92571,7 @@ async fn controller_api_differential_sharegroups_and_shares_rebuild() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -93312,7 +93312,7 @@ async fn controller_api_differential_sharegroups_persistence_and_concurrency() {
 /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
 /// *.json` before writing, per case: all 3 were open. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -93459,7 +93459,7 @@ async fn controller_api_differential_options_and_conversations_projection() {
 /// POST/PUT `/api/v0/options` extension rows are intentionally not
 /// credited here because they are not declared by the frozen oracle
 /// `OptionsController`.  slskdN-only (confirmed against the registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -93714,7 +93714,7 @@ async fn controller_api_differential_options_current_overlay_lifecycle() {
 /// against `/tmp/slskr-parity-evidence/controller-api/*.json`
 /// before writing, per case: all 8 were open. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -94043,7 +94043,7 @@ async fn controller_api_differential_spotify_pods_mesh_and_party() {
 /// `/tmp/slskr-parity-evidence/controller-api/*.json` before
 /// writing, per case: all 5 were open. slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -94274,7 +94274,7 @@ async fn controller_api_differential_application_interests_bridge_mediacore_adve
 /// this session's now-stale `/tmp/native_routes.json` snapshot, so
 /// it was dropped rather than credited.) slskdN-only (confirmed
 /// against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -94421,7 +94421,7 @@ async fn controller_api_differential_storage_and_server() {
 /// that route already credited from earlier batches), and the
 /// visualizer-launch route had zero prior credit at all. slskdN-
 /// only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -94889,7 +94889,7 @@ async fn controller_api_differential_searches_dispatch_and_visualizer_launch() {
 /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
 /// *.json` before writing, per case: all 7 were open. slskdN-only
 /// (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -95094,7 +95094,7 @@ async fn controller_api_differential_options_dht_and_bridge_redaction() {
 /// against `/tmp/slskr-parity-evidence/controller-api/*.json`
 /// before writing, per case: both routes had zero prior credit.
 /// slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -95200,7 +95200,7 @@ async fn controller_api_differential_mediacore_delete_and_mesh_tickets() {
 /// `restart-rehydration` had ever been credited across the whole
 /// persistence-lifecycle workstream, for any domain). slskdN-only
 /// (confirmed against the frozen database-domain registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -95698,7 +95698,7 @@ async fn persistence_lifecycle_differential_collections_notes_wishlist_sharing_d
 /// case was open for both domains, both targets. slskd AND
 /// slskdn (confirmed against both frozen database-domain
 /// registries).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -95918,7 +95918,7 @@ async fn persistence_lifecycle_differential_search_and_message_domains_update_de
 /// Conversations/PrivateMessages/Transfers are declared by both
 /// targets, matching the targets used for their own `create-and-
 /// read-roundtrip`/`update-delete-and-readback` credits).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -96088,7 +96088,7 @@ async fn persistence_lifecycle_differential_covered_domains_schema_create_and_mi
 /// lifecycle/*.json` before writing: `transaction-and-concurrency-
 /// atomicity` was 100% untouched for every domain in the whole
 /// workstream's history.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -96748,7 +96748,7 @@ async fn persistence_lifecycle_differential_covered_domains_transaction_and_conc
 /// failure` was 100% untouched for every domain in the whole
 /// workstream's history -- the last of the 6 case names to be
 /// opened at all.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -98294,7 +98294,7 @@ async fn options_overlay_sets_target_specific_reconnect_and_redacts_secrets() {
     }
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -99204,7 +99204,7 @@ async fn watched_private_message_auto_response_updates_actual_outbound_behavior(
 }
 
 #[cfg(unix)]
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -99272,7 +99272,7 @@ async fn file_lifecycle_differential_options_controller_rejects_backup_symlink()
     .expect("write symlink file evidence");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -99437,7 +99437,7 @@ async fn file_lifecycle_differential_files_service_roots_and_metadata() {
     .expect("write FileService evidence");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -99542,7 +99542,7 @@ async fn file_lifecycle_differential_download_service_path_and_retry() {
     .expect("write DownloadService evidence");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -99863,7 +99863,7 @@ fn file_lifecycle_differential_secure_file_writer_download_open() {
     assert!(rows.iter().all(|row| row["pass"] == true));
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -104257,7 +104257,7 @@ async fn lidarr_scheduler_records_external_failure_and_clears_running_state() {
     assert!(sync.next_sync_at.is_some());
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -104726,7 +104726,7 @@ async fn controller_api_differential_lidarr_and_source_feed_contracts() {
     .expect("write controller-api ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -105494,7 +105494,7 @@ async fn soulseek_diagnostic_and_distributed_logging_filters_are_runtime_consume
     assert_eq!(state.events.read().await.records.len(), before + 1);
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -106188,7 +106188,7 @@ async fn controller_api_differential_controller_file_transfer_and_room_contracts
     .expect("write slskd controller ledger");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -106488,7 +106488,7 @@ async fn controller_api_differential_controller_file_application_and_roster_edge
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -106759,7 +106759,7 @@ async fn controller_api_differential_controller_share_and_relay_lifecycle() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -106839,7 +106839,7 @@ async fn controller_api_differential_controller_fixed_route_malformed_paths() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -107174,7 +107174,7 @@ async fn controller_api_differential_controller_parameterized_malformed_paths() 
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -107481,7 +107481,7 @@ async fn controller_api_differential_controller_empty_and_missing_state() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -107960,7 +107960,7 @@ async fn controller_api_differential_controller_relay_controller_routes() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -108914,7 +108914,7 @@ async fn controller_api_differential_controller_core_application_session_events_
 /// for the same frozen slskd routes.  Every row is emitted only after a
 /// real dispatcher call and, where applicable, a raw SQLite readback or a
 /// fresh store rehydration check.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -109232,7 +109232,7 @@ async fn controller_api_differential_controller_core_failure_restart_and_empty_c
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -109571,7 +109571,7 @@ async fn controller_api_differential_controller_users_and_shares() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -110041,7 +110041,7 @@ async fn controller_api_differential_controller_rooms_and_conversations() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -110786,7 +110786,7 @@ async fn controller_api_differential_controller_rooms_conversations_restart_and_
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -111020,7 +111020,7 @@ async fn controller_api_differential_controller_server_state_and_lifecycle() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -111308,7 +111308,7 @@ async fn controller_api_differential_controller_search_lifecycle() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -111732,7 +111732,7 @@ async fn controller_api_differential_controller_search_failure_restart_and_idemp
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -111982,7 +111982,7 @@ async fn controller_api_differential_native_search_compatibility_contracts() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -112890,7 +112890,7 @@ async fn controller_api_differential_native_searches_open_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -113147,7 +113147,7 @@ async fn controller_api_differential_controller_upload_lifecycle() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -113457,7 +113457,7 @@ async fn controller_api_differential_controller_transfer_failure_restart_and_ide
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -113983,7 +113983,7 @@ async fn controller_api_differential_controller_transfer_batch_cleanup_and_failu
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -114262,7 +114262,7 @@ async fn controller_api_differential_controller_user_browse_contracts() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -114661,7 +114661,7 @@ async fn controller_api_differential_controller_download_edge_contracts() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -115089,7 +115089,7 @@ async fn controller_api_differential_controller_runtime_failure_isolation_contra
 /// while ban persistence, unavailable transport actions, and disabled
 /// remote adversarial configuration retain their distinct frozen failure
 /// contracts.  slskdN-only (confirmed against the frozen registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -115461,7 +115461,7 @@ async fn controller_api_differential_native_security_runtime_failure_contracts()
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -115677,7 +115677,7 @@ async fn controller_api_differential_controller_options_overlay_contracts() {
 /// services.  Closing the SQLite pool after valid transfer fixtures have
 /// been staged therefore yields 500 for those 24 routes and leaves the
 /// accelerated GET/PUT pair available.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -115964,7 +115964,7 @@ async fn controller_api_differential_native_transfers_runtime_failure_contracts(
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -116393,7 +116393,7 @@ async fn controller_api_differential_native_transfers_empty_and_missing_contract
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -116639,7 +116639,7 @@ async fn controller_api_differential_native_transfers_malformed_contracts() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -116913,7 +116913,7 @@ async fn controller_api_differential_native_transfers_nominal_populated_contract
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -117437,7 +117437,7 @@ async fn controller_api_differential_native_transfers_restart_and_concurrency() 
 /// matrix is deliberately filled only from assertions against the live
 /// config, gateway, quarantine, and certificate code paths; components
 /// without a local equivalent remain needs-proof in the manifest.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -118327,7 +118327,7 @@ fn security_controls_differential_hardening_validator() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -118540,7 +118540,7 @@ async fn security_controls_differential_certificate_manager() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -118713,7 +118713,7 @@ async fn security_controls_differential_overlay_message_validation() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -118859,7 +118859,7 @@ async fn security_controls_differential_solid_fetch_policy() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -119294,7 +119294,7 @@ async fn security_controls_differential_mesh_surface() {
 /// classifiers.  Both frozen classes are exercised at the local download
 /// publish boundary, where executable and magic-byte mismatches are
 /// rejected or quarantined before the completed destination is published.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -120898,7 +120898,7 @@ fn security_controls_differential_runtime_controls() {
 /// Differential evidence for the remaining route-owned security
 /// adapters: the local forwarding manager, aggregate health projection,
 /// and request middleware/auth/body guards.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -121109,7 +121109,7 @@ async fn security_controls_differential_route_security_adapters() {
 /// token buckets, DHT quotas, SPKI pinning, pin rotation persistence,
 /// replay/backoff guards, endpoint selection, transport policy matching,
 /// and structured security-event redaction.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -121804,7 +121804,7 @@ async fn security_controls_differential_mesh_transport() {
 
 /// Differential evidence for the durable JWT revocation and managed
 /// blacklist controls shared by the frozen controller profiles.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -122041,7 +122041,7 @@ async fn security_controls_differential_core_security() {
 /// their bounded query contracts.  Keep this separate from the lower-level
 /// security primitives so route evidence cannot be mistaken for proof of
 /// an unrelated helper implementation.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
@@ -122467,7 +122467,7 @@ fn security_controls_differential_authentication_and_jwt() {
 /// The pin manager is also a frozen file-writer subject. Keep its
 /// persistence evidence in the file-lifecycle ledger as well as the
 /// security-control ledger.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -122676,7 +122676,7 @@ fn file_lifecycle_differential_gold_star_club_revocation() {
 
 /// MultiSourceDownloadService publishes only fully ranged, hash-verified
 /// content and removes its private workspace when the operation is dropped.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-file-lifecycle-tests"
@@ -123108,7 +123108,7 @@ async fn file_lifecycle_differential_multisource_download_service() {
 /// startup/debug/YAML/location/validation.  Keep those actions in the
 /// controller ledger with real file reads, watched projections, YAML
 /// validation, and reload checks for both compatibility targets.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -124540,7 +124540,7 @@ async fn controller_api_differential_controller_residual_core_contracts_impl() {
 /// Differential lifecycle proof for the frozen slskd Transfers database
 /// `Batches` domain.  This deliberately exercises the dedicated SQLite
 /// table rather than the generic controller-feature JSON fallback.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -124791,7 +124791,7 @@ async fn persistence_lifecycle_differential_controller_batches_domain() {
 /// rehydration, replacement, restart, transaction, and failure paths
 /// without claiming parity for the frozen repository's derived directory,
 /// FTS, or scan-history tables.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -125004,7 +125004,7 @@ async fn persistence_lifecycle_differential_controller_share_files_domain() {
 /// production, so this proof uses the same durable `TransferRecord` write
 /// path and its real read/update/delete/reopen methods instead of inventing
 /// a REST creation endpoint that neither frozen registry declares.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -125213,7 +125213,7 @@ async fn persistence_lifecycle_differential_transfers_domain_full_lifecycle() {
 /// HashDbState tables.  Controller writes use the same SQLite snapshot
 /// transaction that startup rehydrates, while state parsing failures are
 /// exercised through the backfill route rather than a raw-only assertion.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -125595,7 +125595,7 @@ async fn persistence_lifecycle_differential_native_hashdb_domains() {
 /// record so the public SongID routes retain their state across a restart.
 /// The frozen store exposes upsert/read/list operations only; it has no
 /// delete or corruption-repair contract.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -125795,7 +125795,7 @@ async fn persistence_lifecycle_differential_native_songid_runs() {
 /// and additive accounting contract.  The frozen service exposes reads
 /// and additive writes, but no delete operation; update-delete remains
 /// intentionally open rather than inventing a non-frozen API.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-persistence-tests"
@@ -125939,7 +125939,7 @@ async fn persistence_lifecycle_differential_native_traffic_stats_domain() {
 /// local stores, the durable HashDb/HashDbState projection for restart
 /// checks, and a closed SQLite pool for every runtime-failure case.
 /// slskdN-only (confirmed against the frozen controller registry).
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -126565,7 +126565,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
 /// state-path failure, a fresh PodStore/PodChannelStore load, or a
 /// concurrent mutation.  The route/case keys intentionally match the
 /// frozen slskdN controller manifest exactly.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -127877,7 +127877,7 @@ async fn controller_api_differential_pods_controller_residuals() {
 /// manual search, and lets ordinary service/storage failures surface as
 /// 500 responses.  Each row below is backed by a live route call and, for
 /// stateful cases, durable SQLite readback or a fresh in-memory projection.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -129149,7 +129149,7 @@ async fn controller_api_differential_wishlist_controller_residuals() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -129498,7 +129498,7 @@ async fn controller_api_differential_virtual_soulfind_legacy_residuals() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -130500,7 +130500,7 @@ async fn controller_api_differential_rooms_controller_residuals() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -133400,7 +133400,7 @@ async fn controller_api_differential_podcore_residuals_impl() {
 /// left open after the route-specific MediaCore proofs. Keep the ledger
 /// one-to-one with the frozen manifest so the authoritative audit can
 /// credit each controller action independently.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -133884,7 +133884,7 @@ async fn controller_api_differential_mediacore_residuals() {
 /// overlay contracts; this ledger closes the frozen controller rows that
 /// exercise their remaining malformed, empty, runtime, restart, and
 /// concurrent dimensions.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -134679,7 +134679,7 @@ async fn controller_api_differential_musicbrainz_residuals() {
 /// proves the frozen job-list/detail projections, exact nested routes,
 /// versioned validation, persistence-backed projections, and concurrent
 /// creation behavior independently of the broader search tests.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -135227,7 +135227,7 @@ async fn controller_api_differential_jobs_residuals() {
 /// the already-closed nominal and mutation rows; this ledger isolates the
 /// open runtime, malformed, restart, and concurrent branches so the audit
 /// can credit them independently.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -135728,7 +135728,7 @@ async fn controller_api_differential_library_residuals() {
 /// closed-database behavior; this residual ledger closes the configured
 /// optional-service reads plus the circuit, entropy, adversarial,
 /// disclosure, and reputation validation/lifecycle branches.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -136660,7 +136660,7 @@ async fn controller_api_differential_security_controller_residuals() {
 /// versioned actions, and uses local HTTP fixtures for the external
 /// status/wanted projections rather than treating a hardcoded fallback
 /// as a successful integration response.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -137677,7 +137677,7 @@ async fn controller_api_differential_integrations_residuals() {
 /// The scheduler is process-local except for its HashDb-backed candidate
 /// and file operations, so the ledger separates closed-storage failures
 /// from the successful config, state, reset, and concurrency contracts.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -138451,7 +138451,7 @@ async fn seed_kindless_library_item(state: &Arc<super::AppState>, title: &str) -
 /// instances for reset behavior.  The v0 nominal and malformed warm-cache
 /// cases, plus v0 remediation success, are already credited by earlier
 /// ledgers and are intentionally not duplicated here.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -139130,7 +139130,7 @@ async fn controller_api_differential_native_native_open_cases() {
 /// migration.  The read probes use one real content-discovery entry for
 /// populated state; the closed-pool cases exercise the durable-storage
 /// boundary rather than treating an in-memory empty result as success.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -139504,7 +139504,7 @@ async fn controller_api_differential_audio_canonical_dedupe_and_migration() {
 /// shape, a null/empty request, a closed persistence pool, a fresh-state
 /// reset, and concurrent requests.  Wishlist promotion additionally
 /// checks the actual stored item and duplicate behavior.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -139866,7 +139866,7 @@ async fn controller_api_differential_taste_recommendation_open_cases() {
 /// The frozen controller uses exact routes, a GUID-constrained run id,
 /// empty-state DTOs, and a durable run store; these probes exercise those
 /// boundaries in addition to the already-covered nominal lifecycle.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -140350,7 +140350,7 @@ async fn controller_api_differential_songid_open_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -140892,7 +140892,7 @@ async fn controller_api_differential_share_grants_open_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -141337,7 +141337,7 @@ async fn controller_api_differential_shares_open_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -141948,7 +141948,7 @@ async fn controller_api_differential_users_open_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -143233,7 +143233,7 @@ async fn conversation_runtime_state(
 /// model-bound ids and booleans before service work, returns empty 200/201
 /// bodies for mutations, and evaluates its durable conversation store
 /// before producing read results.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -143981,7 +143981,7 @@ async fn download_runtime_state(env: MapEnv) -> Arc<super::AppState> {
 
 /// Differential proof for the residual compatibility and request-level
 /// download controller cases.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
@@ -144662,7 +144662,7 @@ async fn file_runtime_state(storage: &str) -> Arc<super::AppState> {
 }
 
 /// Differential proof for the residual slskdn FilesController cases.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(all(test, not(any(feature = "bounded-controller-api-tests", feature = "bounded-controller-api-tests-1", feature = "bounded-controller-api-tests-2", feature = "bounded-controller-api-tests-3", feature = "bounded-controller-api-tests-4", feature = "bounded-persistence-tests", feature = "bounded-file-lifecycle-tests", feature = "bounded-protocol-tests", feature = "bounded-security-control-tests", feature = "bounded-security-authorization-tests"))), tokio::test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
