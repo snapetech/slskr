@@ -256,8 +256,8 @@ for anchor in \
   fi
 done
 
-if ! rg -n --fixed-strings -- \
-  'http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await?;' \
+if ! rg -n -U -P \
+  'http_server::write_http_response(?:_with_body)?\([\s\S]{0,400}?\)\s*\.await\?;' \
   "${source_files[@]}" >/dev/null; then
   printf 'runtime boundary hardening check failed: API response write failures must terminate the connection\n' >&2
   status=1
