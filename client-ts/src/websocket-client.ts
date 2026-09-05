@@ -81,8 +81,10 @@ export class WebSocketClient {
           const error = new Error(
             `WebSocket connection timed out after ${WEBSOCKET_CONNECT_TIMEOUT_MS}ms`
           );
-          this.notifyErrorListeners(error);
+          this.ws = null;
           settle(() => reject(error));
+          this.attemptReconnect();
+          this.notifyErrorListeners(error);
           socket.close();
         }, WEBSOCKET_CONNECT_TIMEOUT_MS);
 
@@ -96,7 +98,11 @@ export class WebSocketClient {
             this.notifyConnectionListeners(true);
             settle(resolve);
           } catch (error) {
-            settle(() => reject(error instanceof Error ? error : new Error(String(error))));
+            const connectionError = error instanceof Error ? error : new Error(String(error));
+            this.ws = null;
+            settle(() => reject(connectionError));
+            this.attemptReconnect();
+            this.notifyErrorListeners(connectionError);
             socket.close();
           }
         };
@@ -109,9 +115,14 @@ export class WebSocketClient {
         socket.onerror = () => {
           if (this.ws !== socket) return;
           const error = new Error('WebSocket error');
-          this.notifyErrorListeners(error);
-          if (!settled && socket.readyState !== WebSocket.OPEN) {
+          const handshakeFailed = !settled && socket.readyState !== WebSocket.OPEN;
+          if (handshakeFailed) {
+            this.ws = null;
             settle(() => reject(new Error('WebSocket connection error')));
+            this.attemptReconnect();
+          }
+          this.notifyErrorListeners(error);
+          if (handshakeFailed) {
             socket.close();
           }
         };
@@ -276,13 +287,13 @@ export class WebSocketClient {
 
       // Emit to listeners
       if (this.listeners.has(message.type as EventType)) {
-        this.listeners.get(message.type as EventType)?.forEach((listener) => {
+        for (const listener of Array.from(this.listeners.get(message.type as EventType) ?? [])) {
           try {
             listener(message);
           } catch (error) {
             this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
           }
-        });
+        }
       }
     } catch (error) {
       this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
@@ -296,23 +307,23 @@ export class WebSocketClient {
   }
 
   private notifyConnectionListeners(connected: boolean): void {
-    this.connectionListeners.forEach((listener) => {
+    for (const listener of Array.from(this.connectionListeners)) {
       try {
         listener(connected);
       } catch (error) {
         this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
       }
-    });
+    }
   }
 
   private notifyErrorListeners(error: Error): void {
-    this.errorListeners.forEach((listener) => {
+    for (const listener of Array.from(this.errorListeners)) {
       try {
         listener(error);
       } catch (e) {
         console.error('Error in error listener:', e);
       }
-    });
+    }
   }
 
   private clearConnectionTimer(): void {

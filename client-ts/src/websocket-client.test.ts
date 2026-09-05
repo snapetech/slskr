@@ -116,6 +116,20 @@ describe('WebSocketClient reconnect lifecycle', () => {
     client.disconnect();
   });
 
+  it('cleans up a timed-out handshake so callers can retry immediately', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const firstConnection = client.connect();
+
+    jest.advanceTimersByTime(15_000);
+
+    await expect(firstConnection).rejects.toThrow('WebSocket connection timed out');
+    const secondConnection = client.connect();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    await secondConnection;
+    client.disconnect();
+  });
+
   it('cleans up a handshake error so callers can retry immediately', async () => {
     const client = new WebSocketClient('http://localhost:8080', 'token');
     const firstConnection = client.connect();
