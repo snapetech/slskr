@@ -24,6 +24,23 @@ describe('useFetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects redirects and accepts an empty successful response', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+
+    const { result } = renderHook(() => useFetch<undefined>('/api/health'));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.data).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/health',
+      expect.objectContaining({ redirect: 'error' }),
+    );
+  });
+
   it('does not let an older request clear loading for a newer request', async () => {
     let resolveFirst: ((response: Response) => void) | undefined;
     const firstResponse = new Promise<Response>((resolve) => {

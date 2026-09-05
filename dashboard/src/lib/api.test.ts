@@ -1,5 +1,29 @@
-import { describe, expect, it } from 'vitest';
-import { isAbortError } from './api';
+import { describe, expect, it, vi } from 'vitest';
+import { isAbortError, requestJson } from './api';
+
+describe('requestJson', () => {
+  it('rejects redirects even when a caller requests follow behavior', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"ok":true}', {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      requestJson<{ ok: boolean }>('/api/config', 'secret', { redirect: 'follow' }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/config',
+      expect.objectContaining({
+        redirect: 'error',
+        headers: expect.any(Headers),
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer secret');
+  });
+});
 
 describe('isAbortError', () => {
   it('recognizes browser and fetch-style abort errors', () => {

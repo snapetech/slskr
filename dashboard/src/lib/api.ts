@@ -29,6 +29,9 @@ export async function requestJson<T>(
 
   const response = await fetch(url, {
     ...init,
+    // Do not allow an API key-bearing request to follow a redirect to a
+    // different origin. Callers cannot opt back into redirect following.
+    redirect: 'error',
     headers,
   });
   const body = await response.text();

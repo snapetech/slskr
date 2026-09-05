@@ -61,13 +61,15 @@ export function useFetch<T>(
       const response = await fetch(url, {
         signal: requestController.signal,
         headers: currentOptions?.headers || {},
+        redirect: 'error',
       });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const result = await response.json() as T;
+      const body = await response.text();
+      const result = body.trim() ? JSON.parse(body) as T : undefined as T;
 
       // Only update state if component is still mounted
       if (

@@ -31,6 +31,7 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
         const res = await fetch(`${apiUrl}/api/metrics`, {
           headers,
           signal: requestController.signal,
+          redirect: 'error',
         });
         if (!res.ok) throw new Error('Failed to fetch metrics');
         const nextMetrics = parseMonitoringMetrics(await res.text());
