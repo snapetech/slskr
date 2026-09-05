@@ -2,9 +2,18 @@ import { list } from '../../../lib/events';
 import { toDisplayError } from '../../../lib/errors';
 import { LoaderSegment } from '../../Shared';
 import React, { useEffect, useState } from 'react';
-import { Icon, Message, Pagination, Popup, Table } from 'semantic-ui-react';
+import {
+  Button,
+  Icon,
+  Input,
+  Message,
+  Pagination,
+  Popup,
+  Table,
+} from 'semantic-ui-react';
 
 const PER_PAGE = 10;
+const EMPTY_FILTERS = { kind: '', topic: '', q: '' };
 
 const replaceHyphensWithNonBreakingEquivalent = (string) =>
   string == null ? '' : String(string).replaceAll('-', '‑');
@@ -35,11 +44,30 @@ const Events = () => {
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState([]);
   const [error, setError] = useState();
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [activeFilters, setActiveFilters] = useState(EMPTY_FILTERS);
 
   const paginationChanged = ({ activePage }) => {
     if (activePage >= 1) {
       setPage(activePage);
     }
+  };
+
+  const updateFilter = (name) => (event) => {
+    const { value } = event.target;
+    setFilters((previous) => ({ ...previous, [name]: value }));
+  };
+
+  const applyFilters = (event) => {
+    event.preventDefault();
+    setPage(1);
+    setActiveFilters({ ...filters });
+  };
+
+  const clearFilters = () => {
+    setPage(1);
+    setFilters(EMPTY_FILTERS);
+    setActiveFilters(EMPTY_FILTERS);
   };
 
   useEffect(() => {
@@ -53,6 +81,7 @@ const Events = () => {
         const { events: items, totalCount } = await list({
           limit: PER_PAGE,
           offset: (page - 1) * PER_PAGE,
+          ...activeFilters,
         });
 
         if (!active) {
@@ -91,7 +120,7 @@ const Events = () => {
     return () => {
       active = false;
     };
-  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilters, page]);
 
   if (loading) {
     return <LoaderSegment />;
@@ -99,6 +128,41 @@ const Events = () => {
 
   return (
     <>
+      <form
+        aria-label="Event history filters"
+        onSubmit={applyFilters}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75em', marginBottom: '1em' }}
+      >
+        <Input
+          aria-label="Event text filter"
+          onChange={updateFilter('q')}
+          placeholder="Search event text"
+          value={filters.q}
+        />
+        <Input
+          aria-label="Event kind filter"
+          onChange={updateFilter('kind')}
+          placeholder="Filter by kind"
+          value={filters.kind}
+        />
+        <Input
+          aria-label="Event topic filter"
+          onChange={updateFilter('topic')}
+          placeholder="Filter by topic"
+          value={filters.topic}
+        />
+        <Button primary disabled={loading} type="submit">
+          Filter events
+        </Button>
+        <Button
+          disabled={loading || (!filters.q && !filters.kind && !filters.topic
+            && !activeFilters.q && !activeFilters.kind && !activeFilters.topic)}
+          onClick={clearFilters}
+          type="button"
+        >
+          Clear Filter
+        </Button>
+      </form>
       <div className="header-buttons">
         <Pagination
           activePage={page}

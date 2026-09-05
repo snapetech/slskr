@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { list } from '../../../lib/events';
 import Events from './index';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../lib/events', () => ({
@@ -41,5 +41,33 @@ describe('Events', () => {
       await screen.findByText('event backend unavailable'),
     ).toBeInTheDocument();
     expect(screen.getByText('No events')).toBeInTheDocument();
+  });
+
+  it('passes applied filters to the paginated event request', async () => {
+    list.mockResolvedValue({ events: [], totalCount: 0 });
+
+    render(<Events />);
+
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event text filter' }), {
+      target: { value: 'ambient' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event kind filter' }), {
+      target: { value: 'search.started' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event topic filter' }), {
+      target: { value: 'searches' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter events' }));
+
+    await waitFor(() => {
+      expect(list).toHaveBeenLastCalledWith({
+        kind: 'search.started',
+        limit: 10,
+        offset: 0,
+        q: 'ambient',
+        topic: 'searches',
+      });
+    });
   });
 });
