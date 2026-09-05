@@ -545,6 +545,11 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
             Ok(routing::ok_response(body))
         }
         ("POST", "/api/conversations/batch") => {
+            if conversation_batch_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "conversation batch exceeds recipient limits",
+                ));
+            }
             let usernames = match extract_json_string_array_field(body, "usernames")
                 .or_else(|| extract_json_string_array_field(body, "recipients"))
             {
@@ -2029,6 +2034,11 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
         }
 
         ("PUT", "/api/wishlist/bulk-filter") => {
+            if wishlist_bulk_filter_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "wishlist bulk filter exceeds item limits",
+                ));
+            }
             let requested_ids = extract_json_string_array_field(body, "ids")
                 .or_else(|| extract_json_string_array_field(body, "itemIds"))
                 .unwrap_or_default();

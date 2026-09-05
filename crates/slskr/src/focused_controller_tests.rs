@@ -1861,6 +1861,69 @@ async fn transfer_rejects_oversized_file_batches_before_queue_mutation() {
 }
 
 #[tokio::test]
+async fn string_array_routes_reject_oversized_wire_batches_before_mutation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let recipients = (0..=super::MAX_PRIVATE_MESSAGE_RECIPIENTS)
+        .map(|index| serde_json::json!(format!("peer-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/conversations/batch",
+        None,
+        &serde_json::json!({"usernames": recipients, "body": "hello"}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized conversation batch");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("conversation batch exceeds recipient limits"));
+    assert!(state.messages.read().await.records.is_empty());
+
+    let item_ids = (0..=super::MAX_WISHLIST_ITEMS)
+        .map(|index| serde_json::json!(format!("00000000-0000-0000-0000-{index:012x}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "PUT",
+        "/api/v0/wishlist/bulk-filter",
+        None,
+        &serde_json::json!({"itemIds": item_ids, "filter": "flac"}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized wishlist filter batch");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(
+        response
+            .body
+            .contains("wishlist bulk filter exceeds item limits"),
+        "{}",
+        response.body
+    );
+    assert!(state.wishlist.read().await.records.is_empty());
+
+    let capabilities = (0..=super::MAX_CAPABILITY_NEGOTIATION_ITEMS)
+        .map(|index| serde_json::json!(format!("capability-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/capabilities/negotiate",
+        None,
+        &serde_json::json!({"capabilities": capabilities}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized capability negotiation");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("capabilities negotiation exceeds item limits"));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

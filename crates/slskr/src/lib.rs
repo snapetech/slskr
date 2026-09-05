@@ -158,7 +158,7 @@ use slskr_client::{
     search::{WishlistSearchScheduler, WishlistSearchSchedulerOptions},
     server::{LoginCredentials, ServerSession},
     share_payload::{compress_zlib_payload, decompress_zlib_payload},
-    social::private_message_users_command,
+    social::{private_message_users_command, MAX_PRIVATE_MESSAGE_RECIPIENTS},
     stream::{
         DistributedConnection, ObfuscatedPeerMessageConnection, PeerMessageConnection,
         ServerConnection,
@@ -582,6 +582,7 @@ const MAX_SHARE_GRANT_PERMISSIONS_BYTES: usize = 256;
 const MAX_INCOMING_SHARES: usize = 4_096;
 const MAX_INCOMING_SHARE_ITEMS: usize = 10_000;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
+const MAX_CAPABILITY_NEGOTIATION_ITEMS: usize = 256;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 const MAX_TOTAL_SEARCH_RESULTS: usize = 50_000;
@@ -9506,7 +9507,9 @@ fn versioned_wishlist_invalid_id_response(method: &str, path: &str) -> Option<Ht
         .collect::<Vec<_>>();
 
     let dynamic_ids = match segments.as_slice() {
-        [id] if !matches!(id.as_str(), "mark-all-viewed" | "import") => vec![id],
+        [id] if !matches!(id.as_str(), "bulk-filter" | "mark-all-viewed" | "import") => {
+            vec![id]
+        }
         [id, action]
             if matches!(
                 action.as_str(),
@@ -19513,6 +19516,27 @@ fn json_array_exceeds_limit(value: &serde_json::Value, limit: usize) -> bool {
     value
         .as_array()
         .is_some_and(|items| items.len() > limit)
+}
+
+fn json_array_field_exceeds_limit(body: &str, field: &str, limit: usize) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    payload
+        .get(field)
+        .is_some_and(|value| json_array_exceeds_limit(value, limit))
+}
+
+fn conversation_batch_exceeds_wire_limits(body: &str) -> bool {
+    ["usernames", "recipients"]
+        .into_iter()
+        .any(|field| json_array_field_exceeds_limit(body, field, MAX_PRIVATE_MESSAGE_RECIPIENTS))
+}
+
+fn wishlist_bulk_filter_exceeds_wire_limits(body: &str) -> bool {
+    ["ids", "itemIds"]
+        .into_iter()
+        .any(|field| json_array_field_exceeds_limit(body, field, MAX_WISHLIST_ITEMS))
 }
 
 fn browse_response_exceeds_wire_limits(payload: &serde_json::Value) -> bool {
@@ -29970,6 +29994,11 @@ async fn legacy_route_http_request_with_headers_inner(
             Ok(routing::ok_response(body))
         }
         ("POST", "/api/conversations/batch") => {
+            if conversation_batch_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "conversation batch exceeds recipient limits",
+                ));
+            }
             let usernames = match extract_json_string_array_field(body, "usernames")
                 .or_else(|| extract_json_string_array_field(body, "recipients"))
             {
@@ -44645,6 +44674,9 @@ async fn network_stats_value(state: &AppState, include_peers: bool) -> serde_jso
 }
 
 fn capabilities_negotiate_response(body: &str) -> HttpResponse {
+    if json_array_field_exceeds_limit(body, "capabilities", MAX_CAPABILITY_NEGOTIATION_ITEMS) {
+        return routing::bad_request_response("capabilities negotiation exceeds item limits");
+    }
     let server_capabilities = ["shares", "telemetry"];
 
     // Parse requested capabilities from body

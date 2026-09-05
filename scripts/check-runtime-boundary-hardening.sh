@@ -137,6 +137,11 @@ for anchor in \
   'MAX_TRANSFER_REQUEST_FILES' \
   'controller_file_array_exceeds_wire_limits' \
   'transfer_rejects_oversized_file_batches_before_queue_mutation' \
+  'MAX_CAPABILITY_NEGOTIATION_ITEMS' \
+  'json_array_field_exceeds_limit' \
+  'conversation_batch_exceeds_wire_limits' \
+  'wishlist_bulk_filter_exceeds_wire_limits' \
+  'string_array_routes_reject_oversized_wire_batches_before_mutation' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \
