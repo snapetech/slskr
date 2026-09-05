@@ -1691,6 +1691,57 @@ async fn browse_response_rejects_oversized_wire_batches_before_store_mutation() 
 }
 
 #[tokio::test]
+async fn search_response_rejects_oversized_wire_batches_before_store_mutation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let search_response = super::route_http_request(
+        "POST",
+        "/api/searches",
+        None,
+        r#"{"query":"oversized-response"}"#,
+        &state,
+    )
+    .await
+    .expect("create search for oversized response test");
+    assert_eq!(search_response.status, "200 OK", "{}", search_response.body);
+    let token = state
+        .searches
+        .read()
+        .await
+        .records
+        .first()
+        .map(|record| record.token)
+        .expect("created search token");
+
+    let oversized_files = (0..=super::MAX_SEARCH_RESULTS_PER_SEARCH)
+        .map(|index| serde_json::json!({"filename": format!("file-{index}.flac")}))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/search-responses",
+        None,
+        &serde_json::json!({"token": token, "files": oversized_files}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized search response");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("search response exceeds result limits"));
+
+    let searches = state.searches.read().await;
+    let record = searches
+        .records
+        .iter()
+        .find(|record| record.token == token)
+        .expect("search remains present");
+    assert!(record.results.is_empty());
+    assert_eq!(record.raw_response_count, 0);
+    drop(searches);
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

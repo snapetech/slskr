@@ -602,6 +602,11 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 Ok(payload) => payload,
                 Err(_) => return Ok(routing::bad_request_response("invalid JSON body")),
             };
+            if search_response_exceeds_wire_limits(&payload) {
+                return Ok(routing::bad_request_response(
+                    "search response exceeds result limits",
+                ));
+            }
 
             let token = match payload.get("token").and_then(serde_json::Value::as_u64) {
                 Some(t) => match u32::try_from(t) {

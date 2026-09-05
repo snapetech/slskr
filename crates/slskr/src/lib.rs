@@ -19545,6 +19545,19 @@ fn browse_response_exceeds_wire_limits(payload: &serde_json::Value) -> bool {
     false
 }
 
+fn search_response_exceeds_wire_limits(payload: &serde_json::Value) -> bool {
+    let file_count = payload
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let locked_file_count = payload
+        .get("lockedFiles")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    file_count > MAX_SEARCH_RESULTS_PER_SEARCH
+        || locked_file_count > MAX_SEARCH_RESULTS_PER_SEARCH.saturating_sub(file_count)
+}
+
 use routing::HttpResponse;
 
 #[cfg(not(feature = "legacy-route-dispatch"))]
@@ -23698,6 +23711,11 @@ async fn legacy_route_http_request_with_headers_inner(
                 Ok(payload) => payload,
                 Err(_) => return Ok(routing::bad_request_response("invalid JSON body")),
             };
+            if search_response_exceeds_wire_limits(&payload) {
+                return Ok(routing::bad_request_response(
+                    "search response exceeds result limits",
+                ));
+            }
 
             let token = match payload.get("token").and_then(serde_json::Value::as_u64) {
                 Some(t) => match u32::try_from(t) {
