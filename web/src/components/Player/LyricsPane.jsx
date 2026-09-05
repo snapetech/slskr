@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchWithoutRedirects, readJsonResponse } from '../../lib/http';
 
 const parseTimestamp = (value) => {
   if (typeof value !== 'string') return null;
@@ -112,17 +113,17 @@ const LyricsPane = ({ audioElement, current, visible }) => {
     });
 
     setStatus('Loading lyrics');
-    fetch(`https://lrclib.net/api/get?${params.toString()}`, {
+    fetchWithoutRedirects(`https://lrclib.net/api/get?${params.toString()}`, {
       signal: controller.signal,
     })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => (response.ok ? readJsonResponse(response) : null))
       .then((data) => {
         if (data?.syncedLyrics || data?.plainLyrics) return data;
 
-        return fetch(`https://lrclib.net/api/search?${params.toString()}`, {
+        return fetchWithoutRedirects(`https://lrclib.net/api/search?${params.toString()}`, {
           signal: controller.signal,
         })
-          .then((response) => (response.ok ? response.json() : null))
+          .then((response) => (response.ok ? readJsonResponse(response) : null))
           .then(firstLyricsCandidate);
       })
       .then((data) => {

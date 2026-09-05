@@ -14,13 +14,9 @@ describe('LyricsPane', () => {
 
   it('derives artist and title from local filenames when metadata is placeholder text', async () => {
     window.fetch = vi.fn(() =>
-      Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            syncedLyrics: '[00:01.00]First line\n[00:02.00]Second line',
-          }),
-        ok: true,
-      }),
+      Promise.resolve(new Response(JSON.stringify({
+        syncedLyrics: '[00:01.00]First line\n[00:02.00]Second line',
+      }), { status: 200 })),
     );
 
     render(
@@ -46,19 +42,12 @@ describe('LyricsPane', () => {
   it('falls back to LRCLIB search when exact lyrics lookup misses', async () => {
     window.fetch = vi
       .fn()
-      .mockResolvedValueOnce({
-        json: () => Promise.resolve(null),
-        ok: false,
-      })
-      .mockResolvedValueOnce({
-        json: () =>
-          Promise.resolve([
-            {
-              plainLyrics: 'Plain line one\nPlain line two',
-            },
-          ]),
-        ok: true,
-      });
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        {
+          plainLyrics: 'Plain line one\nPlain line two',
+        },
+      ]), { status: 200 }));
 
     render(
       <LyricsPane
