@@ -1,7 +1,17 @@
 import api from './api';
 
 export const getNowPlaying = async () => {
-  return (await api.get('/nowplaying')).data;
+  const response = await api.get('/nowplaying');
+  if (response.status === 204 || response.data == null || response.data === '') {
+    return null;
+  }
+  if (
+    typeof response.data !== 'object' ||
+    Array.isArray(response.data)
+  ) {
+    throw new Error('Now-playing API returned an invalid state response');
+  }
+  return response.data;
 };
 
 export const setNowPlaying = async ({ artist, title, album } = {}) => {

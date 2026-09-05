@@ -1,7 +1,14 @@
 import api from './api';
 
+const requireRecord = (data) => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Server API returned an invalid state response');
+  }
+  return data;
+};
+
 export const getState = async () => {
-  return (await api.get('/server')).data;
+  return requireRecord((await api.get('/server')).data);
 };
 
 export const connect = (credentials) => {
