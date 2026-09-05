@@ -1281,13 +1281,12 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             if normalized_path != "/api/multisource/download"
                 || serde_json::from_str::<serde_json::Value>(body)
                     .ok()
-                    .and_then(|value| {
+                    .is_some_and(|value| {
                         value
                             .get("sources")
                             .and_then(serde_json::Value::as_array)
-                            .cloned()
-                    })
-                    .is_some_and(|sources| !sources.is_empty()) =>
+                            .is_some_and(|sources| !sources.is_empty())
+                    }) =>
         {
             if route.path.starts_with("/api/v0/")
                 && state.config.controller_profile == ControllerProfile::Native

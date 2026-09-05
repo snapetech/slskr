@@ -6234,6 +6234,7 @@ async fn discover_mesh_range_sources(
                     })
             }),
     );
+    sources.truncate(multisource::MAX_SOURCES);
     sources
 }
 
@@ -36398,8 +36399,12 @@ async fn legacy_route_http_request_with_headers_inner(
         | ("POST", "/api/multisource/download") if normalized_path != "/api/multisource/download"
             || serde_json::from_str::<serde_json::Value>(body)
                 .ok()
-                .and_then(|value| value.get("sources").and_then(serde_json::Value::as_array).cloned())
-                .is_some_and(|sources| !sources.is_empty()) =>
+                .is_some_and(|value| {
+                    value
+                        .get("sources")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|sources| !sources.is_empty())
+                }) =>
         {
             if route.path.starts_with("/api/v0/")
                 && state.config.controller_profile
@@ -58646,11 +58651,18 @@ async fn multisource_verified_swarm_response(
         .unwrap_or_default()
         .to_owned();
     let mut sources = match payload.get("sources") {
-        Some(value) => match serde_json::from_value::<Vec<multisource::RangeSource>>(value.clone())
-        {
-            Ok(sources) => sources,
-            Err(_) => return routing::bad_request_response("invalid swarm sources"),
-        },
+        Some(value) => {
+            if json_array_exceeds_limit(value, multisource::MAX_SOURCES) {
+                return routing::bad_request_response(&format!(
+                    "source count exceeds the {} source limit",
+                    multisource::MAX_SOURCES
+                ));
+            }
+            match serde_json::from_value::<Vec<multisource::RangeSource>>(value.clone()) {
+                Ok(sources) => sources,
+                Err(_) => return routing::bad_request_response("invalid swarm sources"),
+            }
+        }
         None => Vec::new(),
     };
     if sources.is_empty() {

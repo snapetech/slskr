@@ -1453,6 +1453,42 @@ async fn versioned_swarm_rejects_oversized_transfer_limits_before_discovery() {
 }
 
 #[tokio::test]
+async fn versioned_swarm_rejects_oversized_source_batches_before_deserialization() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
+    let oversized_sources = (0..super::multisource::MAX_SOURCES + 1)
+        .map(|index| {
+            serde_json::json!({
+                "username": format!("peer-{index}"),
+                "url": "https://source.example/file"
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/multisource/swarm/async",
+        None,
+        &serde_json::json!({
+            "filename": "Track.flac",
+            "size": 42,
+            "expectedHash": "a".repeat(64),
+            "sources": oversized_sources
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized versioned swarm source response");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("source count exceeds the 16 source limit"));
+    assert!(state.multisource.read().await.list().is_empty());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn versioned_swarm_requires_expected_hash_before_queueing() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));

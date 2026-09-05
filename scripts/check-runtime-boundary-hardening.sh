@@ -113,6 +113,10 @@ for anchor in \
   'filter_rejects_unbounded_precision_requests' \
   'validate_file_size_and_chunk_size' \
   'versioned_swarm_rejects_oversized_transfer_limits_before_discovery' \
+  'versioned_swarm_rejects_oversized_source_batches_before_deserialization' \
+  'source count exceeds the 16 source limit' \
+  'discover_mesh_range_sources' \
+  'sources.truncate(multisource::MAX_SOURCES)' \
   'MAX_HASH_MERGE_ENTRIES' \
   'MAX_MESH_MERGE_ENTRIES' \
   'MAX_SHADOW_MERGE_RECORDS' \
