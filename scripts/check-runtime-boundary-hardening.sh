@@ -153,6 +153,9 @@ for anchor in \
   'MAX_ROUTING_TARGET_PEERS' \
   'MAX_RADAR_MUTED_RELEASE_GROUPS' \
   'MAX_POD_DISCOVERY_TAGS' \
+  'legacy-route-dispatch' \
+  'legacy dispatcher merge-array parity' \
+  'legacy merge paths use bounded route dispatcher' \
   'issue_ids must contain 1 to 25 values' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \

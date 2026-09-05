@@ -19674,6 +19674,27 @@ async fn route_http_request_with_headers(
     // differential coverage, but its monolithic match can overflow the
     // default Tokio worker stack. Keep this high-frequency read on a small
     // entry path so production and focused tests can use the real share tree.
+    // The legacy merge paths use bounded route dispatcher: they are also kept
+    // on the split dispatcher because they parse
+    // caller-sized batches and must remain stack-safe while exercising the
+    // same bounded route contract in both dispatcher configurations.
+    if method == "POST"
+        && matches!(
+            normalized_path.as_str(),
+            "/api/hashdb/sync/merge" | "/api/virtualsoulfind/shadow-index/sync/merge"
+        )
+    {
+        return route_dispatch::route_http_request_with_headers(
+            method,
+            path,
+            authorization,
+            body,
+            state,
+            &headers,
+        )
+        .await;
+    }
+
     if method == "GET" && normalized_path == "/api/library/items/browser" {
         let span = tracing::RequestSpan::new(
             method.to_owned(),
@@ -21091,6 +21112,7 @@ async fn legacy_route_http_request_with_headers_inner(
             }
         }
         ("POST", "/api/hashdb/sync/merge") => {
+            // Keep legacy dispatcher merge-array parity with the bounded route groups.
             let value = match serde_json::from_str::<serde_json::Value>(body) {
                 Ok(value) => value,
                 Err(_) => return Ok(routing::bad_request_response("invalid hash merge request")),
@@ -21121,13 +21143,25 @@ async fn legacy_route_http_request_with_headers_inner(
                     body: serde_json::json!({"error":"mesh peer is quarantined"}).to_string(),
                 });
             }
-            let entries = match value
-                .get("entries")
-                .cloned()
-                .and_then(|entries| serde_json::from_value::<Vec<content_discovery::HashDbEntry>>(entries).ok())
-            {
+            let entries_value = match value.get("entries") {
                 Some(entries) => entries,
                 None => return Ok(routing::bad_request_response("entries are required")),
+            };
+            let max_entries = if route.path.starts_with("/api/v0/") {
+                content_discovery::MAX_MESH_MERGE_ENTRIES
+            } else {
+                content_discovery::MAX_HASH_MERGE_ENTRIES
+            };
+            if json_array_exceeds_limit(entries_value, max_entries) {
+                return Ok(routing::bad_request_response(&format!(
+                    "entries must contain at most {max_entries} entries"
+                )));
+            }
+            let entries = match serde_json::from_value::<Vec<content_discovery::HashDbEntry>>(
+                entries_value.clone(),
+            ) {
+                Ok(entries) => entries,
+                Err(_) => return Ok(routing::bad_request_response("entries are required")),
             };
             let received = entries.len();
             let (result, previous_entries, previous_latest_seq, mutated_entries, mutated_latest_seq) = {
@@ -21201,28 +21235,45 @@ async fn legacy_route_http_request_with_headers_inner(
                 Ok(value) => value,
                 Err(_) => return Ok(routing::bad_request_response("invalid shadow-index merge request")),
             };
-            let records = match value
-                .get("records")
-                .or_else(|| value.get("entries"))
-                .cloned()
-                .and_then(|records| serde_json::from_value::<Vec<content_discovery::ShadowIndexRecord>>(records).ok())
-            {
+            let records_value = match value.get("records").or_else(|| value.get("entries")) {
                 Some(records) => records,
                 None => return Ok(routing::bad_request_response("records are required")),
+            };
+            if json_array_exceeds_limit(
+                records_value,
+                content_discovery::MAX_SHADOW_MERGE_RECORDS,
+            ) {
+                return Ok(routing::bad_request_response(&format!(
+                    "records must contain at most {} records",
+                    content_discovery::MAX_SHADOW_MERGE_RECORDS
+                )));
+            }
+            let records = match serde_json::from_value::<Vec<content_discovery::ShadowIndexRecord>>(
+                records_value.clone(),
+            ) {
+                Ok(records) => records,
+                Err(_) => return Ok(routing::bad_request_response("records are required")),
             };
             let realm_indexes = match value
                 .get("realmIndexes")
                 .or_else(|| value.get("realm_indexes"))
-                .cloned()
             {
-                Some(indexes) => match serde_json::from_value::<Vec<serde_json::Value>>(indexes) {
-                    Ok(indexes) => indexes,
-                    Err(_) => {
-                        return Ok(routing::bad_request_response(
-                            "realmIndexes must be an array of objects",
-                        ))
+                Some(indexes) => {
+                    if json_array_exceeds_limit(indexes, realm_subject_index::MAX_INDEXES) {
+                        return Ok(routing::bad_request_response(&format!(
+                            "realmIndexes must contain at most {} indexes",
+                            realm_subject_index::MAX_INDEXES
+                        )));
                     }
-                },
+                    match serde_json::from_value::<Vec<serde_json::Value>>(indexes.clone()) {
+                        Ok(indexes) => indexes,
+                        Err(_) => {
+                            return Ok(routing::bad_request_response(
+                                "realmIndexes must be an array of objects",
+                            ))
+                        }
+                    }
+                }
                 None => Vec::new(),
             };
             let received = records.len();
