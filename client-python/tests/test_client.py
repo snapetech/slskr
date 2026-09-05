@@ -558,6 +558,30 @@ async def test_websocket_dispatches_sync_and_async_listeners_without_false_error
     assert errors == []
 
 
+@pytest.mark.asyncio
+async def test_websocket_listener_cleanup_and_mutation_are_safe():
+    client = WebSocketClient("https://example.test", "token")
+    received = []
+    unsubscribe_first = None
+
+    def first_listener(_event):
+        received.append("first")
+        if unsubscribe_first is not None:
+            unsubscribe_first()
+
+    def second_listener(_event):
+        received.append("second")
+
+    unsubscribe_first = client.on("search.completed", first_listener)
+    client.on("search.completed", second_listener)
+
+    await client._process_message(json.dumps({"type": "search.completed"}))
+    assert sorted(received) == ["first", "second"]
+
+    client.remove_all_listeners()
+    unsubscribe_first()
+
+
 def test_api_error_helpers():
     not_found = ApiError(404, "not_found")
     server_error = ApiError(503, "unavailable")

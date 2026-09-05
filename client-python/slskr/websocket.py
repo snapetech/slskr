@@ -226,7 +226,7 @@ class WebSocketClient:
             # Emit to listeners
             event_type = event.get("type")
             if event_type in self.event_listeners:
-                for listener in self.event_listeners[event_type]:
+                for listener in tuple(self.event_listeners[event_type]):
                     try:
                         await self._call_listener(listener, event)
                     except Exception as e:
@@ -285,7 +285,7 @@ class WebSocketClient:
 
         # Return unsubscribe function
         def unsubscribe():
-            self.event_listeners[event_type].discard(listener)
+            self.event_listeners.get(event_type, set()).discard(listener)
 
         return unsubscribe
 
