@@ -3,7 +3,9 @@ package slskr
 import (
 	"context"
 	"fmt"
+	"math"
 	"reflect"
+	"strings"
 )
 
 // BatchOperation represents a single operation in a batch
@@ -225,23 +227,74 @@ func (b *BatchBuilder) Execute(ctx context.Context) (*BatchResponse, error) {
 		return nil, err
 	}
 
-	var response BatchResponse
-	response.TotalTimeMs = int(getFloat64(result, "total_time_ms"))
+	return parseBatchResponse(result)
+}
 
-	if results, ok := result["results"].([]interface{}); ok {
-		for _, r := range results {
-			if rm, ok := r.(map[string]interface{}); ok {
-				br := BatchResult{
-					ID:     getString(rm, "id"),
-					Status: int(getFloat64(rm, "status")),
-					Body:   rm["body"],
-				}
-				response.Results = append(response.Results, br)
-			}
-		}
+func parseBatchResponse(result map[string]interface{}) (*BatchResponse, error) {
+	rawTotalTime, ok := result["total_time_ms"]
+	if !ok {
+		return nil, invalidBatchResponse()
+	}
+	totalTimeMs, ok := responseInteger(rawTotalTime, 0, int64(maxInt()))
+	if !ok {
+		return nil, invalidBatchResponse()
 	}
 
-	return &response, nil
+	rawResults, ok := result["results"].([]interface{})
+	if !ok {
+		return nil, invalidBatchResponse()
+	}
+
+	response := &BatchResponse{
+		Results:     make([]BatchResult, 0, len(rawResults)),
+		TotalTimeMs: totalTimeMs,
+	}
+	for _, rawResult := range rawResults {
+		resultObject, ok := rawResult.(map[string]interface{})
+		if !ok {
+			return nil, invalidBatchResponse()
+		}
+
+		id, ok := resultObject["id"].(string)
+		if !ok || strings.TrimSpace(id) == "" {
+			return nil, invalidBatchResponse()
+		}
+		status, ok := responseInteger(resultObject["status"], 100, 599)
+		if !ok {
+			return nil, invalidBatchResponse()
+		}
+		body, ok := resultObject["body"]
+		if !ok {
+			return nil, invalidBatchResponse()
+		}
+
+		response.Results = append(response.Results, BatchResult{
+			ID:     id,
+			Status: status,
+			Body:   body,
+		})
+	}
+
+	return response, nil
+}
+
+func invalidBatchResponse() error {
+	return &ResponseContractError{Resource: "batch"}
+}
+
+func responseInteger(value interface{}, minimum, maximum int64) (int, bool) {
+	number, ok := value.(float64)
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number {
+		return 0, false
+	}
+	if number < float64(minimum) || number > float64(maximum) {
+		return 0, false
+	}
+	return int(number), true
+}
+
+func maxInt() int {
+	return int(^uint(0) >> 1)
 }
 
 func validateBatchOperationIDs(operations []BatchOperation) error {

@@ -49,6 +49,13 @@ function parseBatchResponse(response: unknown): BatchResponse {
   if (!isRecord(response) || !Array.isArray(response.results)) {
     throw new ResponseContractError('batch');
   }
+  if (
+    typeof response.total_time_ms !== 'number'
+    || !Number.isSafeInteger(response.total_time_ms)
+    || response.total_time_ms < 0
+  ) {
+    throw new ResponseContractError('batch');
+  }
   for (const result of response.results) {
     if (
       !isRecord(result)

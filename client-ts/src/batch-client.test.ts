@@ -120,4 +120,21 @@ describe('Batch operation limits', () => {
       message: 'API returned an invalid batch response',
     });
   });
+
+  it.each([
+    { label: 'missing', value: undefined },
+    { label: 'fractional', value: 1.5 },
+    { label: 'negative', value: -1 },
+    { label: 'text', value: '4' },
+  ])('rejects $label total time values', async ({ value }) => {
+    const { client, postAuth } = mockClient();
+    postAuth.mockResolvedValue({
+      results: [{ id: 'op-1', status: 200, body: null }],
+      ...(value === undefined ? {} : { total_time_ms: value }),
+    });
+
+    await expect(new BatchClient(client).execute([
+      { id: 'op-1', method: 'GET', path: '/api/health' },
+    ])).rejects.toMatchObject({ name: 'ResponseContractError' });
+  });
 });

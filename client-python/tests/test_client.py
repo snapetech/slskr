@@ -235,6 +235,24 @@ async def test_python_batch_client_rejects_malformed_success_response():
         await builder.execute()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "total_time_ms",
+    [None, -1, 1.5, "4"],
+    ids=["missing", "negative", "fractional", "text"],
+)
+async def test_python_batch_client_rejects_invalid_total_time(total_time_ms):
+    client = SlskrClient("https://example.test", "token")
+    response = {"results": [{"id": "op-1", "status": 200, "body": None}]}
+    if total_time_ms is not None:
+        response["total_time_ms"] = total_time_ms
+    client._post = AsyncMock(return_value=response)
+
+    builder = BatchBuilder(client).get("/api/health", op_id="op-1")
+    with pytest.raises(ResponseContractError, match="invalid batch response"):
+        await builder.execute()
+
+
 def test_batch_builder_serializes_and_limits_operations():
     client = SlskrClient("http://localhost:8080", "token")
     builder = BatchBuilder(client)

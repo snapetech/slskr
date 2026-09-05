@@ -37,6 +37,11 @@ function parseBatchResponse(response) {
     if (!isRecord(response) || !Array.isArray(response.results)) {
         throw new errors_1.ResponseContractError('batch');
     }
+    if (typeof response.total_time_ms !== 'number'
+        || !Number.isSafeInteger(response.total_time_ms)
+        || response.total_time_ms < 0) {
+        throw new errors_1.ResponseContractError('batch');
+    }
     for (const result of response.results) {
         if (!isRecord(result)
             || typeof result.id !== 'string'

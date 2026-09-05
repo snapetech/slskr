@@ -160,14 +160,10 @@ class BatchBuilder:
                 raise ResponseContractError("batch")
             results.append(BatchResult(result["id"], result["status"], result["body"]))
 
-        total_time_ms = response.get("total_time_ms", 0)
-        if (
-            isinstance(total_time_ms, bool)
-            or not isinstance(total_time_ms, (int, float))
-            or total_time_ms < 0
-        ):
+        total_time_ms = response.get("total_time_ms")
+        if isinstance(total_time_ms, bool) or not isinstance(total_time_ms, int) or total_time_ms < 0:
             raise ResponseContractError("batch")
-        return BatchResponse(results, int(total_time_ms))
+        return BatchResponse(results, total_time_ms)
 
 
 class BatchClient:

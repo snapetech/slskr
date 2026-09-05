@@ -3,6 +3,9 @@ package slskr
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -90,6 +93,87 @@ func TestBatchBuilderRejectsDuplicateIDsBeforeSending(t *testing.T) {
 
 	if _, err := builder.Execute(context.Background()); err == nil || !strings.Contains(err.Error(), "duplicate operation ID") {
 		t.Fatalf("expected duplicate operation ID error, got %v", err)
+	}
+}
+
+func TestBatchExecuteRejectsMalformedResponse(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "missing results",
+			body: `{"total_time_ms":1}`,
+		},
+		{
+			name: "missing total time",
+			body: `{"results":[]}`,
+		},
+		{
+			name: "non-object result",
+			body: `{"results":[null],"total_time_ms":1}`,
+		},
+		{
+			name: "missing result id",
+			body: `{"results":[{"status":200,"body":null}],"total_time_ms":1}`,
+		},
+		{
+			name: "invalid result status",
+			body: `{"results":[{"id":"op-1","status":200.5,"body":null}],"total_time_ms":1}`,
+		},
+		{
+			name: "missing result body",
+			body: `{"results":[{"id":"op-1","status":200}],"total_time_ms":1}`,
+		},
+		{
+			name: "negative total time",
+			body: `{"results":[],"total_time_ms":-1}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			builder := NewClient(server.URL, "token").NewBatchBuilder()
+			builder.Get("/api/health", stringPointer("op-1"))
+			_, err := builder.Execute(context.Background())
+			if err == nil {
+				t.Fatal("expected malformed batch response error")
+			}
+			var contractErr *ResponseContractError
+			if !errors.As(err, &contractErr) {
+				t.Fatalf("expected ResponseContractError, got %T: %v", err, err)
+			}
+			if contractErr.Resource != "batch" {
+				t.Fatalf("unexpected contract resource: %q", contractErr.Resource)
+			}
+		})
+	}
+}
+
+func TestBatchExecuteParsesCompleteResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"results":[{"id":"op-1","status":200,"body":null}],"total_time_ms":4}`))
+	}))
+	defer server.Close()
+
+	builder := NewClient(server.URL, "token").NewBatchBuilder()
+	builder.Get("/api/health", stringPointer("op-1"))
+	response, err := builder.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if response.TotalTimeMs != 4 || len(response.Results) != 1 {
+		t.Fatalf("unexpected batch response: %#v", response)
+	}
+	if response.Results[0].ID != "op-1" || response.Results[0].Status != http.StatusOK || response.Results[0].Body != nil {
+		t.Fatalf("unexpected batch result: %#v", response.Results[0])
 	}
 }
 
