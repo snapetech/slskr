@@ -19,6 +19,14 @@ describe('useLocalStorage', () => {
     expect(window.localStorage.getItem('apiKey')).toBe('"test-token"');
   });
 
+  it('restores persisted falsy JSON values instead of treating them as missing', () => {
+    window.localStorage.setItem('autoRefresh', 'false');
+
+    const { result } = renderHook(() => useLocalStorage('autoRefresh', true));
+
+    expect(result.current[0]).toBe(false);
+  });
+
   it('persists sensitive state changes to sessionStorage only', () => {
     const { result } = renderHook(() => useSessionStorage<string | null>('apiKey', null));
 

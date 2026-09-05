@@ -12,7 +12,7 @@ function useBrowserStorage<T>(
       const storage: BrowserStorage | null =
         typeof window !== 'undefined' ? window[storageName] : null;
       const item = storage?.getItem(key) ?? null;
-      return item ? JSON.parse(item) : initialValue;
+      return item !== null ? JSON.parse(item) : initialValue;
     } catch (error) {
       console.error('Error reading browser storage key:', storageName, key, error);
       return initialValue;
