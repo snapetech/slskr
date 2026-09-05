@@ -2,11 +2,38 @@ import api from './api';
 
 const baseUrl = '/security';
 
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const requireRecord = (data, resource) => {
+  if (!isRecord(data)) {
+    throw new Error(`Security API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
+const requireArray = (data, resource) => {
+  if (!Array.isArray(data)) {
+    throw new Error(`Security API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
+const requireCollection = (data, resource) => {
+  if (!Array.isArray(data) && !isRecord(data)) {
+    throw new Error(`Security API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
 /**
  * Get security dashboard overview
  */
 export const getDashboard = async () => {
-  return (await api.get(`${baseUrl}/dashboard`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/dashboard`)).data,
+    'dashboard',
+  );
 };
 
 /**
@@ -17,14 +44,17 @@ export const getDashboard = async () => {
 export const getEvents = async (count = 100, minSeverity = null) => {
   const parameters = { count };
   if (minSeverity) parameters.minSeverity = minSeverity;
-  return (await api.get(`${baseUrl}/events`, { params: parameters })).data;
+  return requireArray(
+    (await api.get(`${baseUrl}/events`, { params: parameters })).data,
+    'events',
+  );
 };
 
 /**
  * Get active bans
  */
 export const getBans = async () => {
-  return (await api.get(`${baseUrl}/bans`)).data;
+  return requireCollection((await api.get(`${baseUrl}/bans`)).data, 'bans');
 };
 
 /**
@@ -87,9 +117,12 @@ export const unbanUsername = async (username) => {
  * Get peer reputation
  */
 export const getReputation = async (username) => {
-  return (
-    await api.get(`${baseUrl}/reputation/${encodeURIComponent(username)}`)
-  ).data;
+  return requireRecord(
+    (
+      await api.get(`${baseUrl}/reputation/${encodeURIComponent(username)}`)
+    ).data,
+    'reputation',
+  );
 };
 
 /**
@@ -108,24 +141,31 @@ export const setReputation = async (username, score, reason) => {
  * Get suspicious peers (low reputation)
  */
 export const getSuspiciousPeers = async (limit = 50) => {
-  return (
-    await api.get(`${baseUrl}/reputation/suspicious`, { params: { limit } })
-  ).data;
+  return requireArray(
+    (
+      await api.get(`${baseUrl}/reputation/suspicious`, { params: { limit } })
+    ).data,
+    'suspicious peers',
+  );
 };
 
 /**
  * Get trusted peers (high reputation)
  */
 export const getTrustedPeers = async (limit = 50) => {
-  return (await api.get(`${baseUrl}/reputation/trusted`, { params: { limit } }))
-    .data;
+  return requireArray(
+    (
+      await api.get(`${baseUrl}/reputation/trusted`, { params: { limit } })
+    ).data,
+    'trusted peers',
+  );
 };
 
 /**
  * Get known scanners/reconnaissance
  */
 export const getScanners = async () => {
-  return (await api.get(`${baseUrl}/scanners`)).data;
+  return requireArray((await api.get(`${baseUrl}/scanners`)).data, 'scanners');
 };
 
 /**
@@ -133,14 +173,20 @@ export const getScanners = async () => {
  */
 export const getThreats = async (minLevel = null) => {
   const parameters = minLevel ? { minLevel } : {};
-  return (await api.get(`${baseUrl}/threats`, { params: parameters })).data;
+  return requireArray(
+    (await api.get(`${baseUrl}/threats`, { params: parameters })).data,
+    'threats',
+  );
 };
 
 /**
  * Get canary trap statistics
  */
 export const getCanaryStats = async () => {
-  return (await api.get(`${baseUrl}/canaries`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/canaries`)).data,
+    'canary statistics',
+  );
 };
 
 /**
@@ -154,9 +200,12 @@ export const runEntropyCheck = async () => {
  * Get trust disclosure permissions for a peer
  */
 export const getDisclosure = async (username) => {
-  return (
-    await api.get(`${baseUrl}/disclosure/${encodeURIComponent(username)}`)
-  ).data;
+  return requireRecord(
+    (
+      await api.get(`${baseUrl}/disclosure/${encodeURIComponent(username)}`)
+    ).data,
+    'disclosure',
+  );
 };
 
 /**
@@ -175,28 +224,40 @@ export const setTrustTier = async (username, tier, reason) => {
  * Get network guard statistics
  */
 export const getNetworkStats = async () => {
-  return (await api.get(`${baseUrl}/network`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/network`)).data,
+    'network statistics',
+  );
 };
 
 /**
  * Get top connectors by IP
  */
 export const getTopConnectors = async (limit = 10) => {
-  return (await api.get(`${baseUrl}/network/top`, { params: { limit } })).data;
+  return requireArray(
+    (await api.get(`${baseUrl}/network/top`, { params: { limit } })).data,
+    'top connectors',
+  );
 };
 
 /**
  * Get server anomalies from paranoid mode
  */
 export const getAnomalies = async (count = 100) => {
-  return (await api.get(`${baseUrl}/anomalies`, { params: { count } })).data;
+  return requireArray(
+    (await api.get(`${baseUrl}/anomalies`, { params: { count } })).data,
+    'anomalies',
+  );
 };
 
 /**
  * Get adversarial settings
  */
 export const getAdversarialSettings = async () => {
-  return (await api.get(`${baseUrl}/adversarial`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/adversarial`)).data,
+    'adversarial settings',
+  );
 };
 
 /**
@@ -210,21 +271,30 @@ export const updateAdversarialSettings = async (settings) => {
  * Get adversarial statistics
  */
 export const getAdversarialStats = async () => {
-  return (await api.get(`${baseUrl}/adversarial/stats`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/adversarial/stats`)).data,
+    'adversarial statistics',
+  );
 };
 
 /**
  * Get transport selector status
  */
 export const getTransportStatus = async () => {
-  return (await api.get(`${baseUrl}/transports/status`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/transports/status`)).data,
+    'transport status',
+  );
 };
 
 /**
  * Get detailed status of all transports
  */
 export const getAllTransportStatuses = async () => {
-  return (await api.get(`${baseUrl}/transports`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/transports`)).data,
+    'transport collection',
+  );
 };
 
 /**
@@ -238,7 +308,10 @@ export const testTransportConnectivity = async () => {
  * Get Tor connectivity status
  */
 export const getTorStatus = async () => {
-  return (await api.get(`${baseUrl}/tor/status`)).data;
+  return requireRecord(
+    (await api.get(`${baseUrl}/tor/status`)).data,
+    'Tor status',
+  );
 };
 
 /**
