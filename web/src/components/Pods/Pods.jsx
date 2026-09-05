@@ -48,8 +48,10 @@ const initialState = {
   discoveryQuery: '',
   discoveryResults: [],
   leavingPod: false,
+  messageErrors: {},
   savingPod: false,
   sendingMessage: false,
+  podDetailError: null,
   podsError: null,
 };
 
@@ -256,13 +258,23 @@ class Pods extends Component {
         pods.getMembers(podId),
       ]);
       const detail = normalizePod(detailResponse);
+      if (!detail?.podId) {
+        throw new Error('The server returned no pod ID.');
+      }
       const members = asRecords(membersResponse);
       if (this.isMountedFlag && requestId === this.requestIds.podDetails) {
-        this.setState({ members, podDetail: detail });
+        this.setState({ members, podDetail: detail, podDetailError: null });
       }
       return detail;
     } catch (error) {
       console.error('Failed to fetch pod detail:', error);
+      if (this.isMountedFlag && requestId === this.requestIds.podDetails) {
+        this.setState({
+          members: [],
+          podDetail: null,
+          podDetailError: toDisplayError(error, 'Failed to load pod details'),
+        });
+      }
       return null;
     }
   };
@@ -294,10 +306,27 @@ class Pods extends Component {
             ...previousState.messages,
             [messageKey]: asRecords(channelMessages).map(normalizeMessage),
           },
+          messageErrors: {
+            ...previousState.messageErrors,
+            [messageKey]: null,
+          },
         }));
       }
     } catch (error) {
       console.error('Failed to fetch messages:', error);
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.messages &&
+        this.state.activePodId === podId &&
+        this.state.activeChannelId === channelId
+      ) {
+        this.setState((previousState) => ({
+          messageErrors: {
+            ...previousState.messageErrors,
+            [messageKey]: toDisplayError(error, 'Failed to load messages'),
+          },
+        }));
+      }
     }
   };
 
@@ -322,7 +351,14 @@ class Pods extends Component {
     }
 
     if (!this.isMountedFlag) return;
-    this.setState({ activePodId: podId, loading: true });
+    this.setState({
+      activeChannelId: null,
+      activePodId: podId,
+      loading: true,
+      members: [],
+      podDetail: null,
+      podDetailError: null,
+    });
 
     const podDetail = await this.fetchPodDetail(podId);
     if (
@@ -652,7 +688,9 @@ class Pods extends Component {
       members,
       messageInput,
       messages,
+      messageErrors,
       podDetail,
+      podDetailError,
       pods: podsList,
       savingPod,
       sendingMessage,
@@ -671,6 +709,10 @@ class Pods extends Component {
       activePodId && activeChannelId
         ? asRecords(messages[`${activePodId}:${activeChannelId}`]).map(normalizeMessage)
         : [];
+    const currentMessageError =
+      activePodId && activeChannelId
+        ? messageErrors[`${activePodId}:${activeChannelId}`]
+        : null;
     const localPeerId = this.getLocalPeerId();
     const isMember = members.some(
       (member) =>
@@ -828,6 +870,14 @@ class Pods extends Component {
             <Dimmer active>
               <Loader />
             </Dimmer>
+          ) : podDetailError ? (
+            <Message
+              data-testid="pod-detail-load-error"
+              error
+            >
+              <Message.Header>Pod details unavailable</Message.Header>
+              <p>{podDetailError}</p>
+            </Message>
           ) : !podDetail ? (
             <PlaceholderSegment
               caption="Select a pod to view details"
@@ -937,11 +987,25 @@ class Pods extends Component {
                       </Label>
                     </div>
                     <Segment className="pod-message-history">
+                      {currentMessageError && (
+                        <Message
+                          data-testid="pod-messages-load-error"
+                          error
+                        >
+                          <Message.Header>Messages unavailable</Message.Header>
+                          <p>{currentMessageError}</p>
+                          {currentMessages.length > 0 && (
+                            <p>Showing the last successfully loaded messages.</p>
+                          )}
+                        </Message>
+                      )}
                       {currentMessages.length === 0 ? (
-                        <PlaceholderSegment
-                          caption="No messages yet"
-                          icon="comments"
-                        />
+                        currentMessageError ? null : (
+                          <PlaceholderSegment
+                            caption="No messages yet"
+                            icon="comments"
+                          />
+                        )
                       ) : (
                         <List relaxed="very">
                           {currentMessages.map((message, index) => (

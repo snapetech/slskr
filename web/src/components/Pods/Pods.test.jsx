@@ -52,4 +52,57 @@ describe('Pods', () => {
     );
     expect(screen.queryByText('No pods yet')).not.toBeInTheDocument();
   });
+
+  it('reports pod-detail failures instead of showing an unselected state', async () => {
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'General', name: 'General' }],
+        name: 'Test pod',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockRejectedValue(new Error('Pod detail service unavailable'));
+    pods.getMembers.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Pods />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('pod-detail-load-error')).toHaveTextContent(
+      'Pod detail service unavailable',
+    );
+    expect(screen.getByText('Pod details unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Select a pod to view details')).not.toBeInTheDocument();
+  });
+
+  it('reports message-history failures instead of showing an empty success state', async () => {
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'General', name: 'General' }],
+        name: 'Test pod',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockResolvedValue({
+      channels: [{ channelId: 'general', kind: 'General', name: 'General' }],
+      name: 'Test pod',
+      podId: 'pod-1',
+    });
+    pods.getMembers.mockResolvedValue([]);
+    pods.getMessages.mockRejectedValue(new Error('Message service unavailable'));
+
+    render(
+      <MemoryRouter>
+        <Pods />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('pod-messages-load-error')).toHaveTextContent(
+      'Message service unavailable',
+    );
+    expect(screen.getByText('Messages unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
+  });
 });
