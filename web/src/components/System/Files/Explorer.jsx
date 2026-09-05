@@ -4,7 +4,7 @@ import { formatBytes, formatDate } from '../../../lib/util';
 import { LoaderSegment } from '../../Shared';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
-import { Header, Icon, Modal, Table } from 'semantic-ui-react';
+import { Header, Icon, Message, Modal, Table } from 'semantic-ui-react';
 
 const fileStoragePath = (subdirectory, fullName) =>
   [...subdirectory, fullName].filter(Boolean).join('/');
@@ -145,6 +145,7 @@ const DirectoryRow = ({
 
 const Explorer = ({ active = true, remoteFileManagement, root }) => {
   const [directory, setDirectory] = useState({ directories: [], files: [] });
+  const [directoryError, setDirectoryError] = useState(null);
   const [subdirectory, setSubdirectory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deletingPath, setDeletingPath] = useState('');
@@ -176,6 +177,7 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
         mountedRef.current &&
         requestId === requestIdRef.current
       ) {
+        setDirectoryError(null);
         setDirectory(normalizeListing(directoryResult));
       }
     } catch (error) {
@@ -183,7 +185,7 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
         mountedRef.current &&
         requestId === requestIdRef.current
       ) {
-        setDirectory({ directories: [], files: [] });
+        setDirectoryError(toDisplayError(error, 'File listing unavailable'));
         reportFileOperationError(error);
       }
     } finally {
@@ -280,10 +282,19 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
         <Icon name="folder open" />
         {'/' + root + '/' + subdirectory.join('/')}
       </Header>
-      <Table
-        className="unstackable"
-        size="large"
-      >
+      {directoryError ? (
+        <Message
+          data-testid="files-load-error"
+          error
+        >
+          <Message.Header>Files unavailable</Message.Header>
+          <p>{directoryError}</p>
+        </Message>
+      ) : (
+        <Table
+          className="unstackable"
+          size="large"
+        >
         <Table.Header>
           <Table.Row>
             <Table.HeaderCell className="explorer-list-name">
@@ -370,7 +381,8 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
             </>
           )}
         </Table.Body>
-      </Table>
+        </Table>
+      )}
     </>
   );
 };
