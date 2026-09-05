@@ -45,9 +45,10 @@ This is better tested at the API level where we can:
 
 Some tests may skip if UI features are not available:
 - Search page may not exist if feature is disabled
-- Browse navigation may not be available if library browsing is not implemented
+- Browse navigation may be unavailable when the share index is empty or the
+  library-browse endpoint is disabled by the active controller profile
 
-These are graceful skips that allow tests to pass when features are intentionally disabled or not yet implemented.
+These are graceful skips that allow tests to pass when features are intentionally disabled or have no available data.
 
 ## Running Tests
 

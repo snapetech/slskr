@@ -113,9 +113,9 @@ use std::{
     process::Stdio,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, LazyLock, Mutex,
     },
-    time::SystemTime,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use base64::{
@@ -14390,6 +14390,55 @@ async fn sha256_local_file(path: &Path) -> Option<String> {
     Some(hex::encode(hasher.finalize()))
 }
 
+const MAX_LOCAL_SHA256_CACHE_ENTRIES: usize = 4_096;
+
+#[derive(Clone, Debug)]
+struct LocalSha256CacheEntry {
+    size: u64,
+    modified_nanos: Option<u128>,
+    digest: String,
+}
+
+static LOCAL_SHA256_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, LocalSha256CacheEntry>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+/// Reuse local content hashes while still invalidating them when a file's
+/// size or modification timestamp changes. Browser pages and stream/ticket
+/// requests commonly resolve the same file back-to-back; hashing it again for
+/// each route adds avoidable synchronous-looking I/O to the request path.
+async fn sha256_local_file_cached(path: &Path) -> Option<String> {
+    let metadata = tokio::fs::metadata(path).await.ok()?;
+    let size = metadata.len();
+    let modified_nanos = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos());
+    if let Ok(cache) = LOCAL_SHA256_CACHE.lock() {
+        if let Some(cached) = cache.get(path).filter(|cached| {
+            cached.size == size && cached.modified_nanos == modified_nanos
+        }) {
+            return Some(cached.digest.clone());
+        }
+    }
+
+    let digest = sha256_local_file(path).await?;
+    if let Ok(mut cache) = LOCAL_SHA256_CACHE.lock() {
+        if cache.len() >= MAX_LOCAL_SHA256_CACHE_ENTRIES {
+            let _ = cache.pop_first();
+        }
+        cache.insert(
+            path.to_path_buf(),
+            LocalSha256CacheEntry {
+                size,
+                modified_nanos,
+                digest: digest.clone(),
+            },
+        );
+    }
+    Some(digest)
+}
+
 fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -14443,7 +14492,7 @@ async fn find_shared_entry_for_content(
 
     let expected_sha256 = expected_sha256?;
     for (entry, path) in candidates {
-        if sha256_local_file(&path)
+        if sha256_local_file_cached(&path)
             .await
             .is_some_and(|actual| actual.eq_ignore_ascii_case(expected_sha256))
         {
@@ -14665,7 +14714,7 @@ async fn native_library_item_value(
     display_path: &str,
 ) -> serde_json::Value {
     let sha256 = match local_path {
-        Some(path) => sha256_local_file(path).await,
+        Some(path) => sha256_local_file_cached(path).await,
         None => None,
     };
     let content_id = sha256.as_ref().map_or_else(
