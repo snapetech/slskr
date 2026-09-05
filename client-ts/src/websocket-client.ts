@@ -6,6 +6,7 @@ import { Event, EventType, WebSocketMessage } from './types';
 
 export const websocketAuthProtocolPrefix = 'slskr.api-token.';
 export const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
+export const MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024;
 
 export function websocketAuthProtocols(token: string): string[] {
   const normalized = token.trim();
@@ -245,8 +246,27 @@ export class WebSocketClient {
   // =========================================================================
 
   private handleMessage(data: string): void {
+    if (typeof data !== 'string') {
+      this.notifyErrorListeners(new Error('WebSocket message was not text'));
+      return;
+    }
+    const messageBytes = new TextEncoder().encode(data).byteLength;
+    if (messageBytes > MAX_WEBSOCKET_MESSAGE_BYTES) {
+      this.notifyErrorListeners(
+        new Error(`WebSocket message exceeds ${MAX_WEBSOCKET_MESSAGE_BYTES} bytes`)
+      );
+      return;
+    }
+
     try {
-      const message = JSON.parse(data) as Event;
+      const parsed: unknown = JSON.parse(data);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return;
+      }
+      const message = parsed as Event;
+      if (typeof message.type !== 'string') {
+        return;
+      }
 
       // Emit to listeners
       if (this.listeners.has(message.type as EventType)) {

@@ -3,10 +3,11 @@
  * WebSocket client for real-time event streaming
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WebSocketClient = exports.WEBSOCKET_CONNECT_TIMEOUT_MS = exports.websocketAuthProtocolPrefix = void 0;
+exports.WebSocketClient = exports.MAX_WEBSOCKET_MESSAGE_BYTES = exports.WEBSOCKET_CONNECT_TIMEOUT_MS = exports.websocketAuthProtocolPrefix = void 0;
 exports.websocketAuthProtocols = websocketAuthProtocols;
 exports.websocketAuthProtocolPrefix = 'slskr.api-token.';
 exports.WEBSOCKET_CONNECT_TIMEOUT_MS = 15000;
+exports.MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024;
 function websocketAuthProtocols(token) {
     const normalized = token.trim();
     return normalized ? [`${exports.websocketAuthProtocolPrefix}${encodeURIComponent(normalized)}`] : [];
@@ -220,8 +221,24 @@ class WebSocketClient {
     // Private Methods
     // =========================================================================
     handleMessage(data) {
+        if (typeof data !== 'string') {
+            this.notifyErrorListeners(new Error('WebSocket message was not text'));
+            return;
+        }
+        const messageBytes = new TextEncoder().encode(data).byteLength;
+        if (messageBytes > exports.MAX_WEBSOCKET_MESSAGE_BYTES) {
+            this.notifyErrorListeners(new Error(`WebSocket message exceeds ${exports.MAX_WEBSOCKET_MESSAGE_BYTES} bytes`));
+            return;
+        }
         try {
-            const message = JSON.parse(data);
+            const parsed = JSON.parse(data);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                return;
+            }
+            const message = parsed;
+            if (typeof message.type !== 'string') {
+                return;
+            }
             // Emit to listeners
             if (this.listeners.has(message.type)) {
                 this.listeners.get(message.type)?.forEach((listener) => {

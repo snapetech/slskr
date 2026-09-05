@@ -98,12 +98,43 @@ pub(crate) fn publish_signalr_hub_event(
     if state.event_tx.receiver_count() == 0 {
         return;
     }
-    let record = EventRecord {
-        id: 0,
-        kind: kind.to_owned(),
-        resource,
-        detail: Some(detail.to_string()),
-        created_at: crate::unix_timestamp(),
-    };
+    let record = bounded_hub_event_record(kind, resource, detail);
     let _ = state.event_tx.send(record);
+}
+
+fn bounded_hub_event_record(kind: &str, resource: String, detail: Value) -> EventRecord {
+    EventRecord {
+        id: 0,
+        kind: crate::truncate_utf8_bytes(kind.to_owned(), crate::MAX_EVENT_KIND_BYTES),
+        resource: crate::truncate_utf8_bytes(resource, crate::MAX_EVENT_RESOURCE_BYTES),
+        detail: crate::bounded_event_detail(Some(detail.to_string())),
+        created_at: crate::unix_timestamp(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bounded_hub_event_record;
+
+    #[test]
+    fn live_hub_events_use_the_same_bounds_as_persisted_events() {
+        let detail = serde_json::json!({
+            "payload": "x".repeat(crate::MAX_EVENT_DETAIL_BYTES + 1)
+        });
+        let detail_length = detail.to_string().len();
+        let record = bounded_hub_event_record(
+            &"k".repeat(crate::MAX_EVENT_KIND_BYTES + 1),
+            "r".repeat(crate::MAX_EVENT_RESOURCE_BYTES + 1),
+            detail,
+        );
+
+        assert_eq!(record.kind.len(), crate::MAX_EVENT_KIND_BYTES);
+        assert_eq!(record.resource.len(), crate::MAX_EVENT_RESOURCE_BYTES);
+        assert_eq!(
+            record.detail,
+            Some(format!(
+                "<omitted oversized event detail: {detail_length} bytes>"
+            ))
+        );
+    }
 }

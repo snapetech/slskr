@@ -4,6 +4,7 @@
 import { Event, EventType } from './types';
 export declare const websocketAuthProtocolPrefix = "slskr.api-token.";
 export declare const WEBSOCKET_CONNECT_TIMEOUT_MS = 15000;
+export declare const MAX_WEBSOCKET_MESSAGE_BYTES: number;
 export declare function websocketAuthProtocols(token: string): string[];
 export type EventListener = (event: Event) => void;
 export type ConnectionListener = (connected: boolean) => void;

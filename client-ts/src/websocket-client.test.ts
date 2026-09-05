@@ -1,4 +1,4 @@
-import { WebSocketClient } from './websocket-client';
+import { MAX_WEBSOCKET_MESSAGE_BYTES, WebSocketClient } from './websocket-client';
 
 class MockWebSocket {
   static readonly OPEN = 1;
@@ -236,5 +236,37 @@ describe('WebSocketClient reconnect lifecycle', () => {
 
     await expect(connected).rejects.toThrow('restore failed');
     expect(client.isConnected()).toBe(false);
+  });
+
+  it('rejects oversized and non-object event messages before dispatch', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const connected = client.connect();
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    const received = jest.fn();
+    const errors = jest.fn();
+    client.on('search.started', received);
+    client.onError(errors);
+    MockWebSocket.instances[0].onmessage?.({ data: 'null' });
+    MockWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({
+        data: { id: 'search-1' },
+        id: 'event-1',
+        timestamp: '2026-09-05T00:00:00Z',
+        type: 'search.started',
+      }),
+    });
+    MockWebSocket.instances[0].onmessage?.({
+      data: 'x'.repeat(MAX_WEBSOCKET_MESSAGE_BYTES + 1),
+    });
+
+    expect(received).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors.mock.calls[0][0]).toHaveProperty(
+      'message',
+      `WebSocket message exceeds ${MAX_WEBSOCKET_MESSAGE_BYTES} bytes`,
+    );
+    client.disconnect();
   });
 });
