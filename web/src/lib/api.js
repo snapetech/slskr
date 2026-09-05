@@ -4,7 +4,14 @@ import axios from 'axios';
 
 axios.defaults.baseURL = apiBaseUrl;
 
+const MAX_API_RESPONSE_BYTES = 8 * 1024 * 1024;
+
 const api = axios.create({
+  adapter: 'fetch',
+  maxContentLength: MAX_API_RESPONSE_BYTES,
+  // The Fetch adapter uses manual redirect handling here, so credentialed API
+  // requests never follow a redirect to a different origin.
+  maxRedirects: 0,
   withCredentials: true,
 });
 

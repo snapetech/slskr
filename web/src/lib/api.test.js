@@ -2,7 +2,7 @@
 // Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
-import { getCsrfTokenFromCookieString, reloadAfterUnauthorized } from './api';
+import api, { getCsrfTokenFromCookieString, reloadAfterUnauthorized } from './api';
 
 describe('api csrf token selection', () => {
   afterEach(() => {
@@ -68,5 +68,30 @@ describe('api csrf token selection', () => {
 
     expect(reloadAfterUnauthorized(location, 'production')).toBe(true);
     expect(location.reload).toHaveBeenCalledWith();
+  });
+});
+
+describe('api transport limits', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses a bounded fetch transport with redirects disabled', async () => {
+    const originalBaseUrl = api.defaults.baseURL;
+    api.defaults.baseURL = 'http://localhost:3000/api/v0';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        headers: { 'Content-Length': String(8 * 1024 * 1024 + 1) },
+        status: 200,
+      }),
+    );
+
+    try {
+      await expect(api.get('/oversized')).rejects.toThrow('maxContentLength');
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0].redirect).toBe('manual');
+    } finally {
+      api.defaults.baseURL = originalBaseUrl;
+    }
   });
 });
