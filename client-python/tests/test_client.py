@@ -683,6 +683,24 @@ async def test_python_client_does_not_retry_oversized_response():
 
 
 @pytest.mark.asyncio
+async def test_python_client_rejects_redirects_without_following_them():
+    response = MagicMock(status=302)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.request.return_value = context
+    client = SlskrClient("https://example.test", "token", retries=3)
+    client.session = session
+
+    with pytest.raises(NetworkError, match="redirect"):
+        await client._request("GET", "/api/health")
+
+    session.request.assert_called_once()
+    assert session.request.call_args.kwargs["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
 async def test_python_client_does_not_replay_mutations_after_transport_failure():
     context = MagicMock()
     context.__aenter__ = AsyncMock(side_effect=OSError("response lost"))

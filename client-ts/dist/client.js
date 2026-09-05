@@ -7,6 +7,7 @@ exports.SlskrClient = void 0;
 const errors_1 = require("./errors");
 const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_HTTP_ERROR_BYTES = 64 * 1024;
+const MAX_DATE_MILLISECONDS = 8640000000000000;
 function responseList(response, ...keys) {
     if (Array.isArray(response)) {
         return response;
@@ -33,9 +34,22 @@ function numberValue(value, fallback = 0) {
 function normalizeTimestamp(value) {
     if (typeof value === 'number' && Number.isFinite(value)) {
         const milliseconds = value > 10000000000 ? value : value * 1000;
-        return new Date(milliseconds).toISOString();
+        return isoTimestamp(milliseconds);
     }
     return typeof value === 'string' ? value : '';
+}
+function normalizeEpochSeconds(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return isoTimestamp(value * 1000);
+    }
+    return typeof value === 'string' ? value : '';
+}
+function isoTimestamp(milliseconds) {
+    if (!Number.isFinite(milliseconds) || Math.abs(milliseconds) > MAX_DATE_MILLISECONDS) {
+        return '';
+    }
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 function normalizeSearchStatus(value) {
     switch (String(value ?? '').toLowerCase()) {
@@ -170,18 +184,12 @@ function sessionFromSnapshot(response) {
         ? state
         : 'disconnected';
     const connectedAt = snapshot.connected_at;
-    let connected_at;
-    if (typeof connectedAt === 'number' && Number.isFinite(connectedAt)) {
-        connected_at = new Date(connectedAt * 1000).toISOString();
-    }
-    else if (typeof connectedAt === 'string' && connectedAt.length > 0) {
-        connected_at = connectedAt;
-    }
+    const normalizedConnectedAt = normalizeEpochSeconds(connectedAt);
     return {
         id: 'server',
         type: 'server',
         status,
-        ...(connected_at ? { connected_at } : {}),
+        ...(normalizedConnectedAt ? { connected_at: normalizedConnectedAt } : {}),
     };
 }
 function normalizeBrowseStatus(value) {
@@ -217,9 +225,7 @@ function browseRequestFromResponse(response, fallbackUsername = '') {
     const object = responseObject(response);
     const username = String(object.username ?? object.from ?? fallbackUsername);
     const requestedAt = object.requested_at ?? object.requestedAt;
-    const requested_at = typeof requestedAt === 'number'
-        ? new Date(requestedAt * 1000).toISOString()
-        : String(requestedAt ?? '');
+    const requested_at = normalizeEpochSeconds(requestedAt);
     return {
         id: String(object.id ?? username),
         from: String(object.from ?? username),
@@ -548,6 +554,7 @@ class SlskrClient {
                     headers,
                     body: body === undefined ? undefined : JSON.stringify(body),
                     signal: controller.signal,
+                    redirect: 'error',
                 });
             }
             finally {

@@ -112,6 +112,23 @@ describe('SlskrClient request lifecycle', () => {
     expect(requests[0].body).toBeUndefined();
   });
 
+  it('rejects redirects before an API token can be forwarded', async () => {
+    const requests: RequestInit[] = [];
+    global.fetch = jest.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(init ?? {});
+      throw new TypeError('redirect mode is error');
+    });
+    const client = new SlskrClient({
+      baseUrl: 'https://example.test',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.getConfig()).rejects.toBeInstanceOf(NetworkError);
+    expect(requests[0].redirect).toBe('error');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('serializes falsy JSON request bodies instead of dropping them', async () => {
     const requests: RequestInit[] = [];
     global.fetch = jest.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -359,6 +376,22 @@ describe('SlskrClient request lifecycle', () => {
       { id: 'transfer-errored', status: 'failed' },
       { id: 'transfer-rejected', status: 'failed' },
       { id: 'transfer-cancelled', status: 'cancelled' },
+    ]);
+  });
+
+  it('ignores out-of-range numeric timestamps instead of throwing', async () => {
+    global.fetch = jest.fn().mockResolvedValue(new Response(
+      '{"entries":[{"id":"search-1","started_at":1e308}]}',
+      { status: 200 },
+    ));
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.listSearches()).resolves.toMatchObject([
+      { id: 'search-1', started_at: '' },
     ]);
   });
 

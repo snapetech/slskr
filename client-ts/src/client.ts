@@ -30,6 +30,7 @@ import { ApiError, NetworkError, TimeoutError } from './errors';
 
 const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_HTTP_ERROR_BYTES = 64 * 1024;
+const MAX_DATE_MILLISECONDS = 8_640_000_000_000_000;
 
 function responseList<T>(response: unknown, ...keys: string[]): T[] {
   if (Array.isArray(response)) {
@@ -60,9 +61,24 @@ function numberValue(value: unknown, fallback = 0): number {
 function normalizeTimestamp(value: unknown): string {
   if (typeof value === 'number' && Number.isFinite(value)) {
     const milliseconds = value > 10_000_000_000 ? value : value * 1000;
-    return new Date(milliseconds).toISOString();
+    return isoTimestamp(milliseconds);
   }
   return typeof value === 'string' ? value : '';
+}
+
+function normalizeEpochSeconds(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return isoTimestamp(value * 1000);
+  }
+  return typeof value === 'string' ? value : '';
+}
+
+function isoTimestamp(milliseconds: number): string {
+  if (!Number.isFinite(milliseconds) || Math.abs(milliseconds) > MAX_DATE_MILLISECONDS) {
+    return '';
+  }
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
 function normalizeSearchStatus(value: unknown): Search['status'] {
@@ -208,17 +224,12 @@ function sessionFromSnapshot(response: unknown): Session {
     ? state as Session['status']
     : 'disconnected';
   const connectedAt = snapshot.connected_at;
-  let connected_at: string | undefined;
-  if (typeof connectedAt === 'number' && Number.isFinite(connectedAt)) {
-    connected_at = new Date(connectedAt * 1000).toISOString();
-  } else if (typeof connectedAt === 'string' && connectedAt.length > 0) {
-    connected_at = connectedAt;
-  }
+  const normalizedConnectedAt = normalizeEpochSeconds(connectedAt);
   return {
     id: 'server',
     type: 'server',
     status,
-    ...(connected_at ? { connected_at } : {}),
+    ...(normalizedConnectedAt ? { connected_at: normalizedConnectedAt } : {}),
   };
 }
 
@@ -260,9 +271,7 @@ function browseRequestFromResponse(response: unknown, fallbackUsername = ''): Br
   const object = responseObject(response);
   const username = String(object.username ?? object.from ?? fallbackUsername);
   const requestedAt = object.requested_at ?? object.requestedAt;
-  const requested_at = typeof requestedAt === 'number'
-    ? new Date(requestedAt * 1000).toISOString()
-    : String(requestedAt ?? '');
+  const requested_at = normalizeEpochSeconds(requestedAt);
   return {
     id: String(object.id ?? username),
     from: String(object.from ?? username),
@@ -678,6 +687,7 @@ export class SlskrClient {
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal,
+          redirect: 'error',
         });
       } finally {
         if (timeoutId !== undefined) {

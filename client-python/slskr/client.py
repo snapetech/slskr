@@ -515,9 +515,13 @@ class SlskrClient:
                 json=body,
                 headers=headers,
                 timeout=timeout,
+                allow_redirects=False,
             ) as response:
                 if self.debug:
                     logger.debug("[slskr] %s %s %s", method, url, response.status)
+
+                if 300 <= response.status < 400:
+                    raise NetworkError("refusing HTTP redirect outside configured API origin")
 
                 if response.status >= 400:
                     error_data = {}
