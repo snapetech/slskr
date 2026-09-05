@@ -20,6 +20,7 @@ import {
   Button,
   Dropdown,
   Icon,
+  Message,
   Menu,
   Popup,
   Segment,
@@ -71,6 +72,8 @@ const Rooms = ({ runtimeProfile } = {}) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [availableRooms, setAvailableRooms] = useState([]);
   const [joinedRooms, setJoinedRooms] = useState([]);
+  const [availableRoomsError, setAvailableRoomsError] = useState('');
+  const [joinedRoomsError, setJoinedRoomsError] = useState('');
   const [roomSearchLoading, setRoomSearchLoading] = useState(false);
   const closeTabRef = useRef(null);
   const mountedRef = useRef(false);
@@ -185,6 +188,7 @@ const Rooms = ({ runtimeProfile } = {}) => {
         .map((roomName) => roomName.trim())
         .sort();
       setJoinedRooms(normalized);
+      setJoinedRoomsError('');
       if (normalized.length > 0) {
         setTabs((previous) => {
           const existingRooms = new Set(
@@ -201,6 +205,9 @@ const Rooms = ({ runtimeProfile } = {}) => {
       }
     } catch (error) {
       console.error('Failed to fetch joined rooms:', error);
+      if (mountedRef.current && requestId === hydrateRequestIdRef.current) {
+        setJoinedRoomsError(toDisplayError(error, 'Failed to load joined rooms'));
+      }
     }
   }, [createTab]);
 
@@ -245,13 +252,16 @@ const Rooms = ({ runtimeProfile } = {}) => {
                 : 0,
             })),
         );
+        setAvailableRoomsError('');
       }
-    } catch {
+    } catch (error) {
       if (
         mountedRef.current &&
         requestId === availableRoomsRequestIdRef.current
       ) {
-        setAvailableRooms([]);
+        setAvailableRoomsError(
+          toDisplayError(error, 'Failed to load available rooms'),
+        );
       }
     } finally {
       if (
@@ -466,6 +476,14 @@ const Rooms = ({ runtimeProfile } = {}) => {
               }
             />
           </div>
+          {(availableRoomsError || joinedRoomsError) && (
+            <Message
+              compact
+              negative
+            >
+              {availableRoomsError || joinedRoomsError}
+            </Message>
+          )}
         </div>
       </Segment>
       <Tab
