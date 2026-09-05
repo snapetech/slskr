@@ -1,7 +1,7 @@
 // Collections & ShareGroups API client
 
 import api from './api';
-import { fetchWithoutRedirects } from './http';
+import { fetchWithoutRedirects, readJsonResponse } from './http';
 import { encodePathSegment } from './pathEncoding';
 
 // ShareGroups
@@ -114,15 +114,13 @@ const shareFetch = async (ownerEndpoint, path, { method = 'GET', token, body } =
     method,
     redirect: 'error',
   });
-  const text = await response.text();
   let data = null;
-  if (text.trim()) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      if (response.ok) {
-        throw new Error('Remote share endpoint returned invalid JSON');
-      }
+  try {
+    data = await readJsonResponse(response);
+  } catch (error) {
+    if (response.ok || String(error?.message || '').includes('exceeds')) {
+      if (!response.ok) throw error;
+      throw new Error('Remote share endpoint returned invalid JSON', { cause: error });
     }
   }
   if (!response.ok) {

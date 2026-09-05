@@ -1,5 +1,5 @@
 import { urlBase } from '../config';
-import { fetchWithoutRedirects } from './http';
+import { fetchWithoutRedirects, readJsonResponse } from './http';
 import * as session from './session';
 import { encodePathSegment } from './pathEncoding';
 
@@ -16,7 +16,7 @@ export const list = async () => {
     throw new Error(`Failed to list pods: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const get = async (podId) => {
@@ -28,7 +28,7 @@ export const get = async (podId) => {
     throw new Error(`Failed to get pod: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const create = async (pod, requestingPeerId = 'local-peer') => {
@@ -45,7 +45,7 @@ export const create = async (pod, requestingPeerId = 'local-peer') => {
     throw new Error(`Failed to create pod: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const update = async (podId, pod, requestingPeerId = 'local-peer') => {
@@ -62,7 +62,7 @@ export const update = async (podId, pod, requestingPeerId = 'local-peer') => {
     throw new Error(`Failed to update pod: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const getMembers = async (podId) => {
@@ -74,7 +74,7 @@ export const getMembers = async (podId) => {
     throw new Error(`Failed to get pod members: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const join = async (podId, peerId) => {
@@ -91,7 +91,7 @@ export const join = async (podId, peerId) => {
     throw new Error(`Failed to join pod: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const leave = async (podId, peerId) => {
@@ -108,7 +108,7 @@ export const leave = async (podId, peerId) => {
     throw new Error(`Failed to leave pod: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const getMessages = async (podId, channelId, since = null) => {
@@ -126,7 +126,7 @@ export const getMessages = async (podId, channelId, since = null) => {
     throw new Error(`Failed to get messages: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const sendMessage = async (
@@ -152,7 +152,7 @@ export const sendMessage = async (
     throw new Error(`Failed to send message: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const bindRoom = async (
@@ -177,7 +177,7 @@ export const bindRoom = async (
     throw new Error(`Failed to bind room: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const unbindRoom = async (podId, channelId) => {
@@ -193,7 +193,7 @@ export const unbindRoom = async (podId, channelId) => {
     throw new Error(`Failed to unbind room: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 const readDiscovery = async (response) => {
@@ -201,7 +201,7 @@ const readDiscovery = async (response) => {
     throw new Error(`Failed to discover pods: ${response.statusText}`);
   }
 
-  const result = await response.json();
+  const result = await readJsonResponse(response);
   return asArray(result?.pods ?? result?.Pods);
 };
 
@@ -241,5 +241,5 @@ export const refreshDiscovery = async () => {
     throw new Error(`Failed to refresh discovery: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };

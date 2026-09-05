@@ -1,5 +1,5 @@
 import { urlBase } from '../config';
-import { fetchWithoutRedirects } from './http';
+import { fetchWithoutRedirects, readJsonResponse } from './http';
 import * as session from './session';
 
 const baseUrl = `${urlBase}/api/v0/mesh`;
@@ -15,5 +15,5 @@ export const getStats = async () => {
     );
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };

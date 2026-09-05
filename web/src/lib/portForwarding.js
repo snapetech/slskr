@@ -1,5 +1,5 @@
 import { urlBase } from '../config';
-import { fetchWithoutRedirects } from './http';
+import { fetchWithoutRedirects, readJsonResponse } from './http';
 import * as session from './session';
 
 const baseUrl = `${urlBase}/api/v0/port-forwarding`;
@@ -15,8 +15,7 @@ export const startForwarding = async (config) => {
   });
 
   if (!response.ok) {
-    const errorData = await response
-      .json()
+    const errorData = await readJsonResponse(response)
       .catch(() => ({ error: response.statusText }));
     throw new Error(
       errorData.error ||
@@ -24,7 +23,7 @@ export const startForwarding = async (config) => {
     );
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const stopForwarding = async (localPort) => {
@@ -34,8 +33,7 @@ export const stopForwarding = async (localPort) => {
   });
 
   if (!response.ok) {
-    const errorData = await response
-      .json()
+    const errorData = await readJsonResponse(response)
       .catch(() => ({ error: response.statusText }));
     throw new Error(
       errorData.error ||
@@ -43,7 +41,7 @@ export const stopForwarding = async (localPort) => {
     );
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const getForwardingStatus = async () => {
@@ -55,7 +53,7 @@ export const getForwardingStatus = async () => {
     throw new Error(`Failed to get forwarding status: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const getForwardingStatusByPort = async (localPort) => {
@@ -68,8 +66,7 @@ export const getForwardingStatusByPort = async (localPort) => {
       return null;
     }
 
-    const errorData = await response
-      .json()
+    const errorData = await readJsonResponse(response)
       .catch(() => ({ error: response.statusText }));
     throw new Error(
       errorData.error ||
@@ -77,7 +74,7 @@ export const getForwardingStatusByPort = async (localPort) => {
     );
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
 
 export const getAvailablePorts = async (
@@ -95,5 +92,5 @@ export const getAvailablePorts = async (
     throw new Error(`Failed to get available ports: ${response.statusText}`);
   }
 
-  return response.json();
+  return readJsonResponse(response);
 };
