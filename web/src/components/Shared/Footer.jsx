@@ -1,5 +1,6 @@
 import './Footer.css';
 import * as application from '../../lib/application';
+import { toDisplayError } from '../../lib/errors';
 import * as mesh from '../../lib/mesh';
 import * as session from '../../lib/session';
 import * as slskrAPI from '../../lib/slskr';
@@ -35,10 +36,15 @@ const formatSpeed = (bytesPerSec) => {
 };
 
 const formatCount = (value) => {
-  if (value === undefined || value === null) return '0';
+  if (value === undefined || value === null) return '—';
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return value.toString();
+};
+
+const finiteNumberOrNull = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 };
 
 const setFooterHeightVariable = (element) => {
@@ -58,8 +64,11 @@ class Footer extends Component {
     super(props);
     this.state = {
       buildInfo: null,
+      buildInfoError: null,
       slskrStats: null,
+      statsError: null,
       speeds: null,
+      speedsError: null,
       stats: null,
     };
     this.footerRef = React.createRef();
@@ -133,16 +142,28 @@ class Footer extends Component {
       ]);
 
       if (this.isMountedFlag && requestId === this.requestIds.stats) {
-        this.setState({
-          slskrStats:
-            slskrStats.status === 'fulfilled' ? slskrStats.value : null,
-          stats:
-            transportStats.status === 'fulfilled' ? transportStats.value : null,
-        });
+        const nextState = {};
+        const errors = [];
+        if (slskrStats.status === 'fulfilled') {
+          nextState.slskrStats = slskrStats.value;
+        } else {
+          errors.push(toDisplayError(slskrStats.reason, 'slskr telemetry unavailable'));
+        }
+        if (transportStats.status === 'fulfilled') {
+          nextState.stats = transportStats.value;
+        } else {
+          errors.push(toDisplayError(transportStats.reason, 'Network telemetry unavailable'));
+        }
+        nextState.statsError = errors.length > 0 ? errors.join(' ') : null;
+        this.setState(nextState);
       }
     } catch (error) {
-      // Silently fail - stats are non-critical
       console.debug('Failed to fetch mesh stats:', error);
+      if (this.isMountedFlag && requestId === this.requestIds.stats) {
+        this.setState({
+          statsError: toDisplayError(error, 'Network telemetry unavailable'),
+        });
+      }
     }
   };
 
@@ -155,11 +176,15 @@ class Footer extends Component {
     try {
       const speeds = await transfers.getSpeeds();
       if (this.isMountedFlag && requestId === this.requestIds.speeds) {
-        this.setState({ speeds });
+        this.setState({ speeds, speedsError: null });
       }
     } catch (error) {
-      // Silently fail - speeds are non-critical
       console.debug('Failed to fetch transfer speeds:', error);
+      if (this.isMountedFlag && requestId === this.requestIds.speeds) {
+        this.setState({
+          speedsError: toDisplayError(error, 'Transfer speeds unavailable'),
+        });
+      }
     }
   };
 
@@ -172,10 +197,15 @@ class Footer extends Component {
     try {
       const buildInfo = await application.getBuild({ checkForUpdates: true });
       if (this.isMountedFlag && requestId === this.requestIds.buildInfo) {
-        this.setState({ buildInfo });
+        this.setState({ buildInfo, buildInfoError: null });
       }
     } catch (error) {
       console.debug('Failed to fetch build info:', error);
+      if (this.isMountedFlag && requestId === this.requestIds.buildInfo) {
+        this.setState({
+          buildInfoError: toDisplayError(error, 'Build information unavailable'),
+        });
+      }
     }
   };
 
@@ -200,7 +230,15 @@ class Footer extends Component {
     }
 
     const year = new Date().getFullYear();
-    const { buildInfo, slskrStats, speeds, stats } = this.state;
+    const {
+      buildInfo,
+      buildInfoError,
+      slskrStats,
+      speeds,
+      speedsError,
+      stats,
+      statsError,
+    } = this.state;
     const isLoggedIn = session.isLoggedIn();
 
     if (!isLoggedIn && this.props.runtimeProfile !== 'native') {
@@ -238,13 +276,15 @@ class Footer extends Component {
     const swarmJobs = Array.isArray(slskrStats?.swarmJobs)
       ? slskrStats.swarmJobs
       : [];
-    const dhtNodes = Number(dht.dhtNodeCount) || Number(stats?.dht) || 0;
-    const discoveredPeers = Number(dht.discoveredPeerCount) || 0;
-    const displayedDhtPeers = discoveredPeers || dhtNodes;
-    const meshPeers = Number(meshStats.connectedPeerCount) || 0;
-    const hashCount = Number(hashDb.totalEntries) || 0;
+    const dhtNodes =
+      finiteNumberOrNull(dht.dhtNodeCount) ?? finiteNumberOrNull(stats?.dht);
+    const discoveredPeers = finiteNumberOrNull(dht.discoveredPeerCount);
+    const displayedDhtPeers = discoveredPeers ?? dhtNodes;
+    const meshPeers = finiteNumberOrNull(meshStats.connectedPeerCount);
+    const hashCount = finiteNumberOrNull(hashDb.totalEntries);
     const seqId =
-      Number(hashDb.currentSeqId) || Number(meshStats.localSeqId) || 0;
+      finiteNumberOrNull(hashDb.currentSeqId) ??
+      finiteNumberOrNull(meshStats.localSeqId);
     const isSyncing = Boolean(meshStats.isSyncing);
     const backfillActive = Boolean(slskrStats?.backfill?.isActive);
     const activeSwarms = swarmJobs.length;
@@ -265,8 +305,11 @@ class Footer extends Component {
       isLoggedIn && stats
         ? `NAT Type: ${stats.natType || 'Unknown'}`
         : 'NAT: Login to see stats';
+    const telemetryErrors = [statsError, speedsError, buildInfoError]
+      .filter(Boolean)
+      .join(' ');
     const networkTooltip = isLoggedIn
-      ? `DHT peers: ${displayedDhtPeers}; DHT nodes: ${dhtNodes}; mesh peers: ${meshPeers}; hashes: ${hashCount}; seq: ${seqId}`
+      ? `DHT peers: ${formatCount(displayedDhtPeers)}; DHT nodes: ${formatCount(dhtNodes)}; mesh peers: ${formatCount(meshPeers)}; hashes: ${formatCount(hashCount)}; seq: ${formatCount(seqId)}${telemetryErrors ? `; ${telemetryErrors}` : ''}`
       : 'Login to see slskr network stats';
 
     return (
@@ -367,9 +410,9 @@ class Footer extends Component {
               >
                 <strong>T:</strong>{' '}
                 <span className="speed-value">
-                  {totalSpeed ? totalSpeed.value : '0'}
+                  {totalSpeed ? totalSpeed.value : '—'}
                 </span>
-                <span className="speed-unit">{totalSpeed ? totalSpeed.unit : 'B'}</span>
+                <span className="speed-unit">{totalSpeed ? totalSpeed.unit : ''}</span>
               </span>
               <span
                 className="slskr-footer-speed-item"
@@ -381,10 +424,10 @@ class Footer extends Component {
               >
                 <strong>S:</strong>{' '}
                 <span className="speed-value">
-                  {soulseekSpeed ? soulseekSpeed.value : '0'}
+                  {soulseekSpeed ? soulseekSpeed.value : '—'}
                 </span>
                 <span className="speed-unit">
-                  {soulseekSpeed ? soulseekSpeed.unit : 'B'}
+                  {soulseekSpeed ? soulseekSpeed.unit : ''}
                 </span>
               </span>
               <span
@@ -397,9 +440,9 @@ class Footer extends Component {
               >
                 <strong>M:</strong>{' '}
                 <span className="speed-value">
-                  {meshSpeed ? meshSpeed.value : '0'}
+                  {meshSpeed ? meshSpeed.value : '—'}
                 </span>
-                <span className="speed-unit">{meshSpeed ? meshSpeed.unit : 'B'}</span>
+                <span className="speed-unit">{meshSpeed ? meshSpeed.unit : ''}</span>
               </span>
             </div>
           </div>

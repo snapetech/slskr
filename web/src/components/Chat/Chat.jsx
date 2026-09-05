@@ -68,6 +68,7 @@ const Chat = ({ runtimeProfile, state }) => {
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
   const [conversations, setConversations] = useState([]);
+  const [hydrationError, setHydrationError] = useState(null);
   const [usernameInput, setUsernameInput] = useState('');
   const mountedRef = useMountedRef();
   const hydrateRequestIdRef = useRef(0);
@@ -138,6 +139,7 @@ const Chat = ({ runtimeProfile, state }) => {
   const hydrateConversations = useCallback(async () => {
     if (!mountedRef.current) return;
     const requestId = ++hydrateRequestIdRef.current;
+    setHydrationError(null);
 
     try {
       const serverConversations = await chat.getAll();
@@ -163,6 +165,7 @@ const Chat = ({ runtimeProfile, state }) => {
         });
 
       setConversations(activeConversations);
+      setHydrationError(null);
       if (activeConversations.length > 0) {
         setTabs((previous) => {
           const existingUsernames = new Set(
@@ -183,6 +186,9 @@ const Chat = ({ runtimeProfile, state }) => {
         hydrateRequestIdRef.current === requestId
       ) {
         console.error('Failed to hydrate conversations:', error);
+        setHydrationError(
+          toDisplayError(error, 'Failed to load saved conversations'),
+        );
       }
     }
   }, [createTab, mountedRef]);
@@ -374,6 +380,14 @@ const Chat = ({ runtimeProfile, state }) => {
           }
         />
       </Segment>
+      {hydrationError && (
+        <Segment
+          data-testid="chat-conversations-error"
+          negative
+        >
+          Saved conversations unavailable: {hydrationError}
+        </Segment>
+      )}
       {conversations.length > 0 && (
         <Segment className="chat-recovery-rail">
           {conversations.map((conversation) => (

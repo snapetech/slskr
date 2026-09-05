@@ -112,4 +112,17 @@ describe('Footer', () => {
     expect(getSlskrStats).not.toHaveBeenCalled();
     expect(getSpeeds).not.toHaveBeenCalled();
   });
+
+  it('distinguishes unavailable telemetry from measured zero values', async () => {
+    getStats.mockRejectedValue(new Error('Network stats unavailable'));
+    getSlskrStats.mockRejectedValue(new Error('slskr stats unavailable'));
+    getSpeeds.mockRejectedValue(new Error('Transfer speeds unavailable'));
+
+    render(<Footer />);
+
+    expect(await screen.findByText('— dht')).toBeInTheDocument();
+    expect(screen.getByText('— mesh')).toBeInTheDocument();
+    expect(screen.getByText('— hashes')).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
 });
