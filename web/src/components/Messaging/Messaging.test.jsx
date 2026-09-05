@@ -98,6 +98,35 @@ describe('Messaging', () => {
     expect(pods.discoverAll).toHaveBeenCalledWith(50);
   });
 
+  it('bounds and projects restored workspace panels', async () => {
+    localStorage.setItem(
+      'slskr-messaging-workspace',
+      JSON.stringify({
+        panelCounter: Number.MAX_SAFE_INTEGER,
+        panels: [{
+          evil: 'discarded',
+          label: 'x'.repeat(3_000),
+          target: 'friend',
+          type: 'chat',
+        }],
+      }),
+    );
+    chat.getAll.mockResolvedValue([{ username: 'friend' }]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Messaging />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Chat panel: friend')).toBeInTheDocument();
+    const saved = JSON.parse(localStorage.getItem('slskr-messaging-workspace'));
+    expect(saved.panels[0].evil).toBeUndefined();
+    expect(saved.panels[0].label).toHaveLength(2_048);
+  });
+
   it('keeps existing workspace data visible and reports pod load failures', async () => {
     chat.getAll.mockResolvedValue([{ username: 'friend' }]);
     rooms.getJoined.mockResolvedValue([]);
