@@ -84,6 +84,22 @@ const normalizeReport = ({
   summary: isRecord(summary) ? summary : {},
 });
 
+const ReportStatus = ({ error, label, testId }) => {
+  if (!error) return null;
+
+  return (
+    <Message
+      compact
+      data-testid={testId}
+      error
+    >
+      <Message.Header>{label} unavailable</Message.Header>
+      <p>{error}</p>
+      <p>Showing the last successfully loaded data when available.</p>
+    </Message>
+  );
+};
+
 const sumCounts = (directionData = {}) =>
   Object.values(isRecord(directionData) ? directionData : {}).reduce(
     (sum, state) => sum + (Number(state?.count) || 0),
@@ -432,7 +448,7 @@ const LeaderboardTable = ({ loading, onSort, rows = [], sortBy }) => {
   );
 };
 
-const Leaderboard = ({ downloads, end, start, uploads }) => {
+const Leaderboard = ({ downloads, end, errors = {}, start, uploads }) => {
   const [sortBy, setSortBy] = useState('Count');
   const [rows, setRows] = useState({
     download: asRows(downloads),
@@ -488,18 +504,33 @@ const Leaderboard = ({ downloads, end, start, uploads }) => {
     >
       <Grid.Column>
         <Header size="small"><Icon name="download" /> Downloads</Header>
+        <ReportStatus
+          error={errors.download}
+          label="Download leaderboard"
+          testId="compatibility-download-leaderboard-load-error"
+        />
         <LeaderboardTable loading={loading.download} onSort={onSort} rows={rows.download} sortBy={sortBy} />
       </Grid.Column>
       <Grid.Column>
         <Header size="small"><Icon name="upload" /> Uploads</Header>
+        <ReportStatus
+          error={errors.upload}
+          label="Upload leaderboard"
+          testId="compatibility-upload-leaderboard-load-error"
+        />
         <LeaderboardTable loading={loading.upload} onSort={onSort} rows={rows.upload} sortBy={sortBy} />
       </Grid.Column>
     </Grid>
   );
 };
 
-const TopDirectories = ({ rows = [] }) => (
+const TopDirectories = ({ error, rows = [] }) => (
   <>
+    <ReportStatus
+      error={error}
+      label="Directory report"
+      testId="compatibility-directories-load-error"
+    />
     <Header size="small"><Icon name="folder open" /> Directories</Header>
     <Table
       className="unstackable"
@@ -694,8 +725,20 @@ const TransferErrors = ({ data, end, start }) => {
 
   const upload = data.upload ?? { pareto: [], recent: [] };
   const download = data.download ?? { pareto: [], recent: [] };
+  const reportErrors = data.reportErrors ?? {};
+  const paretoError = [reportErrors.uploadPareto, reportErrors.downloadPareto]
+    .filter(Boolean)
+    .join(' ');
+  const recentError = [reportErrors.uploadRecent, reportErrors.downloadRecent]
+    .filter(Boolean)
+    .join(' ');
   return (
     <>
+      <ReportStatus
+        error={reportErrors.histogram}
+        label="Error history"
+        testId="compatibility-error-history-load-error"
+      />
       <CompatibilityGraph
         data={data.chartData}
         defaultSeries={new Set(['uploadErrors', 'downloadErrors'])}
@@ -703,6 +746,11 @@ const TransferErrors = ({ data, end, start }) => {
           { color: '#db2828', format: (value) => value.toLocaleString(), key: 'uploadErrors', name: 'Upload Errors' },
           { color: '#a333c8', format: (value) => value.toLocaleString(), key: 'downloadErrors', name: 'Download Errors' },
         ]}
+      />
+      <ReportStatus
+        error={paretoError}
+        label="Error count report"
+        testId="compatibility-error-pareto-load-error"
       />
       <ExceptionPareto
         direction={paretoDirection}
@@ -712,6 +760,11 @@ const TransferErrors = ({ data, end, start }) => {
           updateRows('pareto', direction);
         }}
         rows={paretoRows ?? mergeParetoRows(upload.pareto, download.pareto)}
+      />
+      <ReportStatus
+        error={recentError}
+        label="Recent error report"
+        testId="compatibility-recent-errors-load-error"
       />
       <ExceptionList
         direction={recentDirection}
@@ -729,6 +782,7 @@ const TransferErrors = ({ data, end, start }) => {
 const HistoricalStatistics = ({ data, historyLabel, historyRanges, onHistoryRangeSelect }) => {
   const [activeTab, setActiveTab] = useState(0);
   const summary = data.summary ?? {};
+  const reportErrors = data.reportErrors ?? {};
   const downloadBytes = sumBytes(summary.Download ?? {});
   const uploadBytes = sumBytes(summary.Upload ?? {});
   const shareRatio = downloadBytes > 0 ? uploadBytes / downloadBytes : null;
@@ -738,15 +792,24 @@ const HistoricalStatistics = ({ data, historyLabel, historyRanges, onHistoryRang
   const panes = [
     {
       menuItem: { content: 'Users', icon: 'users', key: 'users' },
-      render: () => <Tab.Pane><Leaderboard downloads={data.leaderboard.download} end={data.historyEnd} start={data.historyStart} uploads={data.leaderboard.upload} /></Tab.Pane>,
+      render: () => <Tab.Pane><Leaderboard
+        downloads={data.leaderboard.download}
+        end={data.historyEnd}
+        errors={{
+          download: reportErrors.downloadLeaderboard,
+          upload: reportErrors.uploadLeaderboard,
+        }}
+        start={data.historyStart}
+        uploads={data.leaderboard.upload}
+      /></Tab.Pane>,
     },
     {
       menuItem: { content: 'Content', icon: 'folder open', key: 'content' },
-      render: () => <Tab.Pane><TopDirectories rows={data.directories} /></Tab.Pane>,
+      render: () => <Tab.Pane><TopDirectories error={reportErrors.directories} rows={data.directories} /></Tab.Pane>,
     },
     {
       menuItem: { content: 'Errors', icon: 'warning sign', key: 'errors' },
-      render: () => <Tab.Pane><TransferErrors data={{ ...data.exceptions, chartData }} end={data.historyEnd} start={data.historyStart} /></Tab.Pane>,
+      render: () => <Tab.Pane><TransferErrors data={{ ...data.exceptions, chartData, reportErrors }} end={data.historyEnd} start={data.historyStart} /></Tab.Pane>,
     },
   ];
 
@@ -766,6 +829,11 @@ const HistoricalStatistics = ({ data, historyLabel, historyRanges, onHistoryRang
           ))}
         </ButtonGroup>
       </div>
+      <ReportStatus
+        error={reportErrors.summary}
+        label="Transfer summary"
+        testId="compatibility-summary-load-error"
+      />
       <Statistic.Group
         size="small"
         widths="four"
@@ -787,6 +855,11 @@ const HistoricalStatistics = ({ data, historyLabel, historyRanges, onHistoryRang
           <Statistic.Label>Distinct peers</Statistic.Label>
         </Statistic>
       </Statistic.Group>
+      <ReportStatus
+        error={reportErrors.histogram}
+        label="Transfer history"
+        testId="compatibility-histogram-load-error"
+      />
       <CompatibilityGraph
         data={chartData}
         defaultSeries={new Set(['uploadBytes', 'downloadBytes'])}
@@ -819,14 +892,13 @@ const CompatibilityDashboard = ({ runtimeProfile, server } = {}) => {
 
   useEffect(() => {
     let active = true;
-    const reportFailures = [];
-    const safeRequest = (request, fallback) =>
+    const requestReport = (key, request) =>
       Promise.resolve()
         .then(request)
-        .catch((loadError) => {
-          reportFailures.push(loadError);
-          return fallback;
-        });
+        .then(
+          (value) => ({ failed: false, key, value }),
+          (loadError) => ({ failed: true, key, loadError }),
+        );
 
     if (mountedRef.current) {
       setError(null);
@@ -835,61 +907,102 @@ const CompatibilityDashboard = ({ runtimeProfile, server } = {}) => {
     const start = new Date(historyParameters.start);
     const end = new Date(historyParameters.end);
     Promise.all([
-      safeRequest(() => reports.getSummary({ end, start }), {}),
-      safeRequest(
+      requestReport('summary', () => reports.getSummary({ end, start })),
+      requestReport(
+        'histogram',
         () => reports.getHistogram({ buckets: historyParameters.buckets, end, start }),
-        {},
       ),
-      safeRequest(
+      requestReport(
+        'uploadLeaderboard',
         () => reports.getLeaderboard({ direction: 'Upload', end, start }),
-        [],
       ),
-      safeRequest(
+      requestReport(
+        'downloadLeaderboard',
         () => reports.getLeaderboard({ direction: 'Download', end, start }),
-        [],
       ),
-      safeRequest(() => reports.getTopDirectories({ end, start }), []),
-      safeRequest(
+      requestReport('directories', () => reports.getTopDirectories({ end, start })),
+      requestReport(
+        'uploadPareto',
         () => reports.getExceptionPareto({ direction: 'Upload', end, start }),
-        [],
       ),
-      safeRequest(
+      requestReport(
+        'downloadPareto',
         () => reports.getExceptionPareto({ direction: 'Download', end, start }),
-        [],
       ),
-      safeRequest(
+      requestReport(
+        'uploadRecent',
         () => reports.getExceptions({ direction: 'Upload', end, start }),
-        [],
       ),
-      safeRequest(
+      requestReport(
+        'downloadRecent',
         () => reports.getExceptions({ direction: 'Download', end, start }),
-        [],
       ),
-    ]).then(([summary, histogram, uploadLeaderboard, downloadLeaderboard, directories, uploadPareto, downloadPareto, uploadRecent, downloadRecent]) => {
+    ]).then((results) => {
       if (!active || !mountedRef.current) return;
-      setData({
+      const resultByKey = results.reduce((byKey, result) => {
+        byKey[result.key] = result;
+        return byKey;
+      }, {});
+      const failedReports = results.filter((result) => result.failed);
+      const reportErrors = failedReports.reduce((errors, result) => {
+        errors[result.key] = toDisplayError(
+          result.loadError,
+          'report service unavailable',
+        );
+        return errors;
+      }, {});
+      const valueFor = (key, fallback) =>
+        resultByKey[key].failed ? fallback : resultByKey[key].value;
+
+      setData((previous) => ({
         ...normalizeReport({
-          directories,
-          downloadLeaderboard,
-          downloadPareto,
-          downloadRecent,
-          histogram,
-          summary,
-          uploadLeaderboard,
-          uploadPareto,
-          uploadRecent,
+          directories: valueFor('directories', previous.directories ?? []),
+          downloadLeaderboard: valueFor(
+            'downloadLeaderboard',
+            previous.leaderboard?.download ?? [],
+          ),
+          downloadPareto: valueFor(
+            'downloadPareto',
+            previous.exceptions?.download?.pareto ?? [],
+          ),
+          downloadRecent: valueFor(
+            'downloadRecent',
+            previous.exceptions?.download?.recent ?? [],
+          ),
+          histogram: valueFor('histogram', previous.histogram ?? {}),
+          summary: valueFor('summary', previous.summary ?? {}),
+          uploadLeaderboard: valueFor(
+            'uploadLeaderboard',
+            previous.leaderboard?.upload ?? [],
+          ),
+          uploadPareto: valueFor(
+            'uploadPareto',
+            previous.exceptions?.upload?.pareto ?? [],
+          ),
+          uploadRecent: valueFor(
+            'uploadRecent',
+            previous.exceptions?.upload?.recent ?? [],
+          ),
         }),
         historyEnd: historyParameters.end,
         historyStart: historyParameters.start,
-      });
-      setError(
-        reportFailures.length > 0
-          ? `Some transfer reports could not be loaded: ${toDisplayError(
-              reportFailures[0],
-              'report service unavailable',
-            )}`
-          : null,
-      );
+        reportErrors,
+      }));
+      if (failedReports.length > 0) {
+        const firstFailure = failedReports[0];
+        const failureCount =
+          failedReports.length > 1
+            ? ` (${failedReports.length} report sections affected).`
+            : '.';
+        setError(
+          `Some transfer reports could not be loaded: ${toDisplayError(
+            firstFailure.loadError,
+            'report service unavailable',
+          )}${failureCount} Showing the last successfully loaded values for affected sections.`,
+        );
+      } else {
+        setError(null);
+      }
       setLoading(false);
     }).catch((loadError) => {
       if (!active || !mountedRef.current) return;

@@ -67,6 +67,33 @@ describe('CompatibilityDashboard', () => {
     });
   });
 
+  it('retains the last successful report when a range refresh fails', async () => {
+    reportMocks.getSummary.mockReset();
+    reportMocks.getSummary
+      .mockResolvedValueOnce({
+        Download: { Succeeded: { count: 4, distinctUsers: 2, totalBytes: 4_096 } },
+        Upload: { Succeeded: { count: 2, distinctUsers: 1, totalBytes: 2_048 } },
+      })
+      .mockRejectedValueOnce(new Error('summary service unavailable'));
+
+    render(
+      <MemoryRouter>
+        <CompatibilityDashboard server={{ isConnected: true }} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Downloaded · 4 files')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '7d' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compatibility-summary-load-error')).toHaveTextContent(
+        'summary service unavailable',
+      );
+      expect(screen.getByText('Downloaded · 4 files')).toBeInTheDocument();
+    });
+  });
+
   it('starts a search from the target-style search bar', async () => {
     render(
       <MemoryRouter>
