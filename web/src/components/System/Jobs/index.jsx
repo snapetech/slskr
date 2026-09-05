@@ -27,6 +27,21 @@ import {
   Table,
 } from 'semantic-ui-react';
 
+const normalizedJobStatus = (job) =>
+  String(job.status ?? job.state ?? '')
+    .toLowerCase()
+    .replaceAll(/[^a-z]/gu, '');
+const ACTIVE_JOB_STATES = new Set([
+  'assembling',
+  'downloading',
+  'inprogress',
+  'pending',
+  'queued',
+  'running',
+  'verifying',
+  'verifyingfinal',
+]);
+
 const Jobs = () => {
   const [jobs, setJobs] = useState([]);
   const [swarmJobs, setSwarmJobs] = useState([]);
@@ -143,7 +158,7 @@ const Jobs = () => {
   const analytics = useMemo(() => {
     const allJobs = [...jobs, ...swarmJobs];
     const byStatus = allJobs.reduce((accumulator, job) => {
-      const status = job.status || 'unknown';
+      const status = normalizedJobStatus(job) || 'unknown';
       accumulator[status] = (accumulator[status] || 0) + 1;
       return accumulator;
     }, {});
@@ -155,11 +170,11 @@ const Jobs = () => {
     }, {});
 
     const activeCount = allJobs.filter(
-      (index) => index.status === 'running' || index.status === 'pending',
+      (job) => ACTIVE_JOB_STATES.has(normalizedJobStatus(job)),
     ).length;
 
     const completedCount = allJobs.filter(
-      (index) => index.status === 'completed',
+      (job) => normalizedJobStatus(job) === 'completed',
     ).length;
 
     return {

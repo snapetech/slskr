@@ -60,7 +60,14 @@ describe('slskr runtime API helpers', () => {
     });
 
     await expect(getActiveSwarmJobs()).resolves.toEqual([
-      { jobId: 'swarm-1', status: 'in_progress' },
+      {
+        activeSources: 0,
+        downloadedBytes: 0,
+        jobId: 'swarm-1',
+        progressPercent: 0,
+        status: 'in_progress',
+        totalBytes: 0,
+      },
     ]);
   });
 });

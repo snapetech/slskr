@@ -3,6 +3,7 @@
 // </copyright>
 
 import api from './api';
+import { normalizeSwarmJobList } from './swarmJobs';
 
 /**
  * Get all jobs with optional filtering, pagination, and sorting.
@@ -82,7 +83,7 @@ export const createMbReleaseJob = async ({
 export const getActiveSwarmJobs = async () => {
   try {
     const response = await api.get('/multisource/jobs');
-    return Array.isArray(response.data?.jobs) ? response.data.jobs : [];
+    return normalizeSwarmJobList(response.data);
   } catch (error) {
     if (error?.response?.status === 404) return [];
     throw error;

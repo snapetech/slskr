@@ -122,6 +122,28 @@ describe('Jobs', () => {
     expect(screen.getByText(/3 sources/)).toBeInTheDocument();
   });
 
+  it('counts native swarm states as active jobs', async () => {
+    jobsLibrary.getJobs.mockResolvedValue({
+      has_more: false,
+      jobs: [],
+      limit: 20,
+      offset: 0,
+      total: 0,
+    });
+    jobsLibrary.getActiveSwarmJobs.mockResolvedValue([
+      { ...mockSwarmJobs[0], state: 'Downloading' },
+    ]);
+
+    render(<Jobs />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Active Swarm Downloads')).toBeInTheDocument();
+    });
+
+    const activeStatistic = screen.getByText('Active').closest('.statistic');
+    expect(within(activeStatistic).getByText('1')).toBeInTheDocument();
+  });
+
   it('displays analytics statistics', async () => {
     render(<Jobs />);
 

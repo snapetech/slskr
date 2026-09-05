@@ -1,5 +1,6 @@
 import api from './api';
 import { toDisplayError } from './errors';
+import { normalizeSwarmJob, normalizeSwarmJobList } from './swarmJobs';
 
 // Older daemon profiles may not expose every optional endpoint. Preserve the
 // compatibility fallback for that case, but surface real outages and auth
@@ -101,7 +102,7 @@ export const backfillFromSearchHistory = async (options = {}) => {
 
 // MultiSource API
 export const getActiveSwarmJobs = async () => {
-  return safeGet('/multisource/jobs', []);
+  return normalizeSwarmJobList(await safeGet('/multisource/jobs', { jobs: [] }));
 };
 
 export const getSwarmJob = async (jobId) => {
@@ -139,23 +140,6 @@ const parseCapabilities = ({ capabilitiesJson, capabilitiesVersion }) => {
   return {
     features: asArray(document.features),
     version: document.version || capabilitiesVersion || 'slskR',
-  };
-};
-
-const normalizeSwarmJob = (job = {}) => {
-  const completedChunks = Number(job.completedChunks) || 0;
-  const totalChunks = Number(job.totalChunks) || 0;
-
-  return {
-    ...job,
-    activeSources: job.activeSources ?? job.activeWorkers ?? 0,
-    downloadedBytes: job.downloadedBytes ?? job.bytesDownloaded ?? 0,
-    jobId: job.jobId ?? job.id,
-    progressPercent:
-      job.progressPercent ??
-      (totalChunks > 0 ? (completedChunks * 100) / totalChunks : 0),
-    totalBytes: job.totalBytes ?? job.fileSize ?? 0,
-    workers: asArray(job.workers),
   };
 };
 
@@ -238,7 +222,9 @@ const normalizeNetworkStats = (snapshot) => {
       lastSeqId: peer.lastSeqId ?? peer.latestSeqId,
       lastSyncAt: peer.lastSyncAt ?? peer.lastSyncTime,
     })),
-    swarmJobs: asArray(snapshot.swarmJobs).map(normalizeSwarmJob),
+    swarmJobs: asArray(snapshot.swarmJobs)
+      .map(normalizeSwarmJob)
+      .filter((job) => job !== null),
     transport: {
       dht: rawTransport.dht ?? rawTransport.activeDhtSessions ?? 0,
       natType:

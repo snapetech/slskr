@@ -5,6 +5,7 @@
 import * as jobsLibrary from '../../../lib/jobs';
 import { toDisplayError } from '../../../lib/errors';
 import { formatBytes } from '../../../lib/util';
+import { normalizeSwarmJob } from '../../../lib/swarmJobs';
 import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -54,9 +55,7 @@ const SwarmVisualization = ({ jobId }) => {
 
       if (status.status === 'fulfilled') {
         setJobStatus(
-          status.value && typeof status.value === 'object'
-            ? status.value
-            : null,
+          normalizeSwarmJob(status.value),
         );
       } else {
         setError(toDisplayError(status.reason, 'Failed to fetch job status'));
@@ -193,6 +192,9 @@ const SwarmVisualization = ({ jobId }) => {
     jobStatus.totalChunks > 0
       ? (jobStatus.completedChunks / jobStatus.totalChunks) * 100
       : 0;
+  const downloadedBytes =
+    jobStatus.downloadedBytes ?? jobStatus.bytesDownloaded ?? 0;
+  const totalBytes = jobStatus.totalBytes ?? jobStatus.fileSize ?? 0;
 
   return (
     <div>
@@ -247,8 +249,8 @@ const SwarmVisualization = ({ jobId }) => {
           style={{ marginTop: '1em' }}
         />
         <div style={{ fontSize: '0.9em', marginTop: '0.5em' }}>
-          {formatBytes(jobStatus.bytesDownloaded || 0)} /{' '}
-          {formatBytes((jobStatus.totalChunks || 0) * 512 * 1_024)}
+          {formatBytes(downloadedBytes)} /{' '}
+          {totalBytes > 0 ? formatBytes(totalBytes) : 'Unknown size'}
         </div>
       </Segment>
 

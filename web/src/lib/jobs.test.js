@@ -170,6 +170,59 @@ describe('jobs', () => {
       expect(result).toEqual(mockJobs);
     });
 
+    it('normalizes native job metrics and legacy identifiers', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          jobs: [
+            {
+              completedChunks: 2,
+              id: 'legacy-1',
+              progress: 50,
+              size: 8_192,
+              sources: ['alice', 'bob'],
+              status: 'running',
+              bytesTransferred: 2_048,
+            },
+            {
+              activeWorkers: 3,
+              bytesDownloaded: 4_096,
+              completedChunks: 4,
+              jobId: 'native-1',
+              totalChunks: 8,
+              state: 'InProgress',
+            },
+          ],
+        },
+      });
+
+      await expect(jobs.getActiveSwarmJobs()).resolves.toEqual([
+        expect.objectContaining({
+          activeSources: 2,
+          downloadedBytes: 2_048,
+          jobId: 'legacy-1',
+          progressPercent: 50,
+          totalBytes: 8_192,
+        }),
+        expect.objectContaining({
+          activeSources: 3,
+          downloadedBytes: 4_096,
+          jobId: 'native-1',
+          progressPercent: 50,
+          totalBytes: 0,
+        }),
+      ]);
+    });
+
+    it('drops malformed swarm records before rendering', async () => {
+      api.get.mockResolvedValue({
+        data: { jobs: [null, 'invalid', {}, { id: 'valid-1' }] },
+      });
+
+      await expect(jobs.getActiveSwarmJobs()).resolves.toEqual([
+        expect.objectContaining({ jobId: 'valid-1' }),
+      ]);
+    });
+
     it('returns empty array when API response is not an array', async () => {
       api.get.mockResolvedValue({ data: { jobs: null } });
 

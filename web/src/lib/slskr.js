@@ -1,6 +1,7 @@
 import api from './api';
 import { toDisplayError } from './errors';
 import { encodePathSegment } from './pathEncoding';
+import { normalizeSwarmJobList } from './swarmJobs';
 
 // Older daemon profiles may not expose every optional endpoint. Preserve the
 // compatibility fallback for that case, but surface real outages and auth
@@ -22,8 +23,6 @@ const safeGet = async (endpoint, fallback = null) => {
 };
 
 const MAX_PEER_RECORDS = 512;
-const MAX_SWARM_JOB_RECORDS = 512;
-
 const normalizePeerList = (value) => {
   const peers = Array.isArray(value)
     ? value
@@ -34,18 +33,6 @@ const normalizePeerList = (value) => {
   return peers
     .filter((peer) => peer && typeof peer === 'object' && !Array.isArray(peer))
     .slice(0, MAX_PEER_RECORDS);
-};
-
-const normalizeSwarmJobList = (value) => {
-  const jobs = Array.isArray(value)
-    ? value
-    : value && typeof value === 'object' && Array.isArray(value.jobs)
-      ? value.jobs
-      : [];
-
-  return jobs
-    .filter((job) => job && typeof job === 'object' && !Array.isArray(job))
-    .slice(0, MAX_SWARM_JOB_RECORDS);
 };
 
 // Capabilities API
