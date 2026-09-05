@@ -627,6 +627,29 @@ async def test_websocket_failed_subscribe_task_rolls_back_topics():
 
 
 @pytest.mark.asyncio
+async def test_websocket_stale_subscription_failure_keeps_desired_topics_for_reconnect():
+    send_started = asyncio.Event()
+
+    async def failed_send(_message):
+        send_started.set()
+        raise OSError("stale socket")
+
+    ws = MagicMock()
+    ws.closed = False
+    ws.send_json = AsyncMock(side_effect=failed_send)
+    client = WebSocketClient("https://example.test", "token")
+    client.ws = ws
+
+    client.subscribe("searches")
+    await send_started.wait()
+    client.ws = None
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert client.get_subscribed_topics() == ["searches"]
+
+
+@pytest.mark.asyncio
 async def test_websocket_disconnect_cancels_pending_subscription_writes():
     send_started = asyncio.Event()
 

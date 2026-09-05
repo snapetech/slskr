@@ -245,9 +245,10 @@ class WebSocketClient:
         for topic in new_topics:
             self.subscribed_topics.add(topic)
 
-        if self.ws and not self.ws.closed:
+        ws = self.ws
+        if ws and not ws.closed:
             message = {"type": "subscribe", "data": {"topics": list(new_topics)}}
-            self._schedule_send(message, "subscribe", new_topics)
+            self._schedule_send(message, "subscribe", new_topics, ws)
 
     def unsubscribe(self, *topics: str):
         """Unsubscribe from event types"""
@@ -256,12 +257,19 @@ class WebSocketClient:
             return
         self.subscribed_topics.difference_update(removed_topics)
 
-        if self.ws and not self.ws.closed:
+        ws = self.ws
+        if ws and not ws.closed:
             message = {"type": "unsubscribe", "data": {"topics": list(removed_topics)}}
-            self._schedule_send(message, "unsubscribe", removed_topics)
+            self._schedule_send(message, "unsubscribe", removed_topics, ws)
 
-    def _schedule_send(self, message: Dict, transition: str, topics: Set[str]):
-        task = asyncio.create_task(self.ws.send_json(message))
+    def _schedule_send(
+        self,
+        message: Dict,
+        transition: str,
+        topics: Set[str],
+        ws: aiohttp.ClientWebSocketResponse,
+    ):
+        task = asyncio.create_task(ws.send_json(message))
         self._outbound_tasks.add(task)
 
         def finished(completed: asyncio.Task):
@@ -270,10 +278,15 @@ class WebSocketClient:
                 return
             error = completed.exception()
             if error is not None and not self._intentional_disconnect:
-                if transition == "subscribe":
-                    self.subscribed_topics.difference_update(topics)
-                else:
-                    self.subscribed_topics.update(topics)
+                # A send can finish after this socket has been replaced or
+                # closed.  In that case the desired topic set is replayed by
+                # the next handshake and must not be rolled back based on a
+                # stale connection's failure.
+                if self.ws is ws:
+                    if transition == "subscribe":
+                        self.subscribed_topics.difference_update(topics)
+                    else:
+                        self.subscribed_topics.update(topics)
                 self._notify_error_listeners(error)
 
         task.add_done_callback(finished)
