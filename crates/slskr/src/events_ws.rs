@@ -15,6 +15,7 @@ const WEBSOCKET_KEY_DECODED_LEN: usize = 16;
 const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const CLIENT_FRAME_CHANNEL_CAPACITY: usize = 16;
 const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_EVENT_FRAME_BYTES: usize = 64 * 1024;
 
 pub fn valid_sec_websocket_key(sec_websocket_key: &str) -> bool {
     let Ok(decoded) = STANDARD.decode(sec_websocket_key.as_bytes()) else {
@@ -304,14 +305,34 @@ fn validate_close_payload(payload: &[u8]) -> Result<(), String> {
 }
 
 fn event_frame_json(record: &EventRecord) -> String {
-    serde_json::json!({
+    let mut frame = serde_json::json!({
         "topic": record.topic(),
         "id": record.id,
         "type": &record.kind,
         "data": record.data_json(),
         "timestamp": record.created_at,
-    })
-    .to_string()
+    });
+    let serialized = frame.to_string();
+    if serialized.len() <= MAX_EVENT_FRAME_BYTES {
+        return serialized;
+    }
+
+    if let Some(data) = frame
+        .get_mut("data")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let detail_length = record.detail.as_deref().map(str::len).unwrap_or_default();
+        let marker = format!("<omitted oversized event detail: {detail_length} bytes>");
+        data.insert(
+            "detail".to_owned(),
+            serde_json::Value::String(marker.clone()),
+        );
+        if data.get("message").is_some() {
+            data.insert("message".to_owned(), serde_json::Value::String(marker));
+        }
+    }
+
+    frame.to_string()
 }
 
 async fn write_ping_frame<W>(writer: &mut W) -> Result<(), String>
@@ -444,6 +465,24 @@ mod tests {
         assert_eq!(parsed["data"]["resource"], record.resource);
         assert_eq!(parsed["data"]["detail"], record.detail.unwrap());
         assert!(parsed.get("injected").is_none());
+    }
+
+    #[test]
+    fn websocket_event_frame_bounds_detail_with_framing_overhead() {
+        let record = EventRecord {
+            id: 8,
+            kind: "custom.event".to_owned(),
+            resource: "resource".to_owned(),
+            detail: Some("x".repeat(crate::MAX_EVENT_DETAIL_BYTES)),
+            created_at: 12,
+        };
+
+        let frame = event_frame_json(&record);
+        assert!(frame.len() <= MAX_EVENT_FRAME_BYTES);
+        let parsed: serde_json::Value = serde_json::from_str(&frame).expect("valid event JSON");
+        assert!(parsed["data"]["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.starts_with("<omitted oversized event detail:")));
     }
 
     #[tokio::test]

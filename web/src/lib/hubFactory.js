@@ -10,7 +10,7 @@ const RECONNECT_DELAYS_MS = [
   0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 5_000, 5_000, 5_000, 5_000,
 ];
 export const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
-export const MAX_WEBSOCKET_MESSAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024;
 
 const SIGNALR_HUB_TOPICS = new Set([
   'application',
