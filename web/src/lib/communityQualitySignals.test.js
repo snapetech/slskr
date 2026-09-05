@@ -146,4 +146,10 @@ describe('communityQualitySignals', () => {
       }),
     );
   });
+
+  it('ignores oversized persisted quality state', () => {
+    localStorage.setItem(communityQualitySignalStorageKey, 'x'.repeat(600 * 1024));
+
+    expect(getCommunityQualitySignals()).toEqual([]);
+  });
 });

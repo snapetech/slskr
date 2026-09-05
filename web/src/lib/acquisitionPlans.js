@@ -1,5 +1,10 @@
 import { getAcquisitionProfile } from './acquisitionProfiles';
 import { toDisplayError } from './errors';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -14,6 +19,9 @@ export const acquisitionPlanStates = [
   'Rejected',
   'Failed',
 ];
+
+const maxAcquisitionPlans = 500;
+const maxPlanTextCharacters = 2_048;
 
 export const profileProviderPriority = {
   'album-complete': ['LocalLibrary', 'Soulseek', 'NativeMesh', 'MeshDht'],
@@ -31,10 +39,22 @@ const normalizeState = (state) =>
   acquisitionPlanStates.includes(state) ? state : 'Planned';
 
 const normalizeText = (value) =>
-  typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  (typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : '')
+    .trim()
+    .slice(0, maxPlanTextCharacters);
 
 const isPlainObject = (value) =>
   value && typeof value === 'object' && !Array.isArray(value);
+
+const normalizeExecution = (execution) =>
+  isPlainObject(execution)
+    ? {
+        requestedAt: normalizeText(execution.requestedAt),
+        summary: normalizeText(execution.summary),
+      }
+    : null;
 
 const normalizePlan = (plan = {}) => {
   const sourcePlan = isPlainObject(plan) ? plan : {};
@@ -45,7 +65,7 @@ const normalizePlan = (plan = {}) => {
     acquisitionProfile: profile.id,
     createdAt: normalizeText(sourcePlan.createdAt) || timestamp,
     evidenceKey: normalizeText(sourcePlan.evidenceKey),
-    execution: isPlainObject(sourcePlan.execution) ? sourcePlan.execution : null,
+    execution: normalizeExecution(sourcePlan.execution),
     id: normalizeText(sourcePlan.id) || uuidv4(),
     manualOnly: sourcePlan.manualOnly !== false,
     networkImpact:
@@ -53,7 +73,10 @@ const normalizePlan = (plan = {}) => {
       'Dry-run plan only; no peer search, browse, download, DHT lookup, or remote request has started.',
     providerPriority:
       (Array.isArray(sourcePlan.providerPriority)
-        ? sourcePlan.providerPriority.filter((provider) => typeof provider === 'string')
+        ? sourcePlan.providerPriority
+            .filter((provider) => typeof provider === 'string')
+            .map(normalizeText)
+            .slice(0, 16)
         : null) ||
       profileProviderPriority[profile.id] ||
       profileProviderPriority['lossless-exact'],
@@ -70,23 +93,28 @@ const normalizePlan = (plan = {}) => {
 };
 
 export const getAcquisitionPlans = (getItem = getLocalStorageItem) => {
-  try {
-    const parsed = JSON.parse(getItem(acquisitionPlanStorageKey, '[]'));
-    return Array.isArray(parsed)
-      ? parsed.filter(isPlainObject).map(normalizePlan)
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = readBoundedJson(
+    getItem,
+    acquisitionPlanStorageKey,
+    [],
+    maxPersistedJsonCharacters,
+  );
+  return Array.isArray(parsed)
+    ? parsed.filter(isPlainObject).slice(0, maxAcquisitionPlans).map(normalizePlan)
+    : [];
 };
 
 export const saveAcquisitionPlans = (
   plans = [],
   setItem = setLocalStorageItem,
 ) => {
-  const normalized = (Array.isArray(plans) ? plans : []).map(normalizePlan);
-  setItem(acquisitionPlanStorageKey, JSON.stringify(normalized));
-  return normalized;
+  const normalized = (Array.isArray(plans) ? plans : [])
+    .map(normalizePlan)
+    .slice(0, maxAcquisitionPlans);
+  return writeBoundedList(setItem, acquisitionPlanStorageKey, normalized, {
+    maxCharacters: maxPersistedJsonCharacters,
+    maxItems: maxAcquisitionPlans,
+  });
 };
 
 export const buildDiscoveryInboxAcquisitionPlan = (candidate = {}) =>

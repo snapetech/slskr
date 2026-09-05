@@ -4,6 +4,11 @@
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
+import {
   acquisitionProfiles,
   defaultAcquisitionProfileId,
   getAcquisitionProfile,
@@ -25,6 +30,9 @@ const allowedReleaseTypes = [
 const allowedCountries = ['Any', 'US', 'GB', 'CA', 'JP', 'DE', 'FR', 'BR', 'AU'];
 const allowedFormats = ['Any', 'Digital', 'CD', 'Vinyl', 'Cassette'];
 const allowedSchedules = ['Manual only', 'Daily', 'Weekly', 'Monthly'];
+const maxWatchlists = 500;
+const maxWatchlistTextCharacters = 2_048;
+const maxExpansionCandidates = 100;
 
 const toDropdownOptions = (values) =>
   values.map((value) => ({
@@ -45,6 +53,13 @@ export const watchlistAcquisitionProfileOptions = acquisitionProfiles.map((profi
 }));
 
 const now = () => new Date().toISOString();
+
+const normalizeText = (value, fallback = '') =>
+  (typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback)
+    .trim()
+    .slice(0, maxWatchlistTextCharacters);
 
 const isPlainObject = (value) =>
   value && typeof value === 'object' && !Array.isArray(value);
@@ -81,9 +96,9 @@ const normalizeExpansionCandidates = (candidates = []) => {
     )
     .filter(isPlainObject)
     .map((candidate) => ({
-      createdAt: candidate.createdAt || now(),
-      decidedAt: candidate.decidedAt || '',
-      name: (candidate.name || '').trim(),
+      createdAt: normalizeText(candidate.createdAt, now()),
+      decidedAt: normalizeText(candidate.decidedAt),
+      name: normalizeText(candidate.name),
       status: ['Approved', 'Rejected'].includes(candidate.status)
         ? candidate.status
         : 'Pending',
@@ -96,51 +111,59 @@ const normalizeExpansionCandidates = (candidates = []) => {
 
       seen.add(key);
       return true;
-    });
+    })
+    .slice(0, maxExpansionCandidates);
 };
 
 const normalizeWatchlist = (item = {}) => {
+  const sourceItem = isPlainObject(item) ? item : {};
   const timestamp = now();
 
   return {
     acquisitionProfile:
-      getAcquisitionProfile(item.acquisitionProfile)?.id ?? defaultAcquisitionProfileId,
-    cooldownDays: normalizeCooldownDays(item.cooldownDays),
-    country: normalizeCountry(item.country),
-    createdAt: item.createdAt || timestamp,
-    destination: item.destination || 'Discovery Inbox',
-    expansionCandidates: normalizeExpansionCandidates(item.expansionCandidates),
-    expansionSource: item.expansionSource || '',
-    format: normalizeFormat(item.format),
-    id: item.id || uuidv4(),
-    kind: allowedKinds.includes(item.kind) ? item.kind : 'Artist',
-    lastScannedAt: item.lastScannedAt || '',
-    lastScanPreview: item.lastScanPreview || '',
+      getAcquisitionProfile(sourceItem.acquisitionProfile)?.id ?? defaultAcquisitionProfileId,
+    cooldownDays: normalizeCooldownDays(sourceItem.cooldownDays),
+    country: normalizeCountry(sourceItem.country),
+    createdAt: normalizeText(sourceItem.createdAt, timestamp),
+    destination: normalizeText(sourceItem.destination, 'Discovery Inbox'),
+    expansionCandidates: normalizeExpansionCandidates(sourceItem.expansionCandidates),
+    expansionSource: normalizeText(sourceItem.expansionSource),
+    format: normalizeFormat(sourceItem.format),
+    id: normalizeText(sourceItem.id, uuidv4()),
+    kind: allowedKinds.includes(sourceItem.kind) ? sourceItem.kind : 'Artist',
+    lastScannedAt: normalizeText(sourceItem.lastScannedAt),
+    lastScanPreview: normalizeText(sourceItem.lastScanPreview),
     releaseTypes:
-      normalizeReleaseTypes(item.releaseTypes).length > 0
-        ? normalizeReleaseTypes(item.releaseTypes)
+      normalizeReleaseTypes(sourceItem.releaseTypes).length > 0
+        ? normalizeReleaseTypes(sourceItem.releaseTypes)
         : ['Album', 'EP', 'Single'],
-    schedule: normalizeSchedule(item.schedule),
-    target: item.target || 'Untitled watch',
-    updatedAt: item.updatedAt || timestamp,
+    schedule: normalizeSchedule(sourceItem.schedule),
+    target: normalizeText(sourceItem.target, 'Untitled watch'),
+    updatedAt: normalizeText(sourceItem.updatedAt, timestamp),
   };
 };
 
 const getWatchlistsWith = (getItem = getLocalStorageItem) => {
-  try {
-    const parsed = JSON.parse(getItem(watchlistStorageKey, '[]'));
-    return Array.isArray(parsed)
-      ? parsed.filter(isPlainObject).map(normalizeWatchlist)
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = readBoundedJson(
+    getItem,
+    watchlistStorageKey,
+    [],
+    maxPersistedJsonCharacters,
+  );
+  return Array.isArray(parsed)
+    ? parsed.filter(isPlainObject).slice(0, maxWatchlists).map(normalizeWatchlist)
+    : [];
 };
 
 const saveWatchlistsWith = (items, setItem = setLocalStorageItem) => {
-  const normalized = items.filter(isPlainObject).map(normalizeWatchlist);
-  setItem(watchlistStorageKey, JSON.stringify(normalized));
-  return normalized;
+  const normalized = (Array.isArray(items) ? items : [])
+    .filter(isPlainObject)
+    .map(normalizeWatchlist)
+    .slice(0, maxWatchlists);
+  return writeBoundedList(setItem, watchlistStorageKey, normalized, {
+    maxCharacters: maxPersistedJsonCharacters,
+    maxItems: maxWatchlists,
+  });
 };
 
 export const getWatchlists = () => getWatchlistsWith();

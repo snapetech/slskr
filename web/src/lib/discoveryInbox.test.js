@@ -65,4 +65,10 @@ describe('discoveryInbox', () => {
       label: 'Snooze due',
     });
   });
+
+  it('ignores oversized persisted inbox state', () => {
+    localStorage.setItem(discoveryInboxStorageKey, 'x'.repeat(600 * 1024));
+
+    expect(getDiscoveryInboxItems()).toEqual([]);
+  });
 });

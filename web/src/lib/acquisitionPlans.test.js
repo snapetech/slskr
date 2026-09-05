@@ -202,4 +202,10 @@ describe('acquisitionPlans', () => {
       }),
     );
   });
+
+  it('ignores oversized persisted acquisition state', () => {
+    localStorage.setItem(acquisitionPlanStorageKey, 'x'.repeat(600 * 1024));
+
+    expect(getAcquisitionPlans()).toEqual([]);
+  });
 });

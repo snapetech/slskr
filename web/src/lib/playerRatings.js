@@ -2,31 +2,59 @@ import {
   getLocalStorageItem,
   setLocalStorageItem,
 } from './storage';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedObject,
+} from './persistedJson';
 
 export const playerRatingsStorageKey = 'slskr.player.ratings';
 
-const normalizeText = (value = '') => String(value).trim().toLowerCase();
+const maxPlayerRatings = 2_000;
+const maxRatingKeyCharacters = 2_048;
+
+const normalizeText = (value = '') =>
+  String(value).trim().slice(0, maxRatingKeyCharacters).toLowerCase();
 
 const readRatings = () => {
-  try {
-    const parsed = JSON.parse(getLocalStorageItem(playerRatingsStorageKey, '{}'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch {
-    return {};
-  }
+  const parsed = readBoundedJson(
+    getLocalStorageItem,
+    playerRatingsStorageKey,
+    {},
+    maxPersistedJsonCharacters,
+  );
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+  return Object.fromEntries(
+    Object.entries(parsed)
+      .filter(
+        ([key, value]) =>
+          typeof key === 'string' &&
+          key.length <= maxRatingKeyCharacters &&
+          Number.isInteger(Number(value)) &&
+          Number(value) >= 1 &&
+          Number(value) <= 5,
+      )
+      .slice(-maxPlayerRatings),
+  );
 };
 
 const writeRatings = (ratings) => {
-  setLocalStorageItem(playerRatingsStorageKey, JSON.stringify(ratings));
-  return ratings;
+  return writeBoundedObject(
+    setLocalStorageItem,
+    playerRatingsStorageKey,
+    ratings,
+    {
+      maxCharacters: maxPersistedJsonCharacters,
+      maxEntries: maxPlayerRatings,
+    },
+  );
 };
 
 export const getPlayerRatingKey = (track = {}) => {
   if (!track) return '';
-  if (track.contentId) return `content:${track.contentId}`;
-  if (track.streamUrl) return `stream:${track.streamUrl}`;
+  if (track.contentId) return `content:${normalizeText(track.contentId)}`;
+  if (track.streamUrl) return `stream:${normalizeText(track.streamUrl)}`;
 
   const parts = [
     normalizeText(track.artist),

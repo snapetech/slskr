@@ -1,8 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+  writeBoundedObject,
+} from './persistedJson';
 
 export const communityQualitySignalStorageKey = 'slskr.communityQualitySignals';
 export const communityQualityOverrideStorageKey =
   'slskr.communityQualityOverrides';
+
+const maxQualitySignals = 500;
+const maxQualityOverrides = 500;
+const maxQualityTextCharacters = 2_048;
 
 const positiveSignalTypes = new Set([
   'served-verified-content',
@@ -16,7 +26,15 @@ const negativeSignalTypes = new Set([
   'suspicious-candidate',
 ]);
 
-const normalizeUsername = (username = '') => username.trim();
+const normalizeText = (value, fallback = '') => {
+  const text =
+    typeof value === 'string' || typeof value === 'number'
+      ? String(value).trim()
+      : '';
+  return (text || String(fallback)).slice(0, maxQualityTextCharacters);
+};
+
+const normalizeUsername = (username = '') => normalizeText(username);
 
 const getStorage = () => {
   try {
@@ -30,64 +48,80 @@ const readSignals = () => {
   const storage = getStorage();
   if (!storage) return [];
 
-  try {
-    const parsed = JSON.parse(
-      storage.getItem(communityQualitySignalStorageKey) || '[]',
-    );
-    return Array.isArray(parsed)
-      ? parsed.filter(
+  const parsed = readBoundedJson(
+    (key, fallback) => storage.getItem(key) || fallback,
+    communityQualitySignalStorageKey,
+    [],
+    maxPersistedJsonCharacters,
+  );
+  return Array.isArray(parsed)
+    ? parsed
+        .filter(
           (signal) =>
             signal && typeof signal === 'object' && !Array.isArray(signal),
         )
-      : [];
-  } catch (_error) {
-    return [];
-  }
+        .slice(-maxQualitySignals)
+        .map(normalizeSignal)
+        .filter((signal) => signal.username)
+    : [];
 };
 
 const readOverrides = () => {
   const storage = getStorage();
   if (!storage) return {};
 
-  try {
-    const parsed = JSON.parse(
-      storage.getItem(communityQualityOverrideStorageKey) || '{}',
-    );
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch (_error) {
-    return {};
-  }
+  const parsed = readBoundedJson(
+    (key, fallback) => storage.getItem(key) || fallback,
+    communityQualityOverrideStorageKey,
+    {},
+    maxPersistedJsonCharacters,
+  );
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+  return Object.fromEntries(
+    Object.entries(parsed)
+      .map(([username, override]) => [normalizeUsername(username), normalizeOverride(override)])
+      .filter(([username]) => username)
+      .slice(-maxQualityOverrides),
+  );
 };
 
 const writeSignals = (signals) => {
   const storage = getStorage();
   if (!storage) return signals;
 
-  try {
-    storage.setItem(communityQualitySignalStorageKey, JSON.stringify(signals));
-  } catch (_error) {
-    return signals;
-  }
-  return signals;
+  return writeBoundedList(
+    (key, value) => storage.setItem(key, value),
+    communityQualitySignalStorageKey,
+    signals,
+    {
+      maxCharacters: maxPersistedJsonCharacters,
+      maxItems: maxQualitySignals,
+    },
+  );
 };
 
 const writeOverrides = (overrides) => {
   const storage = getStorage();
   if (!storage) return overrides;
 
-  try {
-    storage.setItem(communityQualityOverrideStorageKey, JSON.stringify(overrides));
-  } catch (_error) {
-    return overrides;
-  }
-  return overrides;
+  return writeBoundedObject(
+    (key, value) => storage.setItem(key, value),
+    communityQualityOverrideStorageKey,
+    overrides,
+    {
+      maxCharacters: maxPersistedJsonCharacters,
+      maxEntries: maxQualityOverrides,
+    },
+  );
 };
 
-const normalizeSignal = (signal) => {
-  const username = normalizeUsername(signal.username);
-  const type = signal.type || 'suspicious-candidate';
+const normalizeSignal = (signal = {}) => {
+  const sourceSignal = signal && typeof signal === 'object' && !Array.isArray(signal)
+    ? signal
+    : {};
+  const username = normalizeUsername(sourceSignal.username);
+  const type = normalizeText(sourceSignal.type) || 'suspicious-candidate';
   const category = positiveSignalTypes.has(type)
     ? 'positive'
     : negativeSignalTypes.has(type)
@@ -96,12 +130,10 @@ const normalizeSignal = (signal) => {
 
   return {
     category,
-    createdAt: signal.createdAt || new Date().toISOString(),
-    id:
-      signal.id ||
-      `quality-${uuidv4()}`,
-    reason: (signal.reason || '').trim(),
-    source: signal.source || 'local-review',
+    createdAt: normalizeText(sourceSignal.createdAt, new Date().toISOString()),
+    id: normalizeText(sourceSignal.id, `quality-${uuidv4()}`),
+    reason: normalizeText(sourceSignal.reason),
+    source: normalizeText(sourceSignal.source, 'local-review'),
     type,
     username,
   };
@@ -138,12 +170,18 @@ export const clearCommunityQualitySignalsForUser = (username) => {
 const normalizeOverrideMode = (mode) =>
   ['ignore', 'trust', 'caution'].includes(mode) ? mode : 'ignore';
 
-const normalizeOverride = (override = {}) => ({
-  createdAt: override.createdAt || new Date().toISOString(),
-  mode: normalizeOverrideMode(override.mode),
-  note: (override.note || '').trim(),
-  source: override.source || 'local-review',
-});
+const normalizeOverride = (override = {}) => {
+  const sourceOverride =
+    override && typeof override === 'object' && !Array.isArray(override)
+      ? override
+      : {};
+  return {
+    createdAt: normalizeText(sourceOverride.createdAt, new Date().toISOString()),
+    mode: normalizeOverrideMode(sourceOverride.mode),
+    note: normalizeText(sourceOverride.note),
+    source: normalizeText(sourceOverride.source, 'local-review'),
+  };
+};
 
 export const getCommunityQualityOverrides = () => readOverrides();
 

@@ -484,4 +484,10 @@ describe('playlistIntake', () => {
     [playlist] = getPlaylistIntakes();
     expect(playlist.organizationApproval).toBeNull();
   });
+
+  it('ignores oversized persisted playlist state', () => {
+    localStorage.setItem(playlistIntakeStorageKey, 'x'.repeat(1_100 * 1024));
+
+    expect(getPlaylistIntakes()).toEqual([]);
+  });
 });

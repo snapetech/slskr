@@ -193,4 +193,10 @@ describe('watchlists', () => {
       total: 2,
     });
   });
+
+  it('ignores oversized persisted watchlist state', () => {
+    localStorage.setItem('slskr.watchlists.items', 'x'.repeat(600 * 1024));
+
+    expect(getWatchlists()).toEqual([]);
+  });
 });

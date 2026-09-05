@@ -1,4 +1,9 @@
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
 import { v4 as uuidv4 } from 'uuid';
 
 export const discoveryInboxStorageKey = 'slskr.discoveryInbox.items';
@@ -16,6 +21,9 @@ export const discoveryInboxStates = [
 
 export const defaultDiscoveryInboxState = 'Suggested';
 
+const maxDiscoveryInboxItems = 500;
+const maxDiscoveryInboxTextCharacters = 2_048;
+
 const now = () => new Date().toISOString();
 const daysFromNow = (days, timestamp = Date.now()) =>
   new Date(timestamp + days * 24 * 60 * 60 * 1_000).toISOString();
@@ -23,48 +31,74 @@ const daysFromNow = (days, timestamp = Date.now()) =>
 const normalizeState = (state) =>
   discoveryInboxStates.includes(state) ? state : defaultDiscoveryInboxState;
 
-const normalizeItem = (item) => {
+const normalizeText = (value, fallback = '') =>
+  (typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback)
+    .trim()
+    .slice(0, maxDiscoveryInboxTextCharacters);
+
+const normalizeItem = (item = {}) => {
+  const sourceItem = item && typeof item === 'object' && !Array.isArray(item)
+    ? item
+    : {};
   const timestamp = now();
+  const title = normalizeText(
+    sourceItem.title || sourceItem.searchText,
+    'Untitled discovery',
+  );
 
   return {
-    acquisitionProfile: item.acquisitionProfile || 'lossless-exact',
-    createdAt: item.createdAt || timestamp,
-    evidenceKey: item.evidenceKey || item.title || item.searchText || uuidv4(),
-    id: item.id || uuidv4(),
-    networkImpact: item.networkImpact || 'Manual review; no network request until approved.',
-    reason: item.reason || 'Manual discovery suggestion.',
-    searchText: item.searchText || item.title || '',
-    source: item.source || 'Manual',
-    sourceId: item.sourceId || '',
-    state: normalizeState(item.state),
-    snoozedUntil: item.snoozedUntil || '',
-    title: item.title || item.searchText || 'Untitled discovery',
-    updatedAt: item.updatedAt || timestamp,
+    acquisitionProfile: normalizeText(sourceItem.acquisitionProfile, 'lossless-exact'),
+    createdAt: normalizeText(sourceItem.createdAt, timestamp),
+    evidenceKey: normalizeText(
+      sourceItem.evidenceKey || title || sourceItem.searchText,
+      uuidv4(),
+    ),
+    id: normalizeText(sourceItem.id, uuidv4()),
+    networkImpact: normalizeText(
+      sourceItem.networkImpact,
+      'Manual review; no network request until approved.',
+    ),
+    reason: normalizeText(sourceItem.reason, 'Manual discovery suggestion.'),
+    searchText: normalizeText(sourceItem.searchText || title),
+    source: normalizeText(sourceItem.source, 'Manual'),
+    sourceId: normalizeText(sourceItem.sourceId),
+    state: normalizeState(sourceItem.state),
+    snoozedUntil: normalizeText(sourceItem.snoozedUntil),
+    title,
+    updatedAt: normalizeText(sourceItem.updatedAt, timestamp),
   };
 };
 
 export const getDiscoveryInboxItems = (getItem = getLocalStorageItem) => {
-  try {
-    const parsed = JSON.parse(getItem(discoveryInboxStorageKey, '[]'));
-    return Array.isArray(parsed)
-      ? parsed
-          .filter(
-            (item) => item && typeof item === 'object' && !Array.isArray(item),
-          )
-          .map(normalizeItem)
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = readBoundedJson(
+    getItem,
+    discoveryInboxStorageKey,
+    [],
+    maxPersistedJsonCharacters,
+  );
+  return Array.isArray(parsed)
+    ? parsed
+        .filter(
+          (item) => item && typeof item === 'object' && !Array.isArray(item),
+        )
+        .slice(0, maxDiscoveryInboxItems)
+        .map(normalizeItem)
+    : [];
 };
 
 export const saveDiscoveryInboxItems = (
   items,
   setItem = setLocalStorageItem,
 ) => {
-  const normalized = items.map(normalizeItem);
-  setItem(discoveryInboxStorageKey, JSON.stringify(normalized));
-  return normalized;
+  const normalized = (Array.isArray(items) ? items : [])
+    .map(normalizeItem)
+    .slice(0, maxDiscoveryInboxItems);
+  return writeBoundedList(setItem, discoveryInboxStorageKey, normalized, {
+    maxCharacters: maxPersistedJsonCharacters,
+    maxItems: maxDiscoveryInboxItems,
+  });
 };
 
 export const addDiscoveryInboxItem = (
@@ -168,7 +202,7 @@ export const bulkUpdateDiscoveryInboxItems = (
     setItem = setLocalStorageItem,
   } = {},
 ) => {
-  const idSet = new Set(ids);
+  const idSet = new Set(Array.isArray(ids) ? ids : []);
   const nextState = normalizeState(state);
   const updated = getDiscoveryInboxItems(getItem).map((item) =>
     idSet.has(item.id)

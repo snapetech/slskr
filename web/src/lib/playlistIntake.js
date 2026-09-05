@@ -3,6 +3,10 @@
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
+import {
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
 import { scoreMetadataCandidate } from './metadataMatcher';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -81,7 +85,23 @@ export const replayGainPolicies = [
   },
 ];
 
+const maxPlaylistIntakes = 100;
+const maxPlaylistTracks = 5_000;
+const maxPlaylistTextCharacters = 2_048;
+const maxPlaylistSourceCharacters = 1 * 1024 * 1024;
+const maxPlaylistStorageCharacters = 1 * 1024 * 1024;
+
 const now = () => new Date().toISOString();
+
+const normalizeText = (value, fallback = '') =>
+  (typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback)
+    .trim()
+    .slice(0, maxPlaylistTextCharacters);
+
+const normalizeContent = (value) =>
+  (typeof value === 'string' ? value : '').trim().slice(0, maxPlaylistSourceCharacters);
 
 const isPlainObject = (value) =>
   value && typeof value === 'object' && !Array.isArray(value);
@@ -116,7 +136,7 @@ const normalizeOptionValue = (value, options, fallback) =>
 const normalizeOrganizationOptions = (options = {}) => {
   const safeOptions = isPlainObject(options) ? options : {};
   return {
-    albumTitle: safeOptions.albumTitle || '',
+    albumTitle: normalizeText(safeOptions.albumTitle),
     coverArtPolicy: normalizeOptionValue(safeOptions.coverArtPolicy, coverArtPolicies, 'sidecar'),
     multiArtistPolicy: normalizeOptionValue(
       safeOptions.multiArtistPolicy,
@@ -160,95 +180,123 @@ const parseTextLine = (line) => {
 };
 
 const parsePlaylistRows = (content = '') => {
-  const rows = content
+  const boundedContent = normalizeContent(content);
+  const rows = boundedContent
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
 
-  return rows.map((line, index) => {
+  return rows.slice(0, maxPlaylistTracks).map((line, index) => {
     const parsed = line.includes(',') ? parseCsvLine(line) : parseTextLine(line);
     const title = parsed.title || line;
 
     return {
-      artist: parsed.artist,
+      artist: normalizeText(parsed.artist),
       id: uuidv4(),
       lineNumber: index + 1,
-      sourceLine: line,
+      sourceLine: normalizeText(line),
       state: parsed.artist && title ? 'Matched' : 'Unmatched',
-      title,
+      title: normalizeText(title, 'Untitled track'),
     };
   });
 };
 
-const normalizeTrack = (track = {}, index = 0) => ({
-  artist: track.artist || '',
-  contentId: track.contentId || '',
-  durationMs: track.durationMs || null,
-  id: track.id || uuidv4(),
-  lineNumber: track.lineNumber || index + 1,
-  metadataMatch: track.metadataMatch || null,
-  sourceLine: track.sourceLine || track.title || '',
-  state: ['Matched', 'Rejected', 'Unmatched'].includes(track.state)
-    ? track.state
+const boundedObject = (value) => {
+  if (!isPlainObject(value)) return null;
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length <= 16 * 1024 ? JSON.parse(serialized) : null;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeTrack = (track = {}, index = 0) => {
+  const sourceTrack = isPlainObject(track) ? track : {};
+  const duration = Number(sourceTrack.durationMs);
+  const lineNumber = Number(sourceTrack.lineNumber);
+  return {
+  artist: normalizeText(sourceTrack.artist),
+  contentId: normalizeText(sourceTrack.contentId),
+  durationMs: Number.isFinite(duration) && duration >= 0 ? duration : null,
+  id: normalizeText(sourceTrack.id, uuidv4()),
+  lineNumber: Number.isInteger(lineNumber) && lineNumber > 0 ? lineNumber : index + 1,
+  metadataMatch: boundedObject(sourceTrack.metadataMatch),
+  sourceLine: normalizeText(sourceTrack.sourceLine || sourceTrack.title),
+  state: ['Matched', 'Rejected', 'Unmatched'].includes(sourceTrack.state)
+    ? sourceTrack.state
     : 'Unmatched',
-  title: track.title || track.sourceLine || 'Untitled track',
-});
+  title: normalizeText(sourceTrack.title || sourceTrack.sourceLine, 'Untitled track'),
+  };
+};
 
 const normalizePlaylist = (playlist = {}) => {
+  const sourcePlaylist = isPlainObject(playlist) ? playlist : {};
   const timestamp = now();
-  const tracks = Array.isArray(playlist.tracks)
-    ? playlist.tracks.filter(isPlainObject).map(normalizeTrack)
-    : parsePlaylistRows(playlist.content);
+  const tracks = Array.isArray(sourcePlaylist.tracks)
+    ? sourcePlaylist.tracks
+        .filter(isPlainObject)
+        .slice(0, maxPlaylistTracks)
+        .map(normalizeTrack)
+    : parsePlaylistRows(sourcePlaylist.content);
 
   return {
-    createdAt: playlist.createdAt || timestamp,
-    id: playlist.id || uuidv4(),
-    mirrorEnabled: playlist.mirrorEnabled === true,
-    name: playlist.name || 'Untitled playlist',
-    organizationApproval: playlist.organizationApproval || null,
-    organizationOptions: normalizeOrganizationOptions(playlist.organizationOptions),
-    organizationPlan: playlist.organizationPlan || null,
-    provider: playlist.provider || inferProvider(playlist.source || playlist.name || ''),
+    createdAt: normalizeText(sourcePlaylist.createdAt, timestamp),
+    id: normalizeText(sourcePlaylist.id, uuidv4()),
+    mirrorEnabled: sourcePlaylist.mirrorEnabled === true,
+    name: normalizeText(sourcePlaylist.name, 'Untitled playlist'),
+    organizationApproval: boundedObject(sourcePlaylist.organizationApproval),
+    organizationOptions: normalizeOrganizationOptions(sourcePlaylist.organizationOptions),
+    organizationPlan: boundedObject(sourcePlaylist.organizationPlan),
+    provider: normalizeText(
+      sourcePlaylist.provider || inferProvider(sourcePlaylist.source || sourcePlaylist.name || ''),
+    ),
     providerRefreshLimit: Math.min(
-      Math.max(Number.parseInt(playlist.providerRefreshLimit, 10) || 500, 1),
+      Math.max(Number.parseInt(sourcePlaylist.providerRefreshLimit, 10) || 500, 1),
       5_000,
     ),
     refreshAutomationEnabled:
-      playlist.mirrorEnabled === true && playlist.refreshAutomationEnabled === true,
+      sourcePlaylist.mirrorEnabled === true && sourcePlaylist.refreshAutomationEnabled === true,
     refreshCadence: normalizeRefreshCadence(
-      playlist.refreshCadence,
-      playlist.mirrorEnabled === true,
+      sourcePlaylist.refreshCadence,
+      sourcePlaylist.mirrorEnabled === true,
     ),
-    refreshCollectionId: playlist.refreshCollectionId || '',
-    refreshCooldownDays: normalizeCooldownDays(playlist.refreshCooldownDays),
-    refreshDiff: playlist.refreshDiff || null,
-    refreshLastRunAt: playlist.refreshLastRunAt || '',
-    refreshNextRunAt: playlist.refreshNextRunAt || '',
+    refreshCollectionId: normalizeText(sourcePlaylist.refreshCollectionId),
+    refreshCooldownDays: normalizeCooldownDays(sourcePlaylist.refreshCooldownDays),
+    refreshDiff: boundedObject(sourcePlaylist.refreshDiff),
+    refreshLastRunAt: normalizeText(sourcePlaylist.refreshLastRunAt),
+    refreshNextRunAt: normalizeText(sourcePlaylist.refreshNextRunAt),
     refreshPreview:
-      playlist.refreshPreview ||
+      normalizeText(sourcePlaylist.refreshPreview) ||
       'Refresh preview only; no provider fetch, Soulseek search, peer browse, or download has started.',
-    source: playlist.source || 'Pasted text',
-    state: normalizeState(playlist.state),
+    source: normalizeText(sourcePlaylist.source, 'Pasted text'),
+    state: normalizeState(sourcePlaylist.state),
     tracks,
-    updatedAt: playlist.updatedAt || timestamp,
+    updatedAt: normalizeText(sourcePlaylist.updatedAt, timestamp),
   };
 };
 
 const readPlaylists = (getItem = getLocalStorageItem) => {
-  try {
-    const parsed = JSON.parse(getItem(playlistIntakeStorageKey, '[]'));
-    return Array.isArray(parsed)
-      ? parsed.filter(isPlainObject).map(normalizePlaylist)
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = readBoundedJson(
+    getItem,
+    playlistIntakeStorageKey,
+    [],
+    maxPlaylistStorageCharacters,
+  );
+  return Array.isArray(parsed)
+    ? parsed.filter(isPlainObject).slice(0, maxPlaylistIntakes).map(normalizePlaylist)
+    : [];
 };
 
 const savePlaylists = (playlists, setItem = setLocalStorageItem) => {
-  const normalized = playlists.filter(isPlainObject).map(normalizePlaylist);
-  setItem(playlistIntakeStorageKey, JSON.stringify(normalized));
-  return normalized;
+  const normalized = (Array.isArray(playlists) ? playlists : [])
+    .filter(isPlainObject)
+    .slice(0, maxPlaylistIntakes)
+    .map(normalizePlaylist);
+  return writeBoundedList(setItem, playlistIntakeStorageKey, normalized, {
+    maxCharacters: maxPlaylistStorageCharacters,
+    maxItems: maxPlaylistIntakes,
+  });
 };
 
 export const getPlaylistIntakes = () => readPlaylists();

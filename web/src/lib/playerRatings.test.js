@@ -68,4 +68,10 @@ describe('playerRatings', () => {
     expect(getPlayerRatingKey(null)).toBe('');
     expect(getPlayerRating(null)).toBe(0);
   });
+
+  it('ignores oversized persisted rating state', () => {
+    window.localStorage.setItem(playerRatingsStorageKey, 'x'.repeat(600 * 1024));
+
+    expect(getPlayerRating({ contentId: 'sha256:fixture-track' })).toBe(0);
+  });
 });
