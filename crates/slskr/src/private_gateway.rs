@@ -811,7 +811,7 @@ impl Gateway {
             }
             if !self
                 .overlay_rate_limiter
-                .check_message(&received.1.to_string())
+                .check_message(&overlay_datagram_limiter_id(received.1))
                 .allowed
             {
                 continue;
@@ -1268,6 +1268,10 @@ fn prune_quic_proxy_sessions(sessions: &mut HashMap<SocketAddr, QuicProxySession
 
 fn is_dht_packet(buffer: &[u8]) -> bool {
     buffer.first().copied() == Some(b'd')
+}
+
+fn overlay_datagram_limiter_id(remote: SocketAddr) -> String {
+    remote.ip().to_string()
 }
 
 /// Return DHT responses from mainline's internal socket through the public
@@ -2897,6 +2901,7 @@ fn write_secret(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mesh_security::OVERLAY_MAX_MESSAGES_PER_SECOND;
 
     fn temporary_directory(label: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -3139,6 +3144,38 @@ mod tests {
         assert!(global_gate
             .try_acquire("203.0.64.1:50305".parse().unwrap())
             .is_none());
+    }
+
+    #[test]
+    fn overlay_udp_limiter_identity_is_scoped_to_source_ip() {
+        let limiter = OverlayRateLimiter::new();
+        for port in 1..=OVERLAY_MAX_MESSAGES_PER_SECOND {
+            assert!(
+                limiter
+                    .check_message(&super::overlay_datagram_limiter_id(SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::LOCALHOST),
+                        port as u16,
+                    )))
+                    .allowed,
+                "source-port rotation must not bypass the UDP message budget"
+            );
+        }
+        assert!(
+            !limiter
+                .check_message(&super::overlay_datagram_limiter_id(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    65_535,
+                )))
+                .allowed
+        );
+        assert_eq!(
+            super::overlay_datagram_limiter_id(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1,)
+            ),
+            super::overlay_datagram_limiter_id(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 2,)
+            )
+        );
     }
 
     #[test]
