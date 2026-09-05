@@ -1,6 +1,7 @@
 import * as collectionsAPI from '../../lib/collections';
 import { toDisplayError } from '../../lib/errors';
 import * as identityAPI from '../../lib/identity';
+import { readOptionalApiResponse } from '../../lib/optionalApi';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
 import TooltipButton from '../Shared/TooltipButton';
@@ -101,25 +102,8 @@ export default class ShareGroups extends Component {
         this.setState({ error: null, loading: true });
       }
       const [groupsRes, contactsRes] = await Promise.all([
-        collectionsAPI.getShareGroups().catch((error) => {
-          // If 401/403/404, feature not enabled or not authenticated - return empty list
-          // 400 errors might have useful messages, so let them through
-          if (
-            error?.response?.status === 401 ||
-            error?.response?.status === 403 ||
-            error?.response?.status === 404
-          ) {
-            return { data: [] };
-          }
-
-          throw error;
-        }),
-        identityAPI.getContacts().catch((error) => {
-          if ([401, 403, 404].includes(error?.response?.status)) {
-            return { data: [] };
-          }
-          throw error;
-        }),
+        readOptionalApiResponse(() => collectionsAPI.getShareGroups()),
+        readOptionalApiResponse(() => identityAPI.getContacts()),
       ]);
       if (this.isMountedFlag && requestId === this.requestIds.data) {
         this.setState({
@@ -133,16 +117,9 @@ export default class ShareGroups extends Component {
         });
       }
     } catch (error) {
-      // Only suppress errors for 401/403/404 (auth/feature disabled)
-      const isAuthOrFeatureError =
-        error?.response?.status === 401 ||
-        error?.response?.status === 403 ||
-        error?.response?.status === 404;
       if (this.isMountedFlag && requestId === this.requestIds.data) {
         this.setState({
-          error: isAuthOrFeatureError
-            ? null
-            : toDisplayError(error, 'Failed to load share groups'),
+          error: toDisplayError(error, 'Failed to load share groups'),
           loading: false,
         });
       }

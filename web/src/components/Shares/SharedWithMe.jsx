@@ -1,5 +1,6 @@
 import * as collectionsAPI from '../../lib/collections';
 import { toDisplayError } from '../../lib/errors';
+import { readOptionalApiResponse } from '../../lib/optionalApi';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
 import React, { Component } from 'react';
@@ -15,9 +16,6 @@ import {
   Segment,
   Table,
 } from 'semantic-ui-react';
-
-const isAuthOrFeatureErrorStatus = (status) =>
-  status === 401 || status === 403 || status === 404 || status === 400;
 
 const asRecords = (value) =>
   (Array.isArray(value) ? value : []).filter(
@@ -90,12 +88,9 @@ export default class SharedWithMe extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.load) {
         this.setState({ error: null, loading: true });
       }
-      const sharesRes = await collectionsAPI.getIncomingShares().catch((error) => {
-        if (isAuthOrFeatureErrorStatus(error?.response?.status)) {
-          return { data: [] };
-        }
-        throw error;
-      });
+      const sharesRes = await readOptionalApiResponse(
+        () => collectionsAPI.getIncomingShares(),
+      );
       if (this.isMountedFlag && requestId === this.requestIds.load) {
         this.setState({
           loading: false,
@@ -105,9 +100,7 @@ export default class SharedWithMe extends Component {
     } catch (error) {
       if (this.isMountedFlag && requestId === this.requestIds.load) {
         this.setState({
-          error: isAuthOrFeatureErrorStatus(error?.response?.status)
-            ? null
-            : toDisplayError(error),
+          error: toDisplayError(error, 'Failed to load shared collections'),
           loading: false,
         });
       }

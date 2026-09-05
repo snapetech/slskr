@@ -1,5 +1,6 @@
 import * as collectionsAPI from '../../lib/collections';
 import { toDisplayError } from '../../lib/errors';
+import { readOptionalApiResponse } from '../../lib/optionalApi';
 import PlayCollectionItemButton from '../Player/PlayCollectionItemButton';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
@@ -84,17 +85,7 @@ export default class Collections extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({ error: null, loading: true });
       }
-      const response = await collectionsAPI.getCollections().catch((error) => {
-        if (
-          error?.response?.status === 401 ||
-          error?.response?.status === 403 ||
-          error?.response?.status === 404
-        ) {
-          return { data: [] };
-        }
-
-        throw error;
-      });
+      const response = await readOptionalApiResponse(() => collectionsAPI.getCollections());
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({
           collections: Array.isArray(response.data) ? response.data : [],
@@ -104,13 +95,9 @@ export default class Collections extends Component {
     } catch (error) {
       const errorMessage = toDisplayError(error, 'Failed to load collections');
 
-      const isAuthOrFeatureError =
-        error?.response?.status === 401 ||
-        error?.response?.status === 403 ||
-        error?.response?.status === 404;
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({
-          error: isAuthOrFeatureError ? null : errorMessage,
+          error: errorMessage,
           loading: false,
         });
       }
@@ -123,17 +110,7 @@ export default class Collections extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
         this.setState({ shareGroupsLoading: true });
       }
-      const response = await collectionsAPI.getShareGroups().catch((error) => {
-        if (
-          error?.response?.status === 401 ||
-          error?.response?.status === 403 ||
-          error?.response?.status === 404
-        ) {
-          return { data: [] };
-        }
-
-        throw error;
-      });
+      const response = await readOptionalApiResponse(() => collectionsAPI.getShareGroups());
       const shareGroups = Array.isArray(response.data) ? response.data : [];
       if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
         this.setState((previousState) => ({
@@ -143,9 +120,12 @@ export default class Collections extends Component {
           shareGroupsLoading: false,
         }));
       }
-    } catch {
+    } catch (error) {
       if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
-        this.setState({ shareGroups: [], shareGroupsLoading: false });
+        this.setState({
+          error: toDisplayError(error, 'Failed to load share groups'),
+          shareGroupsLoading: false,
+        });
       }
     }
   };
@@ -160,27 +140,20 @@ export default class Collections extends Component {
         return;
       }
 
-      const response = await collectionsAPI
-        .getSharesByCollection(collectionId)
-        .catch((error) => {
-          if (
-            error?.response?.status === 401 ||
-            error?.response?.status === 403 ||
-            error?.response?.status === 404
-          ) {
-            return { data: [] };
-          }
-
-          throw error;
-        });
+      const response = await readOptionalApiResponse(
+        () => collectionsAPI.getSharesByCollection(collectionId),
+      );
       if (this.isMountedFlag && requestId === this.requestIds.shares) {
         this.setState({
           shares: Array.isArray(response.data) ? response.data : [],
         });
       }
-    } catch {
+    } catch (error) {
       if (this.isMountedFlag && requestId === this.requestIds.shares) {
-        this.setState({ shares: [] });
+        this.setState({
+          error: toDisplayError(error, 'Failed to load collection shares'),
+          shares: [],
+        });
       }
     }
   };
@@ -200,7 +173,15 @@ export default class Collections extends Component {
         });
       }
     } catch (error) {
-      console.error('[Collections] Error loading items:', error);
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.collectionItems
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to load collection items'),
+          selectedCollectionItems: [],
+        });
+      }
     }
   };
 
@@ -301,7 +282,12 @@ export default class Collections extends Component {
   handleSelectCollection = async (collection) => {
     const selectionId = ++this.requestIds.selection;
     if (!this.isMountedFlag) return;
-    this.setState({ selectedCollection: collection });
+    this.setState({
+      error: null,
+      selectedCollection: collection,
+      selectedCollectionItems: [],
+      shares: [],
+    });
     await this.loadCollectionItems(collection.id);
     if (
       !this.isMountedFlag ||
@@ -345,7 +331,11 @@ export default class Collections extends Component {
     } catch (error) {
       console.error('[Collections] Search error:', error);
       if (this.isMountedFlag && requestId === this.requestIds.search) {
-        this.setState({ itemSearchLoading: false, itemSearchResults: [] });
+        this.setState({
+          error: toDisplayError(error, 'Failed to search library items'),
+          itemSearchLoading: false,
+          itemSearchResults: [],
+        });
       }
     }
   };
