@@ -7,6 +7,9 @@ use slskr_client::protocol::peer::FileEntry;
 use slskr_client::protocol::{Reader, Writer};
 use slskr_client::share_payload::{compress_zlib_payload, decompress_zlib_payload};
 
+const MAX_PARSED_SHARE_FOLDERS: usize = 20_000;
+const MAX_PARSED_SHARE_FILES: usize = 20_000;
+
 // ============================================================================
 // Shared Files and Transfer Capacity
 // ============================================================================
@@ -141,7 +144,13 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
     let folder_count = reader
         .read_bounded_count("shared folders", 8)
         .map_err(|e| format!("cannot read folder count: {e}"))?;
+    if folder_count > MAX_PARSED_SHARE_FOLDERS {
+        return Err(format!(
+            "shared folders exceeds {MAX_PARSED_SHARE_FOLDERS} entries"
+        ));
+    }
     let mut entries = Vec::new();
+    let mut parsed_files = 0;
 
     for _ in 0..folder_count {
         let _ = reader
@@ -150,6 +159,12 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
         let file_count = reader
             .read_bounded_count("shared files", 21)
             .map_err(|e| format!("cannot read file count: {e}"))?;
+        if file_count > MAX_PARSED_SHARE_FILES.saturating_sub(parsed_files) {
+            return Err(format!(
+                "shared files exceeds {MAX_PARSED_SHARE_FILES} entries"
+            ));
+        }
+        parsed_files += file_count;
 
         for _ in 0..file_count {
             let code = reader
@@ -233,6 +248,11 @@ pub fn parse_folder_file_list_payload(
     let folder_count = reader
         .read_bounded_count("folder names", 4)
         .map_err(|e| format!("cannot read folder count: {e}"))?;
+    if folder_count > MAX_PARSED_SHARE_FOLDERS {
+        return Err(format!(
+            "folder names exceeds {MAX_PARSED_SHARE_FOLDERS} entries"
+        ));
+    }
     let mut folders = Vec::new();
     for _ in 0..folder_count {
         let folder = reader
@@ -243,6 +263,11 @@ pub fn parse_folder_file_list_payload(
     let file_count = reader
         .read_bounded_count("folder files", 21)
         .map_err(|e| format!("cannot read file count: {e}"))?;
+    if file_count > MAX_PARSED_SHARE_FILES {
+        return Err(format!(
+            "folder files exceeds {MAX_PARSED_SHARE_FILES} entries"
+        ));
+    }
     let mut entries = Vec::new();
     for _ in 0..file_count {
         let code = reader

@@ -97,6 +97,12 @@ for anchor in \
   'user_store_rejects_new_records_at_limit_but_updates_existing_users' \
   'MAX_BROWSE_RECORDS' \
   'MAX_BROWSE_ENTRIES_PER_USER' \
+  'MAX_BROWSE_WIRE_SECTIONS_PER_RESPONSE' \
+  'MAX_BROWSE_WIRE_FOLDERS_PER_RESPONSE' \
+  'MAX_BROWSE_WIRE_FILES_PER_RESPONSE' \
+  'shared_file_list_payload_rejects_excessive_wire_records_without_entries' \
+  'shared_file_list_payload_rejects_excessive_sections_without_files' \
+  'folder_browse_parsers_reject_excessive_wire_records' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

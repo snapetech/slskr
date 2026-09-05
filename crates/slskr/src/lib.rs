@@ -522,6 +522,9 @@ const MAX_USER_USERNAME_BYTES: usize = 1024;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
 const MAX_TOTAL_BROWSE_ENTRIES: usize = 50_000;
+const MAX_BROWSE_WIRE_SECTIONS_PER_RESPONSE: usize = 64;
+const MAX_BROWSE_WIRE_FOLDERS_PER_RESPONSE: usize = 20_000;
+const MAX_BROWSE_WIRE_FILES_PER_RESPONSE: usize = 20_000;
 const MAX_BROWSE_USERNAME_BYTES: usize = 1024;
 const MAX_BROWSE_FILENAME_BYTES: usize = 4 * 1024;
 const MAX_BROWSE_EXTENSION_BYTES: usize = 256;
@@ -85732,6 +85735,14 @@ fn parse_folder_contents_response_payload(
     let directory_count = reader
         .read_bounded_count("folder directories", 8)
         .map_err(|error| error.to_string())?;
+    let mut wire_folder_count = 0;
+    add_browse_wire_count(
+        &mut wire_folder_count,
+        directory_count,
+        "folder directories",
+        MAX_BROWSE_WIRE_FOLDERS_PER_RESPONSE,
+    )?;
+    let mut wire_file_count = 0;
     let mut entries = Vec::new();
     for _ in 0..directory_count {
         let (directory, directory_encoding) = reader
@@ -85740,6 +85751,12 @@ fn parse_folder_contents_response_payload(
         let file_count = reader
             .read_bounded_count("folder files", 21)
             .map_err(|error| error.to_string())?;
+        add_browse_wire_count(
+            &mut wire_file_count,
+            file_count,
+            "folder files",
+            MAX_BROWSE_WIRE_FILES_PER_RESPONSE,
+        )?;
         for _ in 0..file_count {
             let code = reader.read_u8().map_err(|error| error.to_string())?;
             let (filename, filename_encoding) = reader
@@ -92613,9 +92630,25 @@ fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<BrowseEntry>, St
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
     let mut entries = Vec::new();
-    parse_shared_file_list_section(&mut reader, &mut entries)?;
-    while !reader.is_empty() {
-        parse_shared_file_list_section(&mut reader, &mut entries)?;
+    let mut wire_section_count = 0;
+    let mut wire_folder_count = 0;
+    let mut wire_file_count = 0;
+    loop {
+        if wire_section_count >= MAX_BROWSE_WIRE_SECTIONS_PER_RESPONSE {
+            return Err(format!(
+                "shared file list exceeds {MAX_BROWSE_WIRE_SECTIONS_PER_RESPONSE} sections"
+            ));
+        }
+        wire_section_count += 1;
+        parse_shared_file_list_section(
+            &mut reader,
+            &mut entries,
+            &mut wire_folder_count,
+            &mut wire_file_count,
+        )?;
+        if reader.is_empty() {
+            break;
+        }
     }
     Ok(entries)
 }
@@ -92623,10 +92656,18 @@ fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<BrowseEntry>, St
 fn parse_shared_file_list_section(
     reader: &mut Reader<'_>,
     entries: &mut Vec<BrowseEntry>,
+    wire_folder_count: &mut usize,
+    wire_file_count: &mut usize,
 ) -> Result<(), String> {
     let folder_count = reader
         .read_bounded_count("shared folders", 8)
         .map_err(|error| error.to_string())?;
+    add_browse_wire_count(
+        wire_folder_count,
+        folder_count,
+        "shared folders",
+        MAX_BROWSE_WIRE_FOLDERS_PER_RESPONSE,
+    )?;
     for _ in 0..folder_count {
         let (folder, folder_encoding) = reader
             .read_string_with_encoding()
@@ -92634,6 +92675,12 @@ fn parse_shared_file_list_section(
         let file_count = reader
             .read_bounded_count("shared files", 21)
             .map_err(|error| error.to_string())?;
+        add_browse_wire_count(
+            wire_file_count,
+            file_count,
+            "shared files",
+            MAX_BROWSE_WIRE_FILES_PER_RESPONSE,
+        )?;
         for _ in 0..file_count {
             let code = reader.read_u8().map_err(|error| error.to_string())?;
             let (filename, filename_encoding) = reader
@@ -92682,6 +92729,11 @@ fn parse_folder_file_list_payload(
     let file_count = reader
         .read_bounded_count("folder files", 21)
         .map_err(|error| error.to_string())?;
+    if file_count > MAX_BROWSE_WIRE_FILES_PER_RESPONSE {
+        return Err(format!(
+            "folder files exceeds {MAX_BROWSE_WIRE_FILES_PER_RESPONSE} entries"
+        ));
+    }
     let mut entries = Vec::new();
     for _ in 0..file_count {
         let code = reader.read_u8().map_err(|error| error.to_string())?;
@@ -92719,6 +92771,19 @@ fn parse_folder_file_list_payload(
     }
     reader.finish().map_err(|error| error.to_string())?;
     Ok(entries)
+}
+
+fn add_browse_wire_count(
+    total: &mut usize,
+    additional: usize,
+    field: &str,
+    maximum: usize,
+) -> Result<(), String> {
+    if additional > maximum.saturating_sub(*total) {
+        return Err(format!("{field} exceeds {maximum} entries"));
+    }
+    *total += additional;
+    Ok(())
 }
 
 fn join_virtual_path(folder: &str, filename: &str) -> String {

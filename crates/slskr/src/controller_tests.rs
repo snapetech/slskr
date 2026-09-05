@@ -44674,6 +44674,89 @@ fn shared_file_list_payload_rejects_untrusted_attribute_counts_without_looping()
     assert!(error.contains("shared file attributes"));
 }
 
+#[cfg_attr(test, test)]
+#[cfg(feature = "full-controller-tests")]
+fn shared_file_list_payload_rejects_excessive_wire_records_without_entries() {
+    let file_count = super::MAX_BROWSE_WIRE_FILES_PER_RESPONSE + 1;
+    let mut writer = super::Writer::new();
+    writer.write_u32_le(1);
+    writer.write_string("folder").unwrap();
+    writer.write_u32_le(u32::try_from(file_count).unwrap());
+    for _ in 0..file_count {
+        writer.write_u8(0);
+        writer.write_string("").unwrap();
+        writer.write_u64_le(0);
+        writer.write_string("").unwrap();
+        writer.write_u32_le(0);
+    }
+    let payload = super::compress_zlib_payload(&writer.into_inner()).unwrap();
+
+    let error = super::parse_shared_file_list_payload(&payload)
+        .expect_err("wire record cap should reject discarded records");
+    assert!(error.contains("shared files"), "{error}");
+}
+
+#[cfg_attr(test, test)]
+#[cfg(feature = "full-controller-tests")]
+fn shared_file_list_payload_rejects_excessive_sections_without_files() {
+    let mut raw = Vec::new();
+    for _ in 0..=super::MAX_BROWSE_WIRE_SECTIONS_PER_RESPONSE {
+        raw.extend_from_slice(&0_u32.to_le_bytes());
+    }
+    let payload = super::compress_zlib_payload(&raw).unwrap();
+
+    let error = super::parse_shared_file_list_payload(&payload)
+        .expect_err("wire section cap should reject empty sections");
+    assert!(error.contains("sections"), "{error}");
+}
+
+#[cfg_attr(test, test)]
+#[cfg(feature = "full-controller-tests")]
+fn folder_browse_parsers_reject_excessive_wire_records() {
+    let file_count = super::MAX_BROWSE_WIRE_FILES_PER_RESPONSE + 1;
+
+    let mut folder_contents = super::Writer::new();
+    folder_contents.write_u32_le(1);
+    folder_contents.write_string("root").unwrap();
+    folder_contents.write_u32_le(1);
+    folder_contents.write_string("folder").unwrap();
+    folder_contents
+        .write_u32_le(u32::try_from(file_count).unwrap());
+    for _ in 0..file_count {
+        folder_contents.write_u8(0);
+        folder_contents.write_string("").unwrap();
+        folder_contents.write_u64_le(0);
+        folder_contents.write_string("").unwrap();
+        folder_contents.write_u32_le(0);
+    }
+    let folder_contents = super::compress_zlib_payload(&folder_contents.into_inner()).unwrap();
+    let error = super::parse_folder_contents_response_payload(
+        &folder_contents,
+        "folder",
+        super::ProtocolTextEncoding::Utf8,
+    )
+    .unwrap_err();
+    assert!(error.contains("folder files"), "{error}");
+
+    let mut folder_files = super::Writer::new();
+    folder_files.write_u32_le(u32::try_from(file_count).unwrap());
+    for _ in 0..file_count {
+        folder_files.write_u8(0);
+        folder_files.write_string("").unwrap();
+        folder_files.write_u64_le(0);
+        folder_files.write_string("").unwrap();
+        folder_files.write_u32_le(0);
+    }
+    let folder_files = super::compress_zlib_payload(&folder_files.into_inner()).unwrap();
+    let error = super::parse_folder_file_list_payload(
+        &folder_files,
+        "folder",
+        super::ProtocolTextEncoding::Utf8,
+    )
+    .unwrap_err();
+    assert!(error.contains("folder files"), "{error}");
+}
+
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
 async fn peer_address_response_fetches_pending_browse_from_plain_peer() {
