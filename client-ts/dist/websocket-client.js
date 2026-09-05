@@ -131,8 +131,14 @@ class WebSocketClient {
         this.clearReconnectTimer();
         this.clearConnectionTimer();
         this.pendingConnectReject?.(new Error('WebSocket closed before opening'));
-        if (this.ws) {
-            this.ws.close();
+        const socket = this.ws;
+        this.ws = null;
+        if (socket) {
+            // In browsers, close events are delivered asynchronously. Clear the
+            // active socket before closing it so callers can reconnect immediately;
+            // the old socket's callbacks are ignored by their identity checks.
+            this.notifyConnectionListeners(false);
+            socket.close();
         }
     }
     /**

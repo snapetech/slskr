@@ -12,6 +12,7 @@ class MockWebSocket {
   sent: string[] = [];
   url: string;
   sendError: Error | null = null;
+  deferClose = false;
 
   constructor(url: string, _protocols?: string | string[]) {
     this.url = url;
@@ -25,6 +26,12 @@ class MockWebSocket {
 
   close(): void {
     this.readyState = 3;
+    if (!this.deferClose) {
+      this.onclose?.();
+    }
+  }
+
+  emitClose(): void {
     this.onclose?.();
   }
 
@@ -145,6 +152,26 @@ describe('WebSocketClient reconnect lifecycle', () => {
     await expect(connected).rejects.toThrow('closed before opening');
     jest.runOnlyPendingTimers();
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('allows immediate reconnect before the old close event arrives', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const connected = client.connect();
+    const oldSocket = MockWebSocket.instances[0];
+    oldSocket.open();
+    await connected;
+
+    oldSocket.deferClose = true;
+    client.disconnect();
+
+    const reconnected = client.connect();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    await reconnected;
+
+    oldSocket.emitClose();
+    expect(client.isConnected()).toBe(true);
+    client.disconnect();
   });
 
   it('validates and normalizes the WebSocket endpoint URL', async () => {
