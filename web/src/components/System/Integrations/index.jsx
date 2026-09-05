@@ -3,6 +3,7 @@ import { toDisplayError } from '../../../lib/errors';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
 import * as YAML from 'yaml';
+import { urlBase } from '../../../config';
 import MetadataProcessingPanel from './MetadataProcessingPanel';
 import {
   buildMediaServerExecutionContract,
@@ -2097,6 +2098,9 @@ const FtpIntegrationPanel = ({ options }) => {
   );
 };
 
+export const buildDefaultSpotifyRedirectUri = (origin, basePath = urlBase) =>
+  `${origin}${basePath}/api/v0/integrations/spotify/callback`;
+
 const SourceFeedIntegrationsPanel = ({ options }) => {
   const remoteConfiguration = Boolean(
     getOption(options, 'remoteConfiguration', 'RemoteConfiguration'),
@@ -2137,7 +2141,7 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
   const inferredSpotifyRedirectUri =
     form.spotifyRedirectUri.trim() ||
     (typeof window !== 'undefined'
-      ? `${window.location.origin}/api/v0/integrations/spotify/callback`
+      ? buildDefaultSpotifyRedirectUri(window.location.origin)
       : '/api/v0/integrations/spotify/callback');
 
   const buildOverlay = () => {

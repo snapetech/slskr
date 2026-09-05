@@ -3,7 +3,7 @@ import * as federationDiagnostics from '../../../lib/federationDiagnostics';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
 import * as slskr from '../../../lib/slskr';
-import Integrations from './index';
+import Integrations, { buildDefaultSpotifyRedirectUri } from './index';
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,6 +68,12 @@ describe('Integrations', () => {
         warnings: ['Public federation is enabled while HTTP signature verification is disabled.'],
       },
     });
+  });
+
+  it('includes the configured web subpath in the default Spotify redirect URI', () => {
+    expect(buildDefaultSpotifyRedirectUri('https://music.example', '/slskr')).toBe(
+      'https://music.example/slskr/api/v0/integrations/spotify/callback',
+    );
   });
 
   it('surfaces VPN and Lidarr settings without exposing secrets', () => {
