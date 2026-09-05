@@ -936,6 +936,92 @@ describe('Visualizer', () => {
     expect(screen.getByText(/Skipped 1 texture asset: huge.png/)).toBeInTheDocument();
   });
 
+  it('bounds persisted RustyMilk preset state before loading it', async () => {
+    window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
+    window.localStorage.setItem(
+      'slskr.player.rustyMilkPreset',
+      JSON.stringify({
+        fileName: 'oversized.milk',
+        id: 'oversized',
+        source: 'x'.repeat(1024 * 1024 + 1),
+        title: 'Oversized',
+      }),
+    );
+    window.localStorage.setItem(
+      'slskr.player.rustyMilkPresetLibrary',
+      JSON.stringify(Array.from({ length: 25 }, (_, index) => ({
+        fileName: `preset-${index}.milk`,
+        id: `preset-${index}`,
+        source: `name=Preset ${index}`,
+        title: `Preset ${index}`,
+      }))),
+    );
+
+    render(
+      <Visualizer
+        audioElement={{}}
+        mode="inline"
+        onModeChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(nativeEngine.resize).toHaveBeenCalled();
+    });
+    expect(nativeEngine.loadPresetText).not.toHaveBeenCalled();
+    const presetLibrary = screen.getByTestId('visualizer-native-preset-library');
+    expect(presetLibrary.querySelectorAll('option')).toHaveLength(21);
+  });
+
+  it('bounds aggregate RustyMilk texture imports', async () => {
+    window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
+    vi.stubGlobal('FileReader', class {
+      readAsDataURL(file) {
+        this.result = `data:${file.name}`;
+        this.onload();
+      }
+    });
+
+    render(
+      <Visualizer
+        audioElement={{}}
+        mode="inline"
+        onModeChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(nativeEngine.resize).toHaveBeenCalled();
+    });
+
+    const input = document.querySelector('input[type="file"]');
+    const presetFile = new File(['name=Textures'], 'textures.milk', {
+      type: 'text/plain',
+    });
+    const textureFiles = Array.from({ length: 9 }, (_, index) => {
+      const file = new File(['fixture'], `texture-${index + 1}.png`, { type: 'image/png' });
+      Object.defineProperty(file, 'size', {
+        configurable: true,
+        value: 1024 * 1024,
+      });
+      return file;
+    });
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: createFileList([presetFile, ...textureFiles]),
+    });
+    fireEvent.change(input);
+
+    await waitFor(() => {
+      expect(nativeEngine.loadPresetText).toHaveBeenCalledWith(
+        'name=Textures',
+        'textures.milk',
+        { textureAssets: {} },
+      );
+    });
+    expect(screen.getByText(/Skipped 1 texture asset: texture-9.png/)).toBeInTheDocument();
+  });
+
   it('removes only the selected RustyMilk preset from the local library', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(

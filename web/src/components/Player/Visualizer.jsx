@@ -28,6 +28,14 @@ const rustyMilkPresetHistoryLimit = 12;
 const rustyMilkPresetPlaylistLimit = 12;
 const nativeTextureAssetMaxBytes = 1024 * 1024;
 const nativeTextSourceMaxBytes = 1024 * 1024;
+const nativeTextureAssetMaxCount = 32;
+const nativeTextureAssetTotalBytes = 8 * 1024 * 1024;
+const nativeTextureAssetMaxDataUrlBytes = 2 * 1024 * 1024;
+const nativePresetFieldMaxBytes = 512;
+const nativeTextureAssetFileNameMaxBytes = 1024;
+const nativeStoredPresetJsonMaxCharacters = 16 * 1024 * 1024;
+const nativeStoredPresetLibraryJsonMaxCharacters = 32 * 1024 * 1024;
+const nativeStoredPlaylistJsonMaxCharacters = 512 * 1024;
 const nativeEditableParameters = [
   {
     defaultValue: 0.9,
@@ -225,38 +233,145 @@ const getVisualizerErrorMessage = (engineType, error) => {
     : 'RustyMilk failed. Showing analyzer fallback.';
 };
 
-const readStoredRustyMilkPreset = () => {
+const getUtf8ByteLength = (value) => {
+  if (typeof TextEncoder === 'function') {
+    return new TextEncoder().encode(value).byteLength;
+  }
+  return value.length;
+};
+
+const truncateUtf8 = (value, maximumBytes) => {
+  if (typeof value !== 'string' || getUtf8ByteLength(value) <= maximumBytes) return value;
+  let truncated = '';
+  for (const character of value) {
+    const next = truncated + character;
+    if (getUtf8ByteLength(next) > maximumBytes) break;
+    truncated = next;
+  }
+  return truncated;
+};
+
+const readStoredJson = (key, fallback, maximumCharacters) => {
+  const stored = getLocalStorageItem(key);
+  if (typeof stored !== 'string' || stored.length > maximumCharacters) {
+    return fallback;
+  }
   try {
-    return JSON.parse(getLocalStorageItem(rustyMilkPresetStorageKey, 'null'));
+    return JSON.parse(stored);
   } catch {
+    return fallback;
+  }
+};
+
+const normalizeStoredRustyMilkTextureAssets = (textureAssets) => {
+  if (!textureAssets || typeof textureAssets !== 'object' || Array.isArray(textureAssets)) {
+    return {};
+  }
+  const normalized = {};
+  let totalBytes = 0;
+  for (const [key, asset] of Object.entries(textureAssets)) {
+    if (Object.keys(normalized).length >= nativeTextureAssetMaxCount) break;
+    if (
+      typeof key !== 'string'
+      || key.length === 0
+      || getUtf8ByteLength(key) > nativeTextureAssetFileNameMaxBytes
+      || !asset
+      || typeof asset !== 'object'
+      || typeof asset.dataUrl !== 'string'
+      || typeof asset.fileName !== 'string'
+      || asset.fileName.length === 0
+      || getUtf8ByteLength(asset.fileName) > nativeTextureAssetFileNameMaxBytes
+      || getUtf8ByteLength(asset.dataUrl) > nativeTextureAssetMaxDataUrlBytes
+    ) {
+      continue;
+    }
+    const dataUrlBytes = getUtf8ByteLength(asset.dataUrl);
+    if (totalBytes + dataUrlBytes > nativeTextureAssetTotalBytes) break;
+    normalized[key] = {
+      dataUrl: asset.dataUrl,
+      fileName: asset.fileName,
+    };
+    totalBytes += dataUrlBytes;
+  }
+  return normalized;
+};
+
+const normalizeStoredRustyMilkPreset = (preset, { requireId = false } = {}) => {
+  if (!preset || typeof preset !== 'object' || Array.isArray(preset)) return null;
+  if (
+    typeof preset.source !== 'string'
+    || preset.source.length === 0
+    || getUtf8ByteLength(preset.source) > nativeTextSourceMaxBytes
+  ) {
     return null;
   }
+  const id = typeof preset.id === 'string'
+    && preset.id.length > 0
+    && getUtf8ByteLength(preset.id) <= nativePresetFieldMaxBytes
+    ? preset.id
+    : '';
+  if (requireId && !id) return null;
+  const fileName = typeof preset.fileName === 'string'
+    && preset.fileName.length > 0
+    && getUtf8ByteLength(preset.fileName) <= nativePresetFieldMaxBytes
+    ? preset.fileName
+    : 'native.milk';
+  const title = typeof preset.title === 'string'
+    && preset.title.length > 0
+    && getUtf8ByteLength(preset.title) <= nativePresetFieldMaxBytes
+    ? preset.title
+    : 'Native preset';
+  const normalized = {
+    fileName,
+    id,
+    source: preset.source,
+    title,
+  };
+  if (Object.prototype.hasOwnProperty.call(preset, 'textureAssets')) {
+    normalized.textureAssets = normalizeStoredRustyMilkTextureAssets(preset.textureAssets);
+  }
+  return normalized;
+};
+
+const readStoredRustyMilkPreset = () => {
+  return normalizeStoredRustyMilkPreset(
+    readStoredJson(
+      rustyMilkPresetStorageKey,
+      null,
+      nativeStoredPresetJsonMaxCharacters,
+    ),
+  );
 };
 
 const readStoredRustyMilkPresetLibrary = () => {
-  try {
-    const library = JSON.parse(
-      getLocalStorageItem(rustyMilkPresetLibraryStorageKey, '[]'),
-    );
-    return Array.isArray(library)
-      ? library.filter((preset) => preset?.id && preset?.source)
-      : [];
-  } catch {
-    return [];
-  }
+  const library = readStoredJson(
+    rustyMilkPresetLibraryStorageKey,
+    [],
+    nativeStoredPresetLibraryJsonMaxCharacters,
+  );
+  return Array.isArray(library)
+    ? library
+      .slice(0, rustyMilkPresetLibraryLimit)
+      .map((preset) => normalizeStoredRustyMilkPreset(preset, { requireId: true }))
+      .filter(Boolean)
+    : [];
 };
 
 const readStoredRustyMilkPresetFavorites = () => {
-  try {
-    const favorites = JSON.parse(
-      getLocalStorageItem(rustyMilkPresetFavoritesStorageKey, '[]'),
-    );
-    return Array.isArray(favorites)
-      ? favorites.filter((id) => typeof id === 'string' && id.length > 0)
-      : [];
-  } catch {
-    return [];
-  }
+  const favorites = readStoredJson(
+    rustyMilkPresetFavoritesStorageKey,
+    [],
+    nativeStoredPlaylistJsonMaxCharacters,
+  );
+  return Array.isArray(favorites)
+    ? favorites
+      .slice(0, rustyMilkPresetLibraryLimit)
+      .filter((id) => (
+        typeof id === 'string'
+        && id.length > 0
+        && getUtf8ByteLength(id) <= nativePresetFieldMaxBytes
+      ))
+    : [];
 };
 
 const readStoredRustyMilkPresetLibraryMode = () => {
@@ -266,33 +381,68 @@ const readStoredRustyMilkPresetLibraryMode = () => {
 };
 
 const readStoredRustyMilkPresetSearch = () => {
-  return getLocalStorageItem(rustyMilkPresetSearchStorageKey, '');
+  const value = getLocalStorageItem(rustyMilkPresetSearchStorageKey, '');
+  return typeof value === 'string' && getUtf8ByteLength(value) <= nativePresetFieldMaxBytes
+    ? value
+    : '';
 };
 
 const readStoredRustyMilkPresetPlaylists = () => {
-  try {
-    const playlists = JSON.parse(
-      getLocalStorageItem(rustyMilkPresetPlaylistsStorageKey, '[]'),
-    );
-    return Array.isArray(playlists)
-      ? playlists
-        .filter((playlist) =>
-          playlist?.id
-          && playlist?.name
-          && Array.isArray(playlist?.presetIds))
-        .map((playlist) => ({
-          ...playlist,
-          presetIds: playlist.presetIds.filter((id) => typeof id === 'string' && id.length > 0),
-        }))
-        .filter((playlist) => playlist.presetIds.length > 0)
-      : [];
-  } catch {
-    return [];
-  }
+  const playlists = readStoredJson(
+    rustyMilkPresetPlaylistsStorageKey,
+    [],
+    nativeStoredPlaylistJsonMaxCharacters,
+  );
+  return Array.isArray(playlists)
+    ? playlists
+      .slice(0, rustyMilkPresetPlaylistLimit)
+      .map((playlist) => {
+        if (!playlist || typeof playlist !== 'object' || Array.isArray(playlist)) return null;
+        const id = typeof playlist.id === 'string'
+          && playlist.id.length > 0
+          && getUtf8ByteLength(playlist.id) <= nativePresetFieldMaxBytes
+          ? playlist.id
+          : null;
+        const name = typeof playlist.name === 'string'
+          && playlist.name.length > 0
+          && getUtf8ByteLength(playlist.name) <= nativePresetFieldMaxBytes
+          ? playlist.name
+          : null;
+        const presetIds = Array.isArray(playlist.presetIds)
+          ? playlist.presetIds
+            .slice(0, rustyMilkPresetLibraryLimit)
+            .filter((presetId) => (
+              typeof presetId === 'string'
+              && presetId.length > 0
+              && getUtf8ByteLength(presetId) <= nativePresetFieldMaxBytes
+            ))
+          : [];
+        if (!id || !name || presetIds.length === 0) return null;
+        const createdAt = typeof playlist.createdAt === 'string'
+          && getUtf8ByteLength(playlist.createdAt) <= nativePresetFieldMaxBytes
+          ? playlist.createdAt
+          : undefined;
+        const updatedAt = typeof playlist.updatedAt === 'string'
+          && getUtf8ByteLength(playlist.updatedAt) <= nativePresetFieldMaxBytes
+          ? playlist.updatedAt
+          : undefined;
+        return {
+          createdAt,
+          id,
+          name,
+          presetIds,
+          updatedAt,
+        };
+      })
+      .filter(Boolean)
+    : [];
 };
 
 const readStoredActiveRustyMilkPresetPlaylistId = () => {
-  return getLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey, '');
+  const value = getLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey, '');
+  return typeof value === 'string' && getUtf8ByteLength(value) <= nativePresetFieldMaxBytes
+    ? value
+    : '';
 };
 
 const writeStoredRustyMilkPresetLibrary = (library) => {
@@ -452,11 +602,28 @@ const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
 const readNativeTextureAssets = async (files) => {
   const textureAssets = {};
   const skippedTextureAssets = [];
+  let acceptedTextureCount = 0;
+  let acceptedTextureBytes = 0;
   for (const file of files.filter((entry) =>
     !isRustyMilkPresetFile(entry) && !isRustyMilkFragmentFile(entry))) {
     const skip = getRustyMilkTextureAssetSkip(file);
     if (skip) {
       skippedTextureAssets.push(skip);
+      continue;
+    }
+    const declaredSize = Number(file.size);
+    if (
+      acceptedTextureCount >= nativeTextureAssetMaxCount
+      || (
+        Number.isFinite(declaredSize)
+        && declaredSize >= 0
+        && acceptedTextureBytes + declaredSize > nativeTextureAssetTotalBytes
+      )
+    ) {
+      skippedTextureAssets.push({
+        fileName: file.name,
+        message: 'Texture asset import budget exceeded.',
+      });
       continue;
     }
     let dataUrl = null;
@@ -468,6 +635,20 @@ const readNativeTextureAssets = async (files) => {
         message: toDisplayError(textureError, 'Texture asset could not be read.'),
       });
       continue;
+    }
+    if (
+      typeof dataUrl !== 'string'
+      || getUtf8ByteLength(dataUrl) > nativeTextureAssetMaxDataUrlBytes
+    ) {
+      skippedTextureAssets.push({
+        fileName: file.name,
+        message: 'Texture asset data exceeds the browser import limit.',
+      });
+      continue;
+    }
+    acceptedTextureCount += 1;
+    if (Number.isFinite(declaredSize) && declaredSize >= 0) {
+      acceptedTextureBytes += declaredSize;
     }
     const filePath = getRustyMilkImportFilePath(file);
     getTextureAssetKeys(filePath).forEach((key) => {
@@ -909,7 +1090,7 @@ const Visualizer = ({
   }, []);
 
   const updateRustyMilkPresetSearch = useCallback((event) => {
-    const nextSearch = event.target.value;
+    const nextSearch = truncateUtf8(event.target.value, nativePresetFieldMaxBytes);
     setRustyMilkPresetSearch(nextSearch);
     if (nextSearch.trim()) {
       setLocalStorageItem(rustyMilkPresetSearchStorageKey, nextSearch);
@@ -930,11 +1111,12 @@ const Visualizer = ({
       search: rustyMilkPresetSearch,
     });
     const nextName = window.prompt?.('Name this RustyMilk playlist', defaultName);
-    if (!nextName || !nextName.trim()) return;
+    const normalizedName = truncateUtf8(nextName?.trim(), nativePresetFieldMaxBytes);
+    if (!normalizedName) return;
     const playlist = {
       createdAt: new Date().toISOString(),
       id: getRustyMilkPresetPlaylistId(),
-      name: nextName.trim(),
+      name: normalizedName,
       presetIds: visibleRustyMilkPresetLibrary.map((preset) => preset.id),
     };
     setRustyMilkPresetPlaylists((playlists) => {
@@ -970,11 +1152,12 @@ const Visualizer = ({
     );
     if (!activePlaylist) return;
     const nextName = window.prompt?.('Rename RustyMilk playlist', activePlaylist.name);
-    if (!nextName || !nextName.trim()) return;
+    const normalizedName = truncateUtf8(nextName?.trim(), nativePresetFieldMaxBytes);
+    if (!normalizedName) return;
     setRustyMilkPresetPlaylists((playlists) => {
       const nextPlaylists = playlists.map((playlist) =>
         (playlist.id === activePlaylist.id
-          ? { ...playlist, name: nextName.trim(), updatedAt: new Date().toISOString() }
+          ? { ...playlist, name: normalizedName, updatedAt: new Date().toISOString() }
           : playlist));
       writeStoredRustyMilkPresetPlaylists(nextPlaylists);
       return nextPlaylists;
