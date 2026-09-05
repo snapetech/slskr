@@ -38178,10 +38178,7 @@ async fn refresh_controller_version_check(
             .map_err(|error| error.to_string())?
             .error_for_status()
             .map_err(|error| error.to_string())?;
-        let release = response
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|error| error.to_string())?;
+        let release = read_bounded_integration_json(response, "GitHub release").await?;
         let latest_tag = release
             .get("tag_name")
             .and_then(serde_json::Value::as_str)
