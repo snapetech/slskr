@@ -1,5 +1,6 @@
-# slskr GraphQL Schema
-# Alternative query interface to REST API with full type safety
+# slskr GraphQL Schema (design/contract notes)
+# The maintained HTTP API reference does not currently advertise a live
+# GraphQL endpoint or resolver implementation for this schema.
 
 schema {
   query: Query
