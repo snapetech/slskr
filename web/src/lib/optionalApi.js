@@ -3,7 +3,11 @@
 // authorization, and server failures must remain visible to the caller.
 export const readOptionalApiResponse = async (request, fallback = { data: [] }) => {
   try {
-    return await request();
+    const response = await request();
+    if (!response || !Array.isArray(response.data)) {
+      throw new Error('Optional API returned an invalid list response');
+    }
+    return response;
   } catch (error) {
     if (error?.response?.status === 404) return fallback;
     throw error;

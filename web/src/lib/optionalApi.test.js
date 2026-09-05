@@ -17,4 +17,10 @@ describe('readOptionalApiResponse', () => {
       readOptionalApiResponse(() => Promise.reject(error)),
     ).rejects.toBe(error);
   });
+
+  it('rejects malformed successful list responses', async () => {
+    await expect(
+      readOptionalApiResponse(() => Promise.resolve({ data: {} })),
+    ).rejects.toThrow('Optional API returned an invalid list response');
+  });
 });
