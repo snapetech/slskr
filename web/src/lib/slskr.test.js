@@ -5,6 +5,7 @@ import {
   getMetadataProcessingStatus,
   getDiscoveredPeers,
   getMeshPeers,
+  getSlskrStats,
 } from './slskr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -31,6 +32,13 @@ describe('slskr runtime API helpers', () => {
     api.get.mockRejectedValue(error);
 
     await expect(getMetadataProcessingStatus()).rejects.toBe(error);
+  });
+
+  it('propagates real failures from the combined runtime snapshot', async () => {
+    const error = new Error('runtime unavailable');
+    api.get.mockRejectedValue(error);
+
+    await expect(getSlskrStats()).rejects.toBe(error);
   });
 
   it('normalizes peer endpoint envelopes for the network dashboard', async () => {

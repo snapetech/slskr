@@ -70,6 +70,9 @@ const normalizePeerRecords = (value) => {
   );
 };
 
+const isRecord = (value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
 const StatCard = ({ color, icon, inverted = false, label, subLabel, value }) => (
   <Card raised={inverted}>
     <Card.Content>
@@ -219,9 +222,11 @@ const SoulseekSessionStatus = ({ options = {}, state = {} }) => {
 // eslint-disable-next-line complexity
 const Network = ({ options = {}, state = {}, theme }) => {
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
+  const [stats, setStats] = useState(null);
+  const [statsError, setStatsError] = useState(null);
   const [meshPeers, setMeshPeers] = useState([]);
   const [discoveredPeers, setDiscoveredPeers] = useState([]);
+  const [peerError, setPeerError] = useState(null);
   const [syncing, setSyncing] = useState({});
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState(null);
@@ -237,27 +242,49 @@ const Network = ({ options = {}, state = {}, theme }) => {
     if (!mountedRef.current) return;
     const requestId = ++fetchRequestIdRef.current;
     try {
-      const [statsData, peersData, discoveredData] = await Promise.all([
-        slskrAPI.getSlskrStats().catch(() => ({})),
-        slskrAPI.getMeshPeers().catch(() => []),
-        slskrAPI.getDiscoveredPeers().catch(() => []),
+      const [statsResult, peersResult, discoveredResult] = await Promise.allSettled([
+        slskrAPI.getSlskrStats(),
+        slskrAPI.getMeshPeers(),
+        slskrAPI.getDiscoveredPeers(),
       ]);
 
       if (
         mountedRef.current &&
         requestId === fetchRequestIdRef.current
       ) {
-        setStats(
-          statsData && typeof statsData === 'object' && !Array.isArray(statsData)
-            ? statsData
-            : {},
-        );
-        setMeshPeers(normalizePeerRecords(peersData));
-        setDiscoveredPeers(normalizePeerRecords(discoveredData));
+        if (statsResult.status === 'fulfilled' && isRecord(statsResult.value)) {
+          setStats(statsResult.value);
+          setStatsError(null);
+        } else {
+          setStatsError(
+            statsResult.status === 'rejected'
+              ? toDisplayError(statsResult.reason, 'Network statistics unavailable')
+              : 'Network statistics response was invalid',
+          );
+        }
+
+        const peerErrors = [];
+        if (peersResult.status === 'fulfilled') {
+          setMeshPeers(normalizePeerRecords(peersResult.value));
+        } else {
+          peerErrors.push(
+            `Mesh peers: ${toDisplayError(peersResult.reason, 'request failed')}`,
+          );
+        }
+        if (discoveredResult.status === 'fulfilled') {
+          setDiscoveredPeers(normalizePeerRecords(discoveredResult.value));
+        } else {
+          peerErrors.push(
+            `Discovered peers: ${toDisplayError(discoveredResult.reason, 'request failed')}`,
+          );
+        }
+        setPeerError(peerErrors.length > 0 ? peerErrors.join('; ') : null);
       }
     } catch (error) {
       console.error('Failed to fetch network stats:', error);
-      // Don't show toast on every poll failure
+      if (mountedRef.current && requestId === fetchRequestIdRef.current) {
+        setStatsError(toDisplayError(error, 'Network statistics unavailable'));
+      }
     } finally {
       if (
         mountedRef.current &&
@@ -362,7 +389,8 @@ const Network = ({ options = {}, state = {}, theme }) => {
     }
   };
 
-  const { backfill, capabilities, hashDb, mesh, swarmJobs } = stats;
+  const { backfill, capabilities, hashDb, mesh, swarmJobs } = stats || {};
+  const hasStats = stats !== null;
   const obfuscation = capabilities?.obfuscation;
   const darkTheme = theme === 'dark';
   const dhtIsLanOnly = stats?.dht?.isLanOnly ?? stats?.dht?.lanOnly ?? false;
@@ -397,14 +425,20 @@ const Network = ({ options = {}, state = {}, theme }) => {
     !dhtIsLanOnly &&
     dhtIsRunning &&
     !dhtExposureAcknowledged;
-  const networkHealth = buildNetworkHealthScore({
-    discoveredPeers,
-    meshPeers,
-    stats,
-  });
+  const networkHealth = hasStats
+    ? buildNetworkHealthScore({
+        discoveredPeers,
+        meshPeers,
+        stats,
+      })
+    : null;
 
   const copyNetworkHealthReport = async () => {
     if (!mountedRef.current) return;
+    if (!networkHealth) {
+      toast.info('Network health is unavailable until network statistics load');
+      return;
+    }
     const report = formatNetworkHealthReport(networkHealth);
     if (navigator.clipboard?.writeText) {
       try {
@@ -429,6 +463,30 @@ const Network = ({ options = {}, state = {}, theme }) => {
         options={options}
         state={state}
       />
+      {statsError && (
+        <Message
+          className="network-diagnostic-message"
+          negative
+        >
+          <Message.Header>Network telemetry unavailable</Message.Header>
+          <p>{statsError}</p>
+          <p>
+            {hasStats
+              ? 'Showing the last successful network snapshot until the next poll succeeds.'
+              : 'Network health and counters will remain unavailable until the daemon responds.'}
+          </p>
+        </Message>
+      )}
+      {peerError && (
+        <Message
+          className="network-diagnostic-message"
+          warning
+        >
+          <Message.Header>Peer lists unavailable</Message.Header>
+          <p>{peerError}</p>
+          <p>Existing peer data is retained until the next successful poll.</p>
+        </Message>
+      )}
       {shouldExplainLanOnlyDht && (
         <Message
           className="network-diagnostic-message"
@@ -501,7 +559,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
           inverted={darkTheme}
           label="Mesh Peers"
           subLabel="slskr clients connected"
-          value={mesh?.connectedPeerCount ?? meshPeers.length ?? 0}
+          value={hasStats ? mesh?.connectedPeerCount ?? meshPeers.length : '—'}
         />
         <StatCard
           color="green"
@@ -509,11 +567,11 @@ const Network = ({ options = {}, state = {}, theme }) => {
           inverted={darkTheme}
           label="Hash Entries"
           subLabel={
-            hashDb?.dbSizeBytes
+            hasStats && hashDb?.dbSizeBytes
               ? `${formatBytes(hashDb.dbSizeBytes)} on disk`
               : 'Local database'
           }
-          value={formatNumber(hashDb?.totalEntries ?? 0)}
+          value={hasStats ? formatNumber(hashDb?.totalEntries ?? 0) : '—'}
         />
         <StatCard
           color="purple"
@@ -521,7 +579,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
           inverted={darkTheme}
           label="Sequence ID"
           subLabel="Mesh sync position"
-          value={hashDb?.currentSeqId ?? mesh?.localSeqId ?? 0}
+          value={hasStats ? hashDb?.currentSeqId ?? mesh?.localSeqId ?? 0 : '—'}
         />
         <StatCard
           color="orange"
@@ -529,7 +587,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
           inverted={darkTheme}
           label="Active Swarms"
           subLabel="Multi-source downloads"
-          value={swarmJobs?.length ?? 0}
+          value={hasStats ? swarmJobs?.length ?? 0 : '—'}
         />
       </Card.Group>
 
@@ -561,85 +619,97 @@ const Network = ({ options = {}, state = {}, theme }) => {
             }
           />
         </div>
-        <div className="network-health-score-row">
-          <Progress
-            color={
-              networkHealth.score >= 85
-                ? 'green'
-                : networkHealth.score >= 65
-                  ? 'yellow'
-                  : 'red'
-            }
-            percent={networkHealth.score}
-            progress
-          >
-            {networkHealth.label}
-          </Progress>
-          {/* These four are inputs to the score above, not states of their
-              own — one neutral pill style, not four unrelated hues. */}
-          <Label basic>
-            Mesh
-            <Label.Detail>{networkHealth.inputs.meshCount}</Label.Detail>
-          </Label>
-          <Label basic>
-            Discovered
-            <Label.Detail>{networkHealth.inputs.discoveredCount}</Label.Detail>
-          </Label>
-          <Label basic>
-            DHT
-            <Label.Detail>{networkHealth.inputs.dhtNodes}</Label.Detail>
-          </Label>
-          <Label
-            basic={networkHealth.inputs.securityWarningCount === 0}
-            color={networkHealth.inputs.securityWarningCount > 0 ? 'orange' : undefined}
-          >
-            Security
-            <Label.Detail>{networkHealth.inputs.securityWarningCount}</Label.Detail>
-          </Label>
-        </div>
-        {networkHealth.findings.length > 0 ? (
-          <List
-            divided
-            relaxed
-          >
-            {networkHealth.findings.map((finding) => (
-              <List.Item key={`${finding.area}-${finding.summary}`}>
-                <List.Icon
-                  color={
-                    finding.severity === 'fail'
-                      ? 'red'
-                      : finding.severity === 'warn'
-                        ? 'yellow'
-                        : 'blue'
-                  }
-                  name={
-                    finding.severity === 'fail'
-                      ? 'warning sign'
-                      : finding.severity === 'warn'
-                        ? 'exclamation triangle'
-                        : 'info circle'
-                  }
-                  verticalAlign="middle"
-                />
-                <List.Content>
-                  <List.Header>
-                    {finding.area}: {finding.summary}
-                  </List.Header>
-                  <List.Description>{finding.action}</List.Description>
-                </List.Content>
-              </List.Item>
-            ))}
-          </List>
+        {networkHealth ? (
+          <>
+            <div className="network-health-score-row">
+              <Progress
+                color={
+                  networkHealth.score >= 85
+                    ? 'green'
+                    : networkHealth.score >= 65
+                      ? 'yellow'
+                      : 'red'
+                }
+                percent={networkHealth.score}
+                progress
+              >
+                {networkHealth.label}
+              </Progress>
+              {/* These four are inputs to the score above, not states of their
+                  own — one neutral pill style, not four unrelated hues. */}
+              <Label basic>
+                Mesh
+                <Label.Detail>{networkHealth.inputs.meshCount}</Label.Detail>
+              </Label>
+              <Label basic>
+                Discovered
+                <Label.Detail>{networkHealth.inputs.discoveredCount}</Label.Detail>
+              </Label>
+              <Label basic>
+                DHT
+                <Label.Detail>{networkHealth.inputs.dhtNodes}</Label.Detail>
+              </Label>
+              <Label
+                basic={networkHealth.inputs.securityWarningCount === 0}
+                color={networkHealth.inputs.securityWarningCount > 0 ? 'orange' : undefined}
+              >
+                Security
+                <Label.Detail>{networkHealth.inputs.securityWarningCount}</Label.Detail>
+              </Label>
+            </div>
+            {networkHealth.findings.length > 0 ? (
+              <List
+                divided
+                relaxed
+              >
+                {networkHealth.findings.map((finding) => (
+                  <List.Item key={`${finding.area}-${finding.summary}`}>
+                    <List.Icon
+                      color={
+                        finding.severity === 'fail'
+                          ? 'red'
+                          : finding.severity === 'warn'
+                            ? 'yellow'
+                            : 'blue'
+                      }
+                      name={
+                        finding.severity === 'fail'
+                          ? 'warning sign'
+                          : finding.severity === 'warn'
+                            ? 'exclamation triangle'
+                            : 'info circle'
+                      }
+                      verticalAlign="middle"
+                    />
+                    <List.Content>
+                      <List.Header>
+                        {finding.area}: {finding.summary}
+                      </List.Header>
+                      <List.Description>{finding.action}</List.Description>
+                    </List.Content>
+                  </List.Item>
+                ))}
+              </List>
+            ) : (
+              <Message
+                className="network-diagnostic-message"
+                positive
+              >
+                <Message.Header>No local network-health findings</Message.Header>
+                <p>
+                  Mesh, DHT, HashDb, and security counters look healthy from the
+                  already-loaded dashboard data.
+                </p>
+              </Message>
+            )}
+          </>
         ) : (
           <Message
             className="network-diagnostic-message"
-            positive
+            warning
           >
-            <Message.Header>No local network-health findings</Message.Header>
-            <p>
-              Mesh, DHT, HashDb, and security counters look healthy from the
-              already-loaded dashboard data.
-            </p>
+            <Message.Header>Network health unavailable</Message.Header>
+            <p>There is no successful network snapshot to score yet.</p>
           </Message>
         )}
       </Segment>
@@ -659,31 +729,35 @@ const Network = ({ options = {}, state = {}, theme }) => {
         <Label.Group>
           <Label color="blue">
             <Icon name="code branch" />
-            {capabilities?.version ?? 'slskr'}
+            {hasStats ? capabilities?.version ?? 'unknown' : '—'}
           </Label>
-          {capabilities?.features?.map((feature) => (
-            <Label
-              color="teal"
-              key={feature}
-            >
-              <Icon name="check" />
-              {feature}
-            </Label>
-          )) ?? (
-            <>
-              <Label color="teal">
+          {hasStats ? (
+            capabilities?.features?.map((feature) => (
+              <Label
+                color="teal"
+                key={feature}
+              >
                 <Icon name="check" />
-                multi_source
+                {feature}
               </Label>
-              <Label color="teal">
-                <Icon name="check" />
-                hash_db
-              </Label>
-              <Label color="teal">
-                <Icon name="check" />
-                mesh_sync
-              </Label>
-            </>
+            )) ?? (
+              <>
+                <Label color="teal">
+                  <Icon name="check" />
+                  multi_source
+                </Label>
+                <Label color="teal">
+                  <Icon name="check" />
+                  hash_db
+                </Label>
+                <Label color="teal">
+                  <Icon name="check" />
+                  mesh_sync
+                </Label>
+              </>
+            )
+          ) : (
+            <Label color="grey">Capabilities unavailable</Label>
           )}
         </Label.Group>
         {obfuscation && (
@@ -894,43 +968,43 @@ const Network = ({ options = {}, state = {}, theme }) => {
         >
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.signatureVerificationFailures ?? 0)}
+              {hasStats ? formatNumber(mesh?.signatureVerificationFailures ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Sig. failures</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.reputationBasedRejections ?? 0)}
+              {hasStats ? formatNumber(mesh?.reputationBasedRejections ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Rep. rejections</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.rateLimitViolations ?? 0)}
+              {hasStats ? formatNumber(mesh?.rateLimitViolations ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Rate limits</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.quarantinedPeers ?? 0)}
+              {hasStats ? formatNumber(mesh?.quarantinedPeers ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Quarantined</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.quarantineEvents ?? 0)}
+              {hasStats ? formatNumber(mesh?.quarantineEvents ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Quarantine events</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.rejectedMessages ?? 0)}
+              {hasStats ? formatNumber(mesh?.rejectedMessages ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Rejected msgs</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(mesh?.skippedEntries ?? 0)}
+              {hasStats ? formatNumber(mesh?.skippedEntries ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Skipped entries</Statistic.Label>
           </Statistic>
@@ -1015,29 +1089,33 @@ const Network = ({ options = {}, state = {}, theme }) => {
         >
           <Statistic>
             <Statistic.Value>
-              {formatNumber(hashDb?.totalEntries ?? 0)}
+              {hasStats ? formatNumber(hashDb?.totalEntries ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Total Entries</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatNumber(hashDb?.uniqueFiles ?? hashDb?.totalEntries ?? 0)}
+              {hasStats
+                ? formatNumber(hashDb?.uniqueFiles ?? hashDb?.totalEntries ?? 0)
+                : '—'}
             </Statistic.Value>
             <Statistic.Label>Unique Files</Statistic.Label>
           </Statistic>
           <Statistic>
             <Statistic.Value>
-              {formatBytes(hashDb?.dbSizeBytes ?? 0)}
+              {hasStats ? formatBytes(hashDb?.dbSizeBytes ?? 0) : '—'}
             </Statistic.Value>
             <Statistic.Label>Database Size</Statistic.Label>
           </Statistic>
           <Statistic>
-            <Statistic.Value>{hashDb?.currentSeqId ?? 0}</Statistic.Value>
+            <Statistic.Value>
+              {hasStats ? hashDb?.currentSeqId ?? 0 : '—'}
+            </Statistic.Value>
             <Statistic.Label>Sequence ID</Statistic.Label>
           </Statistic>
         </Statistic.Group>
 
-        {hashDb?.coveragePercent !== undefined && (
+        {hasStats && hashDb?.coveragePercent !== undefined && (
           <>
             <Divider hidden />
             <Progress
@@ -1075,10 +1153,10 @@ const Network = ({ options = {}, state = {}, theme }) => {
             >
               <Statistic.Value>
                 <Icon
-                  color={backfill?.isActive ? 'green' : 'grey'}
+                  color={hasStats && backfill?.isActive ? 'green' : 'grey'}
                   name="circle"
                 />{' '}
-                {backfill?.isActive ? 'Active' : 'Idle'}
+                {hasStats ? (backfill?.isActive ? 'Active' : 'Idle') : '—'}
               </Statistic.Value>
               <Statistic.Label>Status</Statistic.Label>
             </Statistic>
@@ -1088,7 +1166,9 @@ const Network = ({ options = {}, state = {}, theme }) => {
               inverted={darkTheme}
               size="mini"
             >
-              <Statistic.Value>{backfill?.pendingCount ?? 0}</Statistic.Value>
+              <Statistic.Value>
+                {hasStats ? backfill?.pendingCount ?? 0 : '—'}
+              </Statistic.Value>
               <Statistic.Label>Pending Files</Statistic.Label>
             </Statistic>
           </Grid.Column>
@@ -1097,7 +1177,9 @@ const Network = ({ options = {}, state = {}, theme }) => {
               inverted={darkTheme}
               size="mini"
             >
-              <Statistic.Value>{backfill?.completedToday ?? 0}</Statistic.Value>
+              <Statistic.Value>
+                {hasStats ? backfill?.completedToday ?? 0 : '—'}
+              </Statistic.Value>
               <Statistic.Label>Completed Today</Statistic.Label>
             </Statistic>
           </Grid.Column>
@@ -1107,7 +1189,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
               size="mini"
             >
               <Statistic.Value>
-                {backfill?.discoveryRate ?? 0}/hr
+                {hasStats ? `${backfill?.discoveryRate ?? 0}/hr` : '—'}
               </Statistic.Value>
               <Statistic.Label>Discovery Rate</Statistic.Label>
             </Statistic>

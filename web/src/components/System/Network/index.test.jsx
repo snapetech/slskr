@@ -71,6 +71,21 @@ describe('Network', () => {
     expect(screen.getByText('Needs attention')).toBeInTheDocument();
   });
 
+  it('does not score an unavailable runtime snapshot as measured health', async () => {
+    slskrAPI.getSlskrStats.mockRejectedValueOnce(new Error('runtime unavailable'));
+
+    render(<Network theme="light" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Network telemetry unavailable')).toBeInTheDocument();
+      expect(screen.getByText('Network health unavailable')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('runtime unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Healthy')).not.toBeInTheDocument();
+  });
+
   it('renders peer records returned in compatibility envelopes', async () => {
     slskrAPI.getMeshPeers.mockResolvedValueOnce({
       count: 1,

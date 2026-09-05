@@ -3,6 +3,9 @@ import { toDisplayError } from './errors';
 import { encodePathSegment } from './pathEncoding';
 import { normalizeSwarmJobList } from './swarmJobs';
 
+const isRecord = (value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
 // Older daemon profiles may not expose every optional endpoint. Preserve the
 // compatibility fallback for that case, but surface real outages and auth
 // failures so the UI cannot report fabricated empty state.
@@ -140,97 +143,61 @@ export const getDhtStatus = async () => {
     isDhtRunning: false,
     verifiedBeaconCount: 0,
   });
+  const normalizedDht = isRecord(dht) ? dht : {};
 
   return {
-    ...dht,
-    isLanOnly: dht.isLanOnly ?? dht.lanOnly ?? false,
+    ...normalizedDht,
+    isLanOnly: normalizedDht.isLanOnly ?? normalizedDht.lanOnly ?? false,
   };
 };
 
 // Combined stats fetch for dashboard
-// eslint-disable-next-line complexity
 export const getSlskrStats = async () => {
-  try {
-    const [capabilities, hashDatabase, mesh, backfill, swarmJobs, dht] =
-      await Promise.allSettled([
-        getCapabilities(),
-        getHashDatabaseStats(),
-        getMeshStats(),
-        getBackfillStats(),
-        getActiveSwarmJobs(),
-        getDhtStatus(),
-      ]);
+  // Each helper preserves the compatibility default for a genuinely absent
+  // optional endpoint. Promise.all must still reject real transport, auth, and
+  // server failures so callers cannot mistake an outage for an empty runtime.
+  const [capabilities, hashDatabase, mesh, backfill, swarmJobs, dht] =
+    await Promise.all([
+      getCapabilities(),
+      getHashDatabaseStats(),
+      getMeshStats(),
+      getBackfillStats(),
+      getActiveSwarmJobs(),
+      getDhtStatus(),
+    ]);
 
-    // Normalize hashDb response to match frontend expectations
-    const rawHashDatabase =
-      hashDatabase.status === 'fulfilled' ? hashDatabase.value : null;
-    const normalizedHashDatabase = rawHashDatabase
-      ? {
-          ...rawHashDatabase,
+  const rawHashDatabase = isRecord(hashDatabase) ? hashDatabase : {};
+  const normalizedHashDatabase = {
+    ...rawHashDatabase,
+    currentSeqId: rawHashDatabase.currentSeqId ?? 0,
+    // Map backend field names to frontend expectations
+    totalEntries:
+      rawHashDatabase.totalHashEntries ?? rawHashDatabase.totalEntries ?? 0,
+  };
 
-          currentSeqId: rawHashDatabase.currentSeqId ?? 0,
-          // Map backend field names to frontend expectations
-          totalEntries:
-            rawHashDatabase.totalHashEntries ??
-            rawHashDatabase.totalEntries ??
-            0,
-        }
-      : { currentSeqId: 0, totalEntries: 0 };
+  const rawMesh = isRecord(mesh) ? mesh : {};
+  const normalizedMesh = {
+    ...rawMesh,
+    // Map backend field names to frontend expectations
+    connectedPeerCount:
+      rawMesh.knownMeshPeers ?? rawMesh.connectedPeerCount ?? 0,
+    isSyncing: rawMesh.isSyncing ?? false,
+    localSeqId: rawMesh.currentSeqId ?? rawMesh.localSeqId ?? 0,
+    warnings: Array.isArray(rawMesh.warnings) ? rawMesh.warnings : [],
+  };
 
-    // Normalize mesh response to match frontend expectations
-    const rawMesh = mesh.status === 'fulfilled' ? mesh.value : null;
-    const normalizedMesh = rawMesh
-      ? {
-          ...rawMesh,
-          // Map backend field names to frontend expectations
-          connectedPeerCount:
-            rawMesh.knownMeshPeers ?? rawMesh.connectedPeerCount ?? 0,
-          isSyncing: rawMesh.isSyncing ?? false,
-          localSeqId: rawMesh.currentSeqId ?? rawMesh.localSeqId ?? 0,
-          warnings: Array.isArray(rawMesh.warnings) ? rawMesh.warnings : [],
-        }
-      : {
-          connectedPeerCount: 0,
-          isSyncing: false,
-          localSeqId: 0,
-          warnings: [],
-        };
+  const rawBackfill = isRecord(backfill) ? backfill : {};
+  const normalizedBackfill = {
+    ...rawBackfill,
+    isActive: rawBackfill.isActive ?? rawBackfill.isRunning ?? false,
+  };
 
-    // Normalize backfill response
-    const rawBackfill = backfill.status === 'fulfilled' ? backfill.value : null;
-    const normalizedBackfill = rawBackfill
-      ? {
-          ...rawBackfill,
-          isActive: rawBackfill.isActive ?? rawBackfill.isRunning ?? false,
-        }
-      : { isActive: false };
-
-    return {
-      backfill: normalizedBackfill,
-      capabilities:
-        capabilities.status === 'fulfilled' ? capabilities.value : null,
-      dht: dht.status === 'fulfilled' ? dht.value : null,
-      hashDb: normalizedHashDatabase,
-      mesh: normalizedMesh,
-      swarmJobs:
-        swarmJobs.status === 'fulfilled' && Array.isArray(swarmJobs.value)
-          ? swarmJobs.value
-          : [],
-    };
-  } catch (error) {
-    console.error('Failed to fetch slskr stats:', error);
-    return {
-      backfill: { isActive: false },
-      capabilities: null,
-      dht: null,
-      hashDb: { currentSeqId: 0, totalEntries: 0 },
-      mesh: {
-        connectedPeerCount: 0,
-        isSyncing: false,
-        localSeqId: 0,
-        warnings: [],
-      },
-      swarmJobs: [],
-    };
-  }
+  return {
+    backfill: normalizedBackfill,
+    capabilities: isRecord(capabilities) ? capabilities : null,
+    dht: isRecord(dht) ? dht : null,
+    hashDb: normalizedHashDatabase,
+    mesh: normalizedMesh,
+    swarmJobs: Array.isArray(swarmJobs) ? swarmJobs : [],
+  };
 };
