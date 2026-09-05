@@ -589,6 +589,9 @@ const MAX_QUARANTINE_JURY_ITEMS: usize = 100;
 const MAX_EXTENDED_DOWNLOAD_ITEMS: usize = 1_000;
 const MAX_RANKING_BATCH_ITEMS: usize = 1_000;
 const MAX_LISTENING_PARTY_TAGS: usize = 10;
+const MAX_ROUTING_TARGET_PEERS: usize = 256;
+const MAX_RADAR_MUTED_RELEASE_GROUPS: usize = 256;
+const MAX_POD_DISCOVERY_TAGS: usize = 100;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 const MAX_TOTAL_SEARCH_RESULTS: usize = 50_000;
@@ -54805,6 +54808,9 @@ async fn extended_controller_mutation_response(
         else {
             return routing::bad_request_response("issue_ids is required");
         };
+        if values.len() > 25 {
+            return routing::bad_request_response("issue_ids must contain 1 to 25 values");
+        }
         let mut issue_ids = Vec::new();
         for value in values {
             let Some(issue_id) = value.as_str().map(str::trim).filter(|id| !id.is_empty()) else {
@@ -59748,15 +59754,22 @@ fn radar_subscription_from_body(body: &str) -> Result<serde_json::Value, String>
         .unwrap_or("trusted");
     let muted_release_group_ids = match object.get("mutedReleaseGroupIds") {
         None | Some(serde_json::Value::Null) => Vec::new(),
-        Some(serde_json::Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| "mutedReleaseGroupIds must contain strings".to_owned())
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        Some(serde_json::Value::Array(values)) => {
+            if values.len() > MAX_RADAR_MUTED_RELEASE_GROUPS {
+                return Err(format!(
+                    "mutedReleaseGroupIds must contain at most {MAX_RADAR_MUTED_RELEASE_GROUPS} items"
+                ));
+            }
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "mutedReleaseGroupIds must contain strings".to_owned())
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
         Some(_) => return Err("mutedReleaseGroupIds must be an array".to_owned()),
     };
     let created_at =
@@ -60399,6 +60412,13 @@ async fn musicbrainz_mutation_response(
                 Ok(_) => return routing::bad_request_response("route request must be an object"),
                 Err(_) => return routing::bad_request_response("invalid JSON body"),
             };
+            if route_request.get("targetPeerIds").is_some_and(|peers| {
+                json_array_exceeds_limit(peers, MAX_ROUTING_TARGET_PEERS)
+            }) {
+                return routing::bad_request_response(
+                    "targetPeerIds must contain at most 256 items",
+                );
+            }
             let mut target_peer_ids = match route_request.get("targetPeerIds") {
                 None | Some(serde_json::Value::Null) => Vec::new(),
                 Some(serde_json::Value::Array(values)) => values
@@ -60725,6 +60745,13 @@ async fn musicbrainz_mutation_response(
                 Ok(_) => return routing::bad_request_response("route request must be an object"),
                 Err(_) => return routing::bad_request_response("invalid JSON body"),
             };
+            if route_request.get("targetPeerIds").is_some_and(|peers| {
+                json_array_exceeds_limit(peers, MAX_ROUTING_TARGET_PEERS)
+            }) {
+                return routing::bad_request_response(
+                    "targetPeerIds must contain at most 256 items",
+                );
+            }
             let mut target_peer_ids = match route_request.get("targetPeerIds") {
                 None | Some(serde_json::Value::Null) => Vec::new(),
                 Some(serde_json::Value::Array(values)) => values
@@ -63991,6 +64018,13 @@ async fn podcore_mutation_response(
                         "Valid message and target peer IDs are required",
                     ));
                 }
+                if payload.get("targetPeerIds").is_some_and(|peers| {
+                    json_array_exceeds_limit(peers, MAX_ROUTING_TARGET_PEERS)
+                }) {
+                    return Some(routing::bad_request_response(
+                        "targetPeerIds must contain at most 256 items",
+                    ));
+                }
                 let peer_ids = payload
                     .get("targetPeerIds")
                     .and_then(serde_json::Value::as_array)
@@ -64410,6 +64444,13 @@ async fn podcore_mutation_response(
                     .and_then(serde_json::Value::as_str)
                     .map(str::trim)
                     .unwrap_or_default();
+                if payload.get("tags").is_some_and(|tags| {
+                    json_array_exceeds_limit(tags, MAX_POD_DISCOVERY_TAGS)
+                }) {
+                    return Some(routing::bad_request_response(
+                        "tags must contain at most 100 items",
+                    ));
+                }
                 let mut keys = vec!["pod:discover:all".to_owned()];
                 if !name.trim().is_empty() {
                     keys.push(format!(

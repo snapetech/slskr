@@ -2137,6 +2137,88 @@ async fn remaining_controller_array_routes_reject_oversized_wire_batches_before_
     assert_eq!(response.status, "400 Bad Request");
     assert!(response.body.contains("at most 1000 source candidates"));
 
+    let issue_ids = (0..=25)
+        .map(|index| serde_json::json!(format!("issue-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/slskdn/library/remediate",
+        None,
+        &serde_json::json!({"issue_ids": issue_ids}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized library remediation request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("issue_ids must contain 1 to 25 values"));
+
+    let muted_release_group_ids = (0..=super::MAX_RADAR_MUTED_RELEASE_GROUPS)
+        .map(|index| serde_json::json!(format!("release-group-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/musicbrainz/release-radar/subscriptions",
+        None,
+        &serde_json::json!({
+            "artistId": "artist:test",
+            "mutedReleaseGroupIds": muted_release_group_ids,
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized release-radar subscription request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("mutedReleaseGroupIds must contain at most 256 items"));
+
+    let target_peer_ids = (0..=super::MAX_ROUTING_TARGET_PEERS)
+        .map(|index| serde_json::json!(format!("peer-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/podcore/routing/route-to-peers",
+        None,
+        &serde_json::json!({
+            "message": {"messageId": "message:test", "channelId": "channel:test"},
+            "targetPeerIds": target_peer_ids,
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized PodCore routing request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("targetPeerIds must contain at most 256 items"));
+
+    let tags = (0..=super::MAX_POD_DISCOVERY_TAGS)
+        .map(|index| serde_json::json!(format!("tag-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/podcore/discovery/register",
+        None,
+        &serde_json::json!({
+            "podId": "pod:test",
+            "visibility": "listed",
+            "name": "test",
+            "tags": tags,
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized PodCore discovery request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("tags must contain at most 100 items"));
+
     let _ = fs::remove_dir_all(&state.config.state_dir);
 }
 

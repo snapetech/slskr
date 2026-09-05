@@ -150,6 +150,10 @@ for anchor in \
   'MAX_RANKING_BATCH_ITEMS' \
   'MAX_LISTENING_PARTY_TAGS' \
   'remaining_controller_array_routes_reject_oversized_wire_batches_before_work' \
+  'MAX_ROUTING_TARGET_PEERS' \
+  'MAX_RADAR_MUTED_RELEASE_GROUPS' \
+  'MAX_POD_DISCOVERY_TAGS' \
+  'issue_ids must contain 1 to 25 values' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \
