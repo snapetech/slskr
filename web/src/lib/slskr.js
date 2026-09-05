@@ -22,6 +22,7 @@ const safeGet = async (endpoint, fallback = null) => {
 };
 
 const MAX_PEER_RECORDS = 512;
+const MAX_SWARM_JOB_RECORDS = 512;
 
 const normalizePeerList = (value) => {
   const peers = Array.isArray(value)
@@ -33,6 +34,18 @@ const normalizePeerList = (value) => {
   return peers
     .filter((peer) => peer && typeof peer === 'object' && !Array.isArray(peer))
     .slice(0, MAX_PEER_RECORDS);
+};
+
+const normalizeSwarmJobList = (value) => {
+  const jobs = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && Array.isArray(value.jobs)
+      ? value.jobs
+      : [];
+
+  return jobs
+    .filter((job) => job && typeof job === 'object' && !Array.isArray(job))
+    .slice(0, MAX_SWARM_JOB_RECORDS);
 };
 
 // Capabilities API
@@ -116,7 +129,7 @@ export const backfillFromSearchHistory = async (options = {}) => {
 
 // MultiSource API
 export const getActiveSwarmJobs = async () => {
-  return safeGet('/multisource/jobs', []);
+  return normalizeSwarmJobList(await safeGet('/multisource/jobs', { jobs: [] }));
 };
 
 export const getSwarmJob = async (jobId) => {

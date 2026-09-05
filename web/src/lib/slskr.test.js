@@ -1,6 +1,7 @@
 import api from './api';
 import {
   getCapabilities,
+  getActiveSwarmJobs,
   getMetadataProcessingStatus,
   getDiscoveredPeers,
   getMeshPeers,
@@ -47,6 +48,19 @@ describe('slskr runtime API helpers', () => {
     await expect(getMeshPeers()).resolves.toEqual([{ username: 'mesh-peer' }]);
     await expect(getDiscoveredPeers()).resolves.toEqual([
       { username: 'discovered-peer' },
+    ]);
+  });
+
+  it('normalizes the multisource jobs envelope for runtime stats', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        count: 1,
+        jobs: [{ jobId: 'swarm-1', status: 'in_progress' }, null, 'invalid-job'],
+      },
+    });
+
+    await expect(getActiveSwarmJobs()).resolves.toEqual([
+      { jobId: 'swarm-1', status: 'in_progress' },
     ]);
   });
 });
