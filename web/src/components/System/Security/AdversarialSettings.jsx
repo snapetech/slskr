@@ -31,10 +31,13 @@ const AdversarialSettings = () => {
   const [settings, setSettings] = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [status, setStatus] = useState(null);
+  const [statusError, setStatusError] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [transportStatus, setTransportStatus] = useState(null);
+  const [transportError, setTransportError] = useState(null);
   const [transportLoading, setTransportLoading] = useState(false);
   const [torStatus, setTorStatus] = useState(null);
+  const [torError, setTorError] = useState(null);
   const [torLoading, setTorLoading] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const mountedRef = useMountedRef();
@@ -96,19 +99,25 @@ const AdversarialSettings = () => {
     const requestId = ++requestIdsRef.current.status;
     try {
       setStatusLoading(true);
-      const statusData = await securityApi
-        .getAdversarialStats()
-        .catch(() => null);
+      const statusData = await securityApi.getAdversarialStats();
       if (
-        statusData &&
         mountedRef.current &&
         requestIdsRef.current.status === requestId
       ) {
-        setStatus(statusData);
+        if (statusData) {
+          setStatus(statusData);
+          setStatusError(null);
+        } else {
+          setStatus(null);
+          setStatusError('Anonymity status is unavailable');
+        }
       }
     } catch (statusError) {
       if (mountedRef.current && requestIdsRef.current.status === requestId) {
-        console.error('Failed to load adversarial status:', statusError);
+        setStatus(null);
+        setStatusError(
+          toDisplayError(statusError, 'Failed to load adversarial status'),
+        );
       }
     } finally {
       if (mountedRef.current && requestIdsRef.current.status === requestId) {
@@ -122,22 +131,28 @@ const AdversarialSettings = () => {
     const requestId = ++requestIdsRef.current.transport;
     try {
       setTransportLoading(true);
-      const transportData = await securityApi
-        .getTransportStatus()
-        .catch(() => null);
+      const transportData = await securityApi.getTransportStatus();
       if (
-        transportData &&
         mountedRef.current &&
         requestIdsRef.current.transport === requestId
       ) {
-        setTransportStatus(transportData);
+        if (transportData) {
+          setTransportStatus(transportData);
+          setTransportError(null);
+        } else {
+          setTransportStatus(null);
+          setTransportError('Transport status is unavailable');
+        }
       }
     } catch (transportError) {
       if (
         mountedRef.current &&
         requestIdsRef.current.transport === requestId
       ) {
-        console.error('Failed to load transport status:', transportError);
+        setTransportStatus(null);
+        setTransportError(
+          toDisplayError(transportError, 'Failed to load transport status'),
+        );
       }
     } finally {
       if (
@@ -154,17 +169,23 @@ const AdversarialSettings = () => {
     const requestId = ++requestIdsRef.current.tor;
     try {
       setTorLoading(true);
-      const torData = await securityApi.getTorStatus().catch(() => null);
+      const torData = await securityApi.getTorStatus();
       if (
-        torData &&
         mountedRef.current &&
         requestIdsRef.current.tor === requestId
       ) {
-        setTorStatus(torData);
+        if (torData) {
+          setTorStatus(torData);
+          setTorError(null);
+        } else {
+          setTorStatus(null);
+          setTorError('Tor status is unavailable');
+        }
       }
     } catch (torError) {
       if (mountedRef.current && requestIdsRef.current.tor === requestId) {
-        console.error('Failed to load Tor status:', torError);
+        setTorStatus(null);
+        setTorError(toDisplayError(torError, 'Failed to load Tor status'));
       }
     } finally {
       if (mountedRef.current && requestIdsRef.current.tor === requestId) {
@@ -628,6 +649,11 @@ const AdversarialSettings = () => {
                             inline
                             size="mini"
                           />
+                        ) : statusError ? (
+                          <Label color="orange">
+                            <Icon name="question circle" />
+                            Unavailable
+                          </Label>
                         ) : status?.AnonymityEnabled ? (
                           <Label color="green">
                             <Icon name="check" />
@@ -697,6 +723,11 @@ const AdversarialSettings = () => {
                             inline
                             size="mini"
                           />
+                        ) : transportError ? (
+                          <Label color="orange">
+                            <Icon name="question circle" />
+                            Unavailable
+                          </Label>
                         ) : transportStatus ? (
                           <Label
                             color={
@@ -728,6 +759,11 @@ const AdversarialSettings = () => {
                             inline
                             size="mini"
                           />
+                        ) : torError ? (
+                          <Label color="orange">
+                            <Icon name="question circle" />
+                            Unavailable
+                          </Label>
                         ) : torStatus ? (
                           <Label
                             color={torStatus.IsAvailable ? 'green' : 'red'}
@@ -748,6 +784,16 @@ const AdversarialSettings = () => {
                     </Statistic>
                   </Grid.Column>
                 </Grid>
+
+                {(statusError || transportError || torError) && (
+                  <Message warning>
+                    <Message.Header>Live status unavailable</Message.Header>
+                    <p>
+                      {statusError || transportError || torError} Refresh to
+                      retry the affected security status checks.
+                    </p>
+                  </Message>
+                )}
 
                 {settings.Anonymity?.Mode === 'Tor' && (
                   <Message info>

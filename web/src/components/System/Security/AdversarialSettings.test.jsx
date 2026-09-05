@@ -46,4 +46,22 @@ describe('Adversarial Settings probes', () => {
     await waitFor(() => expect(securityApi.getTransportStatus).toHaveBeenCalledTimes(1));
     expect(securityApi.getTorStatus).toHaveBeenCalledTimes(1);
   });
+
+  it('surfaces failed live status probes instead of showing measured states', async () => {
+    securityApi.getAdversarialSettings.mockResolvedValue({
+      Enabled: true,
+      Anonymity: { Enabled: true, Mode: 'Tor' },
+    });
+    securityApi.getAdversarialStats.mockRejectedValue(new Error('stats offline'));
+    securityApi.getTransportStatus.mockRejectedValue(new Error('transport offline'));
+    securityApi.getTorStatus.mockRejectedValue(new Error('tor offline'));
+
+    render(<AdversarialSettings />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Unavailable')).toHaveLength(3);
+    });
+    expect(screen.getByText('Live status unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/stats offline/)).toBeInTheDocument();
+  });
 });
