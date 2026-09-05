@@ -6,8 +6,14 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::ClientError;
 
 pub const DEFAULT_MAX_TRANSFER_CHUNK_LEN: usize = 16 * 1024 * 1024;
+/// Absolute upper bound for one file-transfer chunk, regardless of caller input.
+pub const MAX_TRANSFER_CHUNK_LEN: usize = DEFAULT_MAX_TRANSFER_CHUNK_LEN;
 pub const MAX_OBFUSCATED_TRANSFER_FRAME_LEN: usize = 8 * 1024 * 1024;
 const OBFUSCATED_TRANSFER_FRAME_PREFIX_LEN: usize = 4;
+
+fn bounded_transfer_chunk_len(value: usize) -> usize {
+    value.min(MAX_TRANSFER_CHUNK_LEN)
+}
 
 #[derive(Debug)]
 pub struct FileTransferConnection<S> {
@@ -135,6 +141,7 @@ where
         length: usize,
         max_len: usize,
     ) -> Result<Vec<u8>, ClientError> {
+        let max_len = bounded_transfer_chunk_len(max_len);
         if length > max_len {
             return Err(ClientError::FrameTooLarge {
                 length,
@@ -179,6 +186,7 @@ where
         length: usize,
         max_len: usize,
     ) -> Result<Vec<u8>, ClientError> {
+        let max_len = bounded_transfer_chunk_len(max_len);
         if length > max_len {
             return Err(ClientError::FrameTooLarge {
                 length,

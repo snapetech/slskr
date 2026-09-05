@@ -1,5 +1,7 @@
 use slskr_client::{
-    file_transfer::{FileTransferConnection, DEFAULT_MAX_TRANSFER_CHUNK_LEN},
+    file_transfer::{
+        FileTransferConnection, DEFAULT_MAX_TRANSFER_CHUNK_LEN, MAX_TRANSFER_CHUNK_LEN,
+    },
     ClientError,
 };
 use tokio::io::duplex;
@@ -60,6 +62,24 @@ async fn oversized_chunk_is_rejected_before_allocation() {
     assert!(matches!(
         error,
         ClientError::FrameTooLarge { length: 9, max: 8 }
+    ));
+}
+
+#[tokio::test]
+async fn caller_chunk_limit_cannot_raise_the_safety_ceiling() {
+    let (_a, b) = duplex(8);
+    let mut b = FileTransferConnection::new(b);
+
+    let error = b
+        .read_chunk_with_max(MAX_TRANSFER_CHUNK_LEN + 1, usize::MAX)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::FrameTooLarge {
+            length,
+            max
+        } if length == MAX_TRANSFER_CHUNK_LEN + 1 && max == MAX_TRANSFER_CHUNK_LEN
     ));
 }
 
