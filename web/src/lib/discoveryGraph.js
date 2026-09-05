@@ -4,6 +4,37 @@ const asObject = (value) =>
   value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const isPlainObject = (value) =>
   value && typeof value === 'object' && !Array.isArray(value);
+const maxSavedDiscoveryGraphBranches = 12;
+const maxSavedDiscoveryGraphTextCharacters = 2_048;
+const maxSavedDiscoveryGraphStorageCharacters = 64 * 1024;
+const savedDiscoveryGraphRequestKeys = [
+  'album',
+  'artist',
+  'artistId',
+  'compareLabel',
+  'compareNodeId',
+  'recordingId',
+  'releaseId',
+  'scope',
+  'songIdRunId',
+  'title',
+];
+
+const normalizeSavedDiscoveryGraphText = (value) =>
+  typeof value === 'string' || typeof value === 'number'
+    ? String(value).trim().slice(0, maxSavedDiscoveryGraphTextCharacters)
+    : '';
+
+const normalizeSavedDiscoveryGraphRequest = (request) => {
+  if (!isPlainObject(request)) return null;
+
+  const normalized = Object.fromEntries(
+    savedDiscoveryGraphRequestKeys
+      .map((key) => [key, normalizeSavedDiscoveryGraphText(request[key])])
+      .filter(([, value]) => value),
+  );
+  return Object.keys(normalized).length > 0 ? normalized : null;
+};
 
 export const buildDiscoveryGraph = async (request) => {
   const response = await api.post('/discovery-graph', request);
@@ -38,23 +69,45 @@ export const fromQueryString = (search = '') => {
   };
 };
 
-const isSavedBranch = (branch) =>
-  branch &&
-  typeof branch === 'object' &&
-  !Array.isArray(branch) &&
-  typeof branch.id === 'string' &&
-  branch.id.trim() &&
-  typeof branch.title === 'string' &&
-  branch.title.trim();
+export const normalizeSavedDiscoveryGraphBranch = (branch) => {
+  if (!isPlainObject(branch)) return null;
+
+  const id = normalizeSavedDiscoveryGraphText(branch.id);
+  const title = normalizeSavedDiscoveryGraphText(branch.title);
+  if (!id || !title) return null;
+
+  const normalized = { id, title };
+  const savedAt = normalizeSavedDiscoveryGraphText(branch.savedAt);
+  const seedNodeId = normalizeSavedDiscoveryGraphText(branch.seedNodeId);
+  const request = normalizeSavedDiscoveryGraphRequest(branch.request);
+  if (savedAt) normalized.savedAt = savedAt;
+  if (seedNodeId) normalized.seedNodeId = seedNodeId;
+  if (request) normalized.request = request;
+  return normalized;
+};
 
 export const parseSavedDiscoveryGraphBranches = (raw) => {
+  if (typeof raw !== 'string' || raw.length > maxSavedDiscoveryGraphStorageCharacters) {
+    return [];
+  }
+
   try {
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter(isSavedBranch) : [];
+    return Array.isArray(parsed)
+      ? parsed
+          .slice(0, maxSavedDiscoveryGraphBranches)
+          .map(normalizeSavedDiscoveryGraphBranch)
+          .filter(Boolean)
+      : [];
   } catch {
     return [];
   }
 };
+
+export const getSavedDiscoveryGraphLimits = () => ({
+  maxBranches: maxSavedDiscoveryGraphBranches,
+  maxCharacters: maxSavedDiscoveryGraphStorageCharacters,
+});
 
 export const getDiscoveryGraphNodes = (graph) =>
   Array.isArray(graph?.nodes) ? graph.nodes.filter(isPlainObject) : [];

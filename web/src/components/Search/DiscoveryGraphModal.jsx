@@ -1,4 +1,5 @@
 import * as discoveryGraph from '../../lib/discoveryGraph';
+import { writeBoundedList } from '../../lib/persistedJson';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -117,10 +118,18 @@ const DiscoveryGraphModal = ({
       title: safeGraph.title,
       request: safeGraph.request || null,
     };
-    const nextSavedBranches = [nextBranch, ...savedBranches].slice(0, 12);
-    setLocalStorageItem(
+    const nextSavedBranches = [nextBranch, ...savedBranches]
+      .map(discoveryGraph.normalizeSavedDiscoveryGraphBranch)
+      .filter(Boolean)
+      .slice(0, 12);
+    writeBoundedList(
+      setLocalStorageItem,
       'slskr.discoveryGraph.savedBranches',
-      JSON.stringify(nextSavedBranches),
+      nextSavedBranches,
+      {
+        maxCharacters: discoveryGraph.getSavedDiscoveryGraphLimits().maxCharacters,
+        maxItems: discoveryGraph.getSavedDiscoveryGraphLimits().maxBranches,
+      },
     );
     setSavedBranches(nextSavedBranches);
   };

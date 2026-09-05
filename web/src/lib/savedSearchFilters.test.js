@@ -38,4 +38,16 @@ describe('saved search filters', () => {
     expect(removeSavedSearchFilter(' lossLESS ')).toEqual([]);
     expect(getSavedSearchFilters()).toEqual([]);
   });
+
+  it('rejects oversized and malformed persisted filters', () => {
+    storage.getLocalStorageItem.mockReturnValue(
+      `[${JSON.stringify({ name: 'valid', value: 'ok' })},${JSON.stringify({ name: 'x'.repeat(3_000), value: 'ignored' })}]`,
+    );
+
+    expect(getSavedSearchFilters()).toHaveLength(2);
+    expect(getSavedSearchFilters()[1].name).toHaveLength(2_048);
+
+    storage.getLocalStorageItem.mockReturnValue('x'.repeat(512 * 1024 + 1));
+    expect(getSavedSearchFilters()).toEqual([]);
+  });
 });

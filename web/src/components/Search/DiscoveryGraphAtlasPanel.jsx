@@ -68,26 +68,11 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   const [copyLoading, setCopyLoading] = useState(false);
 
   const loadSavedBranches = () => {
-    try {
-      const raw = getLocalStorageItem('slskr.discoveryGraph.savedBranches');
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (mountedRef.current) {
-        setSavedBranches(
-          Array.isArray(parsed)
-            ? parsed.filter(
-              (branch) =>
-                branch &&
-                typeof branch === 'object' &&
-                !Array.isArray(branch) &&
-                branch.request &&
-                typeof branch.request === 'object',
-            )
-            : [],
-        );
-      }
-    } catch (error) {
-      console.warn('Failed to load saved Discovery Graph branches', error);
-      if (mountedRef.current) setSavedBranches([]);
+    const raw = getLocalStorageItem('slskr.discoveryGraph.savedBranches');
+    const parsed = discoveryGraph.parseSavedDiscoveryGraphBranches(raw)
+      .filter((branch) => branch.request);
+    if (mountedRef.current) {
+      setSavedBranches(parsed);
     }
   };
 

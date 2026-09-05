@@ -168,4 +168,27 @@ describe('discoveryGraph helpers', () => {
       ),
     ).toEqual([{ id: 'branch-1', title: 'Saved branch' }]);
   });
+
+  it('bounds saved branch payloads and projects nested requests', () => {
+    expect(parseSavedDiscoveryGraphBranches('x'.repeat(64 * 1024 + 1))).toEqual([]);
+
+    const [branch] = parseSavedDiscoveryGraphBranches(JSON.stringify([{
+      id: 'branch-1',
+      request: {
+        artist: 'Fixture Artist',
+        ignored: 'not persisted',
+        title: 'Fixture Track',
+      },
+      title: 'Saved branch',
+    }]));
+
+    expect(branch).toEqual({
+      id: 'branch-1',
+      request: {
+        artist: 'Fixture Artist',
+        title: 'Fixture Track',
+      },
+      title: 'Saved branch',
+    });
+  });
 });

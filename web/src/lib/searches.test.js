@@ -299,6 +299,29 @@ describe('filterResponse', () => {
   });
 });
 
+describe('blocked users', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('normalizes, deduplicates, and bounds blocked users', () => {
+    window.localStorage.setItem(
+      'slskr_blocked_users',
+      JSON.stringify([' alice ', 'alice', null, 'bob']),
+    );
+
+    expect(search.getBlockedUsers()).toEqual(['alice', 'bob']);
+    expect(search.blockUser(' carol ')).toEqual(['carol', 'alice', 'bob']);
+    expect(search.blockUser('')).toEqual(['carol', 'alice', 'bob']);
+  });
+
+  it('rejects oversized blocked-user state before parsing', () => {
+    window.localStorage.setItem('slskr_blocked_users', 'x'.repeat(512 * 1024 + 1));
+
+    expect(search.getBlockedUsers()).toEqual([]);
+  });
+});
+
 describe('parseFiltersFromString', () => {
   it('accepts non-string input as an empty query', () => {
     expect(search.parseFiltersFromString(null)).toMatchObject({

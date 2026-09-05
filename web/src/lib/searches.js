@@ -1,5 +1,10 @@
 import api from './api';
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
 import { v4 as uuidv4 } from 'uuid';
 
 const USER_DOWNLOAD_STATS_CACHE_TTL_MS = 30_000;
@@ -72,41 +77,73 @@ export const getUserDownloadStats = () => {
 // Blocked users management (localStorage-based)
 const BLOCKED_USERS_KEY = 'slskr_blocked_users';
 const LEGACY_BLOCKED_USERS_KEY = 'slskdn_blocked_users';
+const MAX_BLOCKED_USERS = 500;
+const MAX_BLOCKED_USERNAME_CHARACTERS = 512;
+
+const normalizeBlockedUsername = (username) =>
+  typeof username === 'string' || typeof username === 'number'
+    ? String(username).trim().slice(0, MAX_BLOCKED_USERNAME_CHARACTERS)
+    : '';
+
+const parseBlockedUsers = (raw) => {
+  const parsed = readBoundedJson(
+    (_key, fallback) => (typeof raw === 'string' ? raw : fallback),
+    BLOCKED_USERS_KEY,
+    [],
+    maxPersistedJsonCharacters,
+  );
+  if (!Array.isArray(parsed)) return [];
+
+  return Array.from(
+    new Set(
+      parsed
+        .map(normalizeBlockedUsername)
+        .filter(Boolean),
+    ),
+  ).slice(0, MAX_BLOCKED_USERS);
+};
+
+const writeBlockedUsers = (blocked) =>
+  writeBoundedList(setLocalStorageItem, BLOCKED_USERS_KEY, blocked, {
+    maxCharacters: maxPersistedJsonCharacters,
+    maxItems: MAX_BLOCKED_USERS,
+  });
 
 export const getBlockedUsers = () => {
-  try {
-    const current = getLocalStorageItem(BLOCKED_USERS_KEY);
-    const blocked =
-      current ?? getLocalStorageItem(LEGACY_BLOCKED_USERS_KEY);
-    if (current === null && blocked !== null) {
-      setLocalStorageItem(BLOCKED_USERS_KEY, blocked);
-    }
-    const parsed = blocked ? JSON.parse(blocked) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  const current = getLocalStorageItem(BLOCKED_USERS_KEY);
+  const legacy =
+    current === null ? getLocalStorageItem(LEGACY_BLOCKED_USERS_KEY) : null;
+  const blocked = parseBlockedUsers(current ?? legacy);
+
+  if (current === null && legacy !== null) {
+    writeBlockedUsers(blocked);
   }
+
+  return blocked;
 };
 
 export const blockUser = (username) => {
+  const normalizedUsername = normalizeBlockedUsername(username);
+  if (!normalizedUsername) return getBlockedUsers();
+
   const blocked = getBlockedUsers();
-  if (!blocked.includes(username)) {
-    blocked.push(username);
-    setLocalStorageItem(BLOCKED_USERS_KEY, JSON.stringify(blocked));
+  if (!blocked.includes(normalizedUsername)) {
+    blocked.unshift(normalizedUsername);
+    return writeBlockedUsers(blocked);
   }
 
   return blocked;
 };
 
 export const unblockUser = (username) => {
+  const normalizedUsername = normalizeBlockedUsername(username);
   let blocked = getBlockedUsers();
-  blocked = blocked.filter((u) => u !== username);
-  setLocalStorageItem(BLOCKED_USERS_KEY, JSON.stringify(blocked));
-  return blocked;
+  blocked = blocked.filter((user) => user !== normalizedUsername);
+  return writeBlockedUsers(blocked);
 };
 
 export const isUserBlocked = (username) => {
-  return getBlockedUsers().includes(username);
+  return getBlockedUsers().includes(normalizeBlockedUsername(username));
 };
 
 export const create = ({
