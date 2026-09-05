@@ -33,7 +33,7 @@ async def test_python_client_uses_daemon_wire_contracts():
     client = SlskrClient("https://example.test", "token")
     client._get = AsyncMock(
         side_effect=[
-            [{"id": "search-1"}],
+            [{"searchId": "search-1"}],
             {"id": "search-1", "results": []},
             {"entries": [{"id": 1}]},
             {"entries": [{"id": 2}]},
@@ -43,7 +43,9 @@ async def test_python_client_uses_daemon_wire_contracts():
     client._post = AsyncMock(side_effect=[{"id": 4}, {"id": 5}, None])
     client._put = AsyncMock(return_value=None)
 
-    assert await client.list_searches() == [{"id": "search-1"}]
+    assert await client.list_searches() == [
+        {"searchId": "search-1", "id": "search-1"}
+    ]
     assert await client.get_search_details("search-1", limit=10, offset=2) == {
         "id": "search-1",
         "results": [],
@@ -107,6 +109,14 @@ async def test_python_client_covers_session_and_extended_api_routes():
 
     async def fake_post(path, body, authenticated=True):
         post_calls.append((path, body, authenticated))
+        if path.endswith("/browse/cancel"):
+            return {"entries": []}
+        if path.endswith("/browse/folder"):
+            folder_calls = sum(1 for call in post_calls if call[0] == path)
+            if folder_calls > 1:
+                return {"entries": []}
+        if path.endswith("/rooms/lounge%20room/join"):
+            return {"name": "lounge room"}
         return {"accepted": True} if path.startswith("/api/session/") else {}
 
     async def fake_put(path, body, authenticated=True):
@@ -137,7 +147,7 @@ async def test_python_client_covers_session_and_extended_api_routes():
     assert await client.get_user("bob") == {"username": "bob", "status": "online"}
     assert await client.list_rooms() == [{"name": "lounge"}]
     assert await client.get_room("lounge room") == {"name": "lounge room"}
-    assert await client.join_room("lounge room") == {}
+    assert await client.join_room("lounge room") == {"name": "lounge room"}
     await client.leave_room("lounge room")
 
     assert await client.browse_user("bob", folder="Albums") == {
@@ -146,8 +156,10 @@ async def test_python_client_covers_session_and_extended_api_routes():
     assert await client.request_browse("bob") == {}
     assert await client.request_browse("bob", folder="Albums") == {}
     assert await client.get_browse_requests(status="pending") == [{"username": "bob"}]
-    assert await client.respond_to_browse_request("bob", "reject") == {}
-    assert await client.respond_to_browse_request("bob", "accept", folder="Albums") == {}
+    assert await client.respond_to_browse_request("bob", "reject") == {"entries": []}
+    assert await client.respond_to_browse_request("bob", "accept", folder="Albums") == {
+        "entries": []
+    }
     with pytest.raises(ValueError, match="accept.*reject"):
         await client.respond_to_browse_request("bob", "ignore")
 
@@ -212,6 +224,18 @@ async def test_python_client_rejects_malformed_success_response_contracts():
     with pytest.raises(ResponseContractError, match="invalid users response"):
         await client.list_users()
 
+    client._get = AsyncMock(return_value={"entries": [{}]})
+    with pytest.raises(ResponseContractError, match="invalid users response"):
+        await client.list_users()
+
+    client._get = AsyncMock(return_value={"entries": [{}]})
+    with pytest.raises(ResponseContractError, match="invalid searches response"):
+        await client.list_searches()
+
+    client._get = AsyncMock(return_value={"entries": [{}]})
+    with pytest.raises(ResponseContractError, match="invalid rooms response"):
+        await client.list_rooms()
+
     client._get = AsyncMock(return_value=None)
     with pytest.raises(ResponseContractError, match="invalid session response"):
         await client.get_sessions()
@@ -243,6 +267,32 @@ async def test_python_client_rejects_malformed_success_response_contracts():
     client._get = AsyncMock(return_value={"entries": [{"id": 1}]})
     with pytest.raises(ResponseContractError, match="invalid events response"):
         await client.get_events()
+
+    client._get = AsyncMock(return_value={})
+    with pytest.raises(ResponseContractError, match="invalid room response"):
+        await client.get_room("lounge")
+
+    client._get = AsyncMock(return_value={})
+    with pytest.raises(ResponseContractError, match="invalid browse result response"):
+        await client.browse_user("alice")
+
+    client._get = AsyncMock(return_value={"entries": [{}]})
+    with pytest.raises(ResponseContractError, match="invalid browse requests response"):
+        await client.get_browse_requests()
+
+    client._get = AsyncMock(
+        return_value={"id": "search-1", "results": [None]}
+    )
+    with pytest.raises(ResponseContractError, match="invalid search details response"):
+        await client.get_search_details("search-1")
+
+    client._post = AsyncMock(return_value={})
+    with pytest.raises(ResponseContractError, match="invalid room response"):
+        await client.join_room("lounge")
+
+    client._post = AsyncMock(return_value={})
+    with pytest.raises(ResponseContractError, match="invalid browse result response"):
+        await client.respond_to_browse_request("alice", "reject")
 
 
 @pytest.mark.asyncio

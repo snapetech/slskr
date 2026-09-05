@@ -387,8 +387,83 @@ func TestClientRejectsMalformedMessageAndTransferResponses(t *testing.T) {
 		name   string
 		method string
 		path   string
+		body   string
 		call   func(*Client) error
 	}{
+		{
+			name:   "list searches",
+			method: http.MethodGet,
+			path:   "/api/searches",
+			call: func(client *Client) error {
+				_, err := client.ListSearches(context.Background(), 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "search details",
+			method: http.MethodGet,
+			path:   "/api/searches/search-1",
+			call: func(client *Client) error {
+				_, err := client.GetSearchDetails(context.Background(), "search-1", 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "list users",
+			method: http.MethodGet,
+			path:   "/api/users",
+			call: func(client *Client) error {
+				_, err := client.ListUsers(context.Background(), 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "list rooms",
+			method: http.MethodGet,
+			path:   "/api/rooms",
+			call: func(client *Client) error {
+				_, err := client.ListRooms(context.Background(), 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "get room",
+			method: http.MethodGet,
+			path:   "/api/rooms/lounge",
+			call: func(client *Client) error {
+				_, err := client.GetRoom(context.Background(), "lounge")
+				return err
+			},
+		},
+		{
+			name:   "browse result",
+			method: http.MethodGet,
+			path:   "/api/users/alice/browse",
+			body:   `{}`,
+			call: func(client *Client) error {
+				_, err := client.BrowseUser(context.Background(), "alice", "", 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "browse requests",
+			method: http.MethodGet,
+			path:   "/api/browse/requests",
+			call: func(client *Client) error {
+				_, err := client.GetBrowseRequests(context.Background(), "", 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "respond browse request",
+			method: http.MethodPost,
+			path:   "/api/users/alice/browse/cancel",
+			body:   `{}`,
+			call: func(client *Client) error {
+				_, err := client.RespondToBrowseRequest(context.Background(), "alice", "reject", "")
+				return err
+			},
+		},
 		{
 			name:   "list messages",
 			method: http.MethodGet,
@@ -443,7 +518,11 @@ func TestClientRejectsMalformedMessageAndTransferResponses(t *testing.T) {
 					t.Errorf("unexpected request %s %s", request.Method, request.URL.RequestURI())
 				}
 				writer.Header().Set("Content-Type", "application/json")
-				_, _ = writer.Write([]byte(`{"entries":[{}]}`))
+				body := test.body
+				if body == "" {
+					body = `{"entries":[{}]}`
+				}
+				_, _ = writer.Write([]byte(body))
 			}))
 			defer server.Close()
 
@@ -493,7 +572,7 @@ func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 		case request.Method == http.MethodPost && request.URL.EscapedPath() == "/api/users/alice/browse/folder":
 			write(`{"entries":[]}`)
 		case request.Method == http.MethodPost && request.URL.EscapedPath() == "/api/users/alice/browse/cancel":
-			write(`{"cancelled":true}`)
+			write(`{"entries":[]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/events":
 			if request.URL.Query().Get("kind") != "transfer.completed" {
 				t.Errorf("event kind was not encoded: %q", request.URL.RawQuery)

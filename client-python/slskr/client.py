@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 import aiohttp
 
@@ -205,7 +205,9 @@ class SlskrClient:
     async def list_users(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List watched users."""
         result = await self._get("/api/users", params={"limit": limit, "offset": offset})
-        return self._response_list(result, "users", "users", "entries")
+        return self._response_list_with_text(
+            result, "users", ("username",), "users", "entries"
+        )
 
     async def get_user(self, username: str) -> Dict[str, Any]:
         """Get a watched user's information."""
@@ -221,36 +223,27 @@ class SlskrClient:
     async def list_searches(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List searches"""
         result = await self._get("/api/searches", params={"limit": limit, "offset": offset})
-        return self._response_list(result, "searches", "searches", "entries")
+        return self._response_list_with_normalized_identifier(
+            result, "searches", "id", "searchId", "token"
+        )
 
     async def create_search(self, query: str, room: str = None, target: str = None) -> Dict:
         """Create new search"""
         body = {"query": query, "room": room, "target": target}
         result = self._response_object(await self._post("/api/searches", body), "search")
-        search_id = next(
-            (
-                result.get(key)
-                for key in ("id", "searchId", "token")
-                if self._valid_response_identifier(result.get(key))
-            ),
-            None,
+        return self._response_object_with_normalized_identifier(
+            result, "search", "id", "searchId", "token"
         )
-        if search_id is None:
-            raise ResponseContractError("search")
-        if not self._valid_response_identifier(result.get("id")):
-            result = {**result, "id": search_id}
-        return result
 
     async def get_search_details(
         self, search_id: str, limit: int = 50, offset: int = 0
     ) -> Dict:
         """Get search details and results"""
-        return self._response_object(
+        return self._response_object_with_search_contract(
             await self._get(
                 f"/api/searches/{self._path_segment(search_id)}",
                 params={"limit": limit, "offset": offset},
-            ),
-            "search details",
+            )
         )
 
     # =========================================================================
@@ -339,20 +332,24 @@ class SlskrClient:
     async def list_rooms(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List rooms."""
         result = await self._get("/api/rooms", params={"limit": limit, "offset": offset})
-        return self._response_list(result, "rooms", "rooms", "entries")
+        return self._response_list_with_text(
+            result, "rooms", ("name", "room"), "rooms", "entries"
+        )
 
     async def get_room(self, name: str) -> Dict[str, Any]:
         """Get room details by name."""
-        return self._response_object(
-            await self._get(f"/api/rooms/{self._path_segment(name)}"), "room"
+        return self._response_object_with_text(
+            await self._get(f"/api/rooms/{self._path_segment(name)}"), "room", "name", "room"
         )
 
     async def join_room(self, name: str) -> Dict[str, Any]:
         """Join a room."""
-        return self._response_object(
+        return self._response_object_with_text(
             await self._post(
                 f"/api/rooms/{self._path_segment(name)}/join", {"name": name}
             ),
+            "room",
+            "name",
             "room",
         )
 
@@ -375,11 +372,10 @@ class SlskrClient:
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if folder is not None:
             params["folder"] = folder
-        return self._response_object(
+        return self._response_object_with_browse_contract(
             await self._get(
                 f"/api/users/{self._path_segment(username)}/browse", params=params
-            ),
-            "browse result",
+            )
         )
 
     async def request_browse(
@@ -410,7 +406,9 @@ class SlskrClient:
         if status:
             params["status"] = status
         result = await self._get("/api/browse/requests", params=params)
-        return self._response_list(result, "browse requests", "requests", "entries")
+        return self._response_list_with_text(
+            result, "browse requests", ("username", "from", "id"), "requests", "entries"
+        )
 
     async def respond_to_browse_request(
         self, username: str, action: str, folder: Optional[str] = None
@@ -426,7 +424,7 @@ class SlskrClient:
             path = f"/api/users/{segment}/browse/folder"
             body = {"folder": folder or ""}
         result = await self._post(path, body)
-        return self._response_object(result, "browse result")
+        return self._response_object_with_browse_contract(result)
 
     # =========================================================================
     # Events
@@ -691,6 +689,51 @@ class SlskrClient:
             raise ResponseContractError(resource)
         return response
 
+    @classmethod
+    def _response_object_with_normalized_identifier(
+        cls, result: Any, resource: str, canonical: str, *aliases: str
+    ) -> Dict[str, Any]:
+        response = cls._response_object(result, resource)
+        for key in (canonical, *aliases):
+            if cls._valid_response_identifier(response.get(key)):
+                if not cls._valid_response_identifier(response.get(canonical)):
+                    response = {**response, canonical: response[key]}
+                return response
+        raise ResponseContractError(resource)
+
+    @classmethod
+    def _response_object_with_text(
+        cls, result: Any, resource: str, *keys: str
+    ) -> Dict[str, Any]:
+        response = cls._response_object(result, resource)
+        if not any(cls._valid_response_text(response.get(key)) for key in keys):
+            raise ResponseContractError(resource)
+        return response
+
+    @classmethod
+    def _response_object_with_search_contract(cls, result: Any) -> Dict[str, Any]:
+        response = cls._response_object_with_normalized_identifier(
+            result, "search details", "id", "searchId", "token"
+        )
+        if "results" in response and response["results"] is not None:
+            if not isinstance(response["results"], list) or any(
+                not isinstance(value, dict) for value in response["results"]
+            ):
+                raise ResponseContractError("search details")
+        return response
+
+    @classmethod
+    def _response_object_with_browse_contract(cls, result: Any) -> Dict[str, Any]:
+        response = cls._response_object(result, "browse result")
+        values = None
+        for key in ("entries", "directories"):
+            if isinstance(response.get(key), list):
+                values = response[key]
+                break
+        if values is None or any(not isinstance(value, dict) for value in values):
+            raise ResponseContractError("browse result")
+        return response
+
     @staticmethod
     def _response_list(result: Any, resource: str, *keys: str) -> List[Dict]:
         values = None
@@ -705,6 +748,30 @@ class SlskrClient:
         if values is None or any(not isinstance(value, dict) for value in values):
             raise ResponseContractError(resource)
         return values
+
+    @classmethod
+    def _response_list_with_text(
+        cls, result: Any, resource: str, text_keys: Tuple[str, ...], *collection_keys: str
+    ) -> List[Dict]:
+        values = cls._response_list(result, resource, *collection_keys)
+        if any(
+            not any(cls._valid_response_text(value.get(key)) for key in text_keys)
+            for value in values
+        ):
+            raise ResponseContractError(resource)
+        return values
+
+    @classmethod
+    def _response_list_with_normalized_identifier(
+        cls, result: Any, resource: str, canonical: str, *aliases: str
+    ) -> List[Dict]:
+        values = cls._response_list(result, resource, resource, "entries")
+        return [
+            cls._response_object_with_normalized_identifier(
+                value, resource, canonical, *aliases
+            )
+            for value in values
+        ]
 
     @classmethod
     def _response_list_with_identifier(

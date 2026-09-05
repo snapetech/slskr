@@ -165,9 +165,11 @@ func (c *Client) ListSearches(ctx context.Context, limit, offset int) ([]map[str
 
 	var out []map[string]interface{}
 	for _, s := range searches {
-		if m, ok := s.(map[string]interface{}); ok {
-			out = append(out, m)
+		m := s.(map[string]interface{})
+		if err := normalizeResponseIdentifier(m, "search", "id", "searchId", "token"); err != nil {
+			return nil, err
 		}
+		out = append(out, m)
 	}
 	return out, nil
 }
@@ -204,14 +206,10 @@ func (c *Client) createSearch(ctx context.Context, query string, options *Search
 	if err != nil {
 		return nil, err
 	}
-	if searchID, hasID := result["id"]; hasID && validResponseIdentifier(searchID) {
-		return result, nil
+	if err := normalizeResponseIdentifier(result, "search", "id", "searchId", "token"); err != nil {
+		return nil, err
 	}
-	if searchID, hasSearchID := result["searchId"]; hasSearchID && validResponseIdentifier(searchID) {
-		result["id"] = searchID
-		return result, nil
-	}
-	return nil, &ResponseContractError{Resource: "search"}
+	return result, nil
 }
 
 // GetSearchDetails gets a search and its result page.
@@ -219,7 +217,17 @@ func (c *Client) GetSearchDetails(ctx context.Context, searchID string, limit, o
 	params := url.Values{}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	params.Set("offset", fmt.Sprintf("%d", offset))
-	return c.getWithParams(ctx, fmt.Sprintf("/api/searches/%s", pathSegment(searchID)), params, true)
+	result, err := c.getWithParams(ctx, fmt.Sprintf("/api/searches/%s", pathSegment(searchID)), params, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := normalizeResponseIdentifier(result, "search details", "id", "searchId", "token"); err != nil {
+		return nil, err
+	}
+	if err := requireResponseArrayIfPresent(result, "search details", "results"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // ListTransfers lists transfers
@@ -401,9 +409,11 @@ func (c *Client) ListUsers(ctx context.Context, limit, offset int) ([]map[string
 
 	var out []map[string]interface{}
 	for _, u := range users {
-		if m, ok := u.(map[string]interface{}); ok {
-			out = append(out, m)
+		m := u.(map[string]interface{})
+		if err := requireResponseText(m, "user", "username"); err != nil {
+			return nil, err
 		}
+		out = append(out, m)
 	}
 	return out, nil
 }
@@ -434,16 +444,25 @@ func (c *Client) ListRooms(ctx context.Context, pagination ...int) ([]map[string
 
 	var out []map[string]interface{}
 	for _, r := range rooms {
-		if m, ok := r.(map[string]interface{}); ok {
-			out = append(out, m)
+		m := r.(map[string]interface{})
+		if err := requireResponseText(m, "room", "name", "room"); err != nil {
+			return nil, err
 		}
+		out = append(out, m)
 	}
 	return out, nil
 }
 
 // GetRoom gets room info
 func (c *Client) GetRoom(ctx context.Context, roomID string) (map[string]interface{}, error) {
-	return c.get(ctx, fmt.Sprintf("/api/rooms/%s", pathSegment(roomID)), true)
+	result, err := c.get(ctx, fmt.Sprintf("/api/rooms/%s", pathSegment(roomID)), true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseText(result, "room", "name", "room"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // JoinRoom joins a room
@@ -451,7 +470,14 @@ func (c *Client) JoinRoom(ctx context.Context, roomName string) (map[string]inte
 	body := map[string]interface{}{
 		"name": roomName,
 	}
-	return c.post(ctx, fmt.Sprintf("/api/rooms/%s/join", pathSegment(roomName)), body, true)
+	result, err := c.post(ctx, fmt.Sprintf("/api/rooms/%s/join", pathSegment(roomName)), body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseText(result, "room", "name", "room"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // LeaveRoom leaves a room
@@ -520,7 +546,14 @@ func (c *Client) BrowseUser(ctx context.Context, username, folder string, limit,
 	if folder != "" {
 		params.Set("folder", folder)
 	}
-	return c.getWithParams(ctx, fmt.Sprintf("/api/users/%s/browse", pathSegment(username)), params, true)
+	result, err := c.getWithParams(ctx, fmt.Sprintf("/api/users/%s/browse", pathSegment(username)), params, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseArrayField(result, "browse result", "entries", "directories"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // RequestBrowse requests a fresh browse listing from a user. Supplying an
@@ -553,9 +586,11 @@ func (c *Client) GetBrowseRequests(ctx context.Context, status string, limit, of
 	}
 	var out []map[string]interface{}
 	for _, request := range requests {
-		if object, ok := request.(map[string]interface{}); ok {
-			out = append(out, object)
+		object := request.(map[string]interface{})
+		if err := requireResponseText(object, "browse request", "username", "from", "id"); err != nil {
+			return nil, err
 		}
+		out = append(out, object)
 	}
 	return out, nil
 }
@@ -571,7 +606,14 @@ func (c *Client) RespondToBrowseRequest(ctx context.Context, username, action, f
 		path = fmt.Sprintf("/api/users/%s/browse/cancel", pathSegment(username))
 		body = map[string]interface{}{"reason": "rejected by client"}
 	}
-	return c.post(ctx, path, body, true)
+	result, err := c.post(ctx, path, body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseArrayField(result, "browse result", "entries", "directories"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GetEvents lists recorded events.
@@ -862,6 +904,24 @@ func responseArray(value interface{}, keys ...string) ([]interface{}, error) {
 		}
 	}
 	return nil, fmt.Errorf("unexpected response format: missing array field")
+}
+
+func requireResponseArrayField(result map[string]interface{}, resource string, keys ...string) error {
+	if _, err := responseArray(result, keys...); err != nil {
+		return &ResponseContractError{Resource: resource}
+	}
+	return nil
+}
+
+func requireResponseArrayIfPresent(result map[string]interface{}, resource, key string) error {
+	value, present := result[key]
+	if !present || value == nil {
+		return nil
+	}
+	if _, err := responseArray(map[string]interface{}{key: value}, key); err != nil {
+		return &ResponseContractError{Resource: resource}
+	}
+	return nil
 }
 
 func validateResponseArray(values []interface{}) ([]interface{}, error) {

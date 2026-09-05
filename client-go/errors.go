@@ -35,12 +35,33 @@ func validResponseIdentifier(value interface{}) bool {
 }
 
 func requireResponseIdentifier(result map[string]interface{}, resource string, keys ...string) error {
-	for _, key := range keys {
-		if value, ok := result[key]; ok && validResponseIdentifier(value) {
-			return nil
-		}
+	if _, ok := responseIdentifier(result, keys...); ok {
+		return nil
 	}
 	return &ResponseContractError{Resource: resource}
+}
+
+func responseIdentifier(result map[string]interface{}, keys ...string) (interface{}, bool) {
+	for _, key := range keys {
+		if value, ok := result[key]; ok && validResponseIdentifier(value) {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func normalizeResponseIdentifier(result map[string]interface{}, resource, canonical string, aliases ...string) error {
+	keys := make([]string, 0, len(aliases)+1)
+	keys = append(keys, canonical)
+	keys = append(keys, aliases...)
+	value, ok := responseIdentifier(result, keys...)
+	if !ok {
+		return &ResponseContractError{Resource: resource}
+	}
+	if !validResponseIdentifier(result[canonical]) {
+		result[canonical] = value
+	}
+	return nil
 }
 
 func requireResponseText(result map[string]interface{}, resource string, keys ...string) error {
