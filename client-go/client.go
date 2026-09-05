@@ -809,19 +809,30 @@ func decodeJSONValue(raw []byte) (interface{}, error) {
 }
 
 func responseArray(value interface{}, keys ...string) ([]interface{}, error) {
+	var values []interface{}
 	if values, ok := value.([]interface{}); ok {
-		return values, nil
+		return validateResponseArray(values)
 	}
 	object, ok := value.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("unexpected response format: expected JSON array or object")
 	}
 	for _, key := range keys {
-		if values, ok := object[key].([]interface{}); ok {
-			return values, nil
+		if candidate, ok := object[key].([]interface{}); ok {
+			values = candidate
+			return validateResponseArray(values)
 		}
 	}
 	return nil, fmt.Errorf("unexpected response format: missing array field")
+}
+
+func validateResponseArray(values []interface{}) ([]interface{}, error) {
+	for _, value := range values {
+		if _, ok := value.(map[string]interface{}); !ok {
+			return nil, fmt.Errorf("unexpected response format: array entries must be JSON objects")
+		}
+	}
+	return values, nil
 }
 
 func transferDirectionValue(direction string) string {

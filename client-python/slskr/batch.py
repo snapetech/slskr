@@ -5,6 +5,8 @@ Batch operations client
 from copy import deepcopy
 from typing import List, Dict, Any
 
+from .exceptions import ResponseContractError
+
 
 class BatchOperation:
     """Single batch operation"""
@@ -141,12 +143,31 @@ class BatchBuilder:
         request = {"operations": [op.to_dict() for op in self.operations]}
 
         response = await self.client._post("/api/batch", request)
+        if not isinstance(response, dict) or not isinstance(response.get("results"), list):
+            raise ResponseContractError("batch")
 
-        results = [
-            BatchResult(r["id"], r["status"], r["body"]) for r in response.get("results", [])
-        ]
+        results = []
+        for result in response["results"]:
+            if (
+                not isinstance(result, dict)
+                or not isinstance(result.get("id"), str)
+                or not result["id"].strip()
+                or isinstance(result.get("status"), bool)
+                or not isinstance(result.get("status"), int)
+                or not 100 <= result["status"] <= 599
+                or "body" not in result
+            ):
+                raise ResponseContractError("batch")
+            results.append(BatchResult(result["id"], result["status"], result["body"]))
 
-        return BatchResponse(results, response.get("total_time_ms", 0))
+        total_time_ms = response.get("total_time_ms", 0)
+        if (
+            isinstance(total_time_ms, bool)
+            or not isinstance(total_time_ms, (int, float))
+            or total_time_ms < 0
+        ):
+            raise ResponseContractError("batch")
+        return BatchResponse(results, int(total_time_ms))
 
 
 class BatchClient:

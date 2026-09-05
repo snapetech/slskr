@@ -143,6 +143,19 @@ func TestClientRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestClientRejectsNonObjectCollectionEntries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"entries":[null]}`))
+	}))
+	defer server.Close()
+
+	_, err := NewClient(server.URL, "token").ListSearches(context.Background(), 50, 0)
+	if err == nil || !strings.Contains(err.Error(), "array entries must be JSON objects") {
+		t.Fatalf("expected malformed collection error, got %v", err)
+	}
+}
+
 func TestClientUsesDaemonWireContracts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

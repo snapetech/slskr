@@ -7,7 +7,7 @@ import pytest
 
 from slskr import BatchClient, BatchBuilder, SlskrClient, WebSocketClient
 from slskr.batch import BatchOperation, BatchResponse, BatchResult
-from slskr.exceptions import ApiError, NetworkError
+from slskr.exceptions import ApiError, NetworkError, ResponseContractError
 
 
 def test_client_url_and_path_segments_are_safe():
@@ -198,6 +198,41 @@ async def test_create_search_exposes_compatibility_search_id_as_id():
 
     assert result["id"] == "search-123"
     assert result["searchId"] == "search-123"
+
+
+@pytest.mark.asyncio
+async def test_python_client_rejects_malformed_success_response_contracts():
+    client = SlskrClient("https://example.test", "token")
+
+    client._get = AsyncMock(return_value=[])
+    with pytest.raises(ResponseContractError, match="invalid health response"):
+        await client.health()
+
+    client._get = AsyncMock(return_value={})
+    with pytest.raises(ResponseContractError, match="invalid users response"):
+        await client.list_users()
+
+    client._get = AsyncMock(return_value=None)
+    with pytest.raises(ResponseContractError, match="invalid session response"):
+        await client.get_sessions()
+
+    client._post = AsyncMock(return_value={"query": "ambient"})
+    with pytest.raises(ResponseContractError, match="invalid search response"):
+        await client.create_search("ambient")
+
+    client._get = AsyncMock(return_value={"entries": [None]})
+    with pytest.raises(ResponseContractError, match="invalid events response"):
+        await client.get_events()
+
+
+@pytest.mark.asyncio
+async def test_python_batch_client_rejects_malformed_success_response():
+    client = SlskrClient("https://example.test", "token")
+    client._post = AsyncMock(return_value={"results": [{"id": "op-1", "status": 200}]})
+
+    builder = BatchBuilder(client).get("/api/health", op_id="op-1")
+    with pytest.raises(ResponseContractError, match="invalid batch response"):
+        await builder.execute()
 
 
 def test_batch_builder_serializes_and_limits_operations():

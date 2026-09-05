@@ -45,6 +45,13 @@ class NetworkError(Exception):
         super().__init__(message)
 
 
+class ResponseContractError(NetworkError):
+    """Successful API response did not match the documented shape."""
+
+    def __init__(self, resource: str):
+        super().__init__(f"API returned an invalid {resource} response")
+
+
 class TimeoutError(Exception):
     """Request timeout error"""
 

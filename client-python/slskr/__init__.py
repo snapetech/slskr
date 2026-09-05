@@ -8,6 +8,7 @@ from .client import SlskrClient
 from .exceptions import (
     ApiError,
     NetworkError,
+    ResponseContractError,
     TimeoutError,
     ValidationError,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "WebSocketClient",
     "ApiError",
     "NetworkError",
+    "ResponseContractError",
     "TimeoutError",
     "ValidationError",
 ]
