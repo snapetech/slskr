@@ -30,22 +30,9 @@ vi.mock('./RealmSubjectIndexConflicts', () => ({
 }));
 
 const meshStats = {
-  activeCircuits: 0,
-  activeStreams: 0,
-  bootstrapPeers: [],
-  connectedPeers: 0,
-  description: 'Mesh transport ready',
-  health: 'Healthy',
-  isolatedPeers: 0,
-  lastDhtError: null,
-  lastDhtPublishUtc: null,
+  dht: 0,
   natType: 'Unknown',
-  publicEndpoint: null,
-  quorumPeers: 0,
-  relayedPeers: 0,
-  status: 'Healthy',
-  totalPeers: 0,
-  transportPreference: 'Auto',
+  overlay: 0,
 };
 
 describe('System Mesh', () => {
@@ -125,5 +112,27 @@ describe('System Mesh', () => {
       screen.getByText((_, element) => element.textContent === 'Similarity rating: 14'),
     ).toBeInTheDocument();
     expect(screen.getByText(/peer-id/)).toBeInTheDocument();
+  });
+
+  it('retains the last mesh snapshot when a refresh fails', async () => {
+    mesh.getStats.mockReset();
+    mesh.getStats
+      .mockResolvedValueOnce({ ...meshStats, dht: 3 })
+      .mockRejectedValueOnce(new Error('mesh telemetry unavailable'));
+    soulseekDiscovery.getMeshRendezvousStatus.mockResolvedValue({
+      data: { enabled: false, interestTag: 'slskr-mesh-v1' },
+    });
+
+    render(<Mesh />);
+
+    expect(await screen.findByText('3')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh mesh statistics' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mesh-stats-load-error')).toHaveTextContent(
+        'mesh telemetry unavailable',
+      );
+      expect(screen.getByText('3')).toBeInTheDocument();
+    });
   });
 });

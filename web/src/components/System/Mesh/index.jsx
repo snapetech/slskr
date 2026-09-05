@@ -20,11 +20,58 @@ import {
   Statistic,
 } from 'semantic-ui-react';
 
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const toCount = (value) => {
+  if (Array.isArray(value)) return value.length;
+  if (isRecord(value)) {
+    for (const key of ['count', 'activeConnections', 'sessions', 'activeSessions']) {
+      if (value[key] !== undefined) return toCount(value[key]);
+    }
+    return null;
+  }
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+};
+
+const formatCount = (value) => {
+  const count = toCount(value);
+  return count === null ? '—' : count.toLocaleString();
+};
+
+const normalizeMeshStats = (data) => {
+  if (!isRecord(data)) return null;
+
+  const dhtSessions = toCount(
+    data.activeDhtSessions ?? data.dhtSessions ?? data.dht,
+  );
+  const overlaySessions = toCount(
+    data.activeOverlaySessions ?? data.overlaySessions ?? data.overlay,
+  );
+
+  return {
+    ...data,
+    activeDhtSessions: dhtSessions,
+    activeOverlaySessions: overlaySessions,
+    description:
+      data.description ??
+      (dhtSessions !== null || overlaySessions !== null
+        ? 'Mesh transport session counts are available.'
+        : undefined),
+    status:
+      data.status ??
+      (dhtSessions !== null || overlaySessions !== null ? 'Healthy' : 'Unknown'),
+  };
+};
+
 const Mesh = ({ runtimeProfile } = {}) => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [rendezvousStatus, setRendezvousStatus] = useState(null);
+  const [rendezvousStatusError, setRendezvousStatusError] = useState(null);
   const [rendezvousUsers, setRendezvousUsers] = useState([]);
   const [capabilityRecords, setCapabilityRecords] = useState([]);
   const [rendezvousLoading, setRendezvousLoading] = useState(false);
@@ -46,7 +93,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
         mountedRef.current &&
         statsRequestIdRef.current === requestId
       ) {
-        setStats(data && typeof data === 'object' ? data : null);
+        setStats(normalizeMeshStats(data));
       }
     } catch (error_) {
       if (
@@ -75,6 +122,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
     const requestId = ++rendezvousStatusRequestIdRef.current;
     const fetchRendezvousStatus = async () => {
       if (!mountedRef.current) return;
+      setRendezvousStatusError(null);
       try {
         const response = await soulseekDiscovery.getMeshRendezvousStatus();
         if (
@@ -86,16 +134,16 @@ const Mesh = ({ runtimeProfile } = {}) => {
               ? response.data
               : {},
           );
+          setRendezvousStatusError(null);
         }
       } catch (error_) {
         if (
           mountedRef.current &&
           rendezvousStatusRequestIdRef.current === requestId
         ) {
-          setRendezvousStatus({
-            enabled: false,
-            error: toDisplayError(error_, 'Unable to load rendezvous status'),
-          });
+          setRendezvousStatusError(
+            toDisplayError(error_, 'Unable to load rendezvous status'),
+          );
         }
       }
     };
@@ -214,8 +262,6 @@ const Mesh = ({ runtimeProfile } = {}) => {
       });
     } catch (error_) {
       if (!request.isCurrentRequest()) return;
-      setRendezvousUsers([]);
-      setCapabilityRecords([]);
       setRendezvousMessage({
         negative: true,
         text:
@@ -268,7 +314,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
     );
   }
 
-  if (error) {
+  if (error && !stats) {
     return (
       <Message error>
         <Message.Header>Failed to load mesh statistics</Message.Header>
@@ -283,6 +329,23 @@ const Mesh = ({ runtimeProfile } = {}) => {
         <Icon name="sitemap" />
         Mesh Network Status
       </Header>
+      {error && (
+        <Message
+          data-testid="mesh-stats-load-error"
+          error
+        >
+          <Message.Header>Mesh statistics refresh failed</Message.Header>
+          <p>{error}</p>
+          <p>Showing the last successfully loaded mesh snapshot.</p>
+        </Message>
+      )}
+      <Button
+        aria-label="Refresh mesh statistics"
+        disabled={loading}
+        icon="refresh"
+        loading={loading}
+        onClick={fetchStats}
+      />
 
       <Grid stackable>
         {/* Overall Health Status */}
@@ -309,24 +372,24 @@ const Mesh = ({ runtimeProfile } = {}) => {
             <Header as="h3">Network Statistics</Header>
             <Statistic.Group size="small">
               <Statistic>
-                <Statistic.Value>{stats?.totalPeers || 0}</Statistic.Value>
+                <Statistic.Value>{formatCount(stats?.totalPeers)}</Statistic.Value>
                 <Statistic.Label>Total Peers</Statistic.Label>
               </Statistic>
               <Statistic>
                 <Statistic.Value>
-                  {stats?.activeDhtSessions || 0}
+                  {formatCount(stats?.activeDhtSessions)}
                 </Statistic.Value>
                 <Statistic.Label>DHT Sessions</Statistic.Label>
               </Statistic>
               <Statistic>
                 <Statistic.Value>
-                  {stats?.activeOverlaySessions || 0}
+                  {formatCount(stats?.activeOverlaySessions)}
                 </Statistic.Value>
                 <Statistic.Label>Overlay Sessions</Statistic.Label>
               </Statistic>
               <Statistic>
                 <Statistic.Value>
-                  {stats?.routingTableSize || 0}
+                  {formatCount(stats?.routingTableSize)}
                 </Statistic.Value>
                 <Statistic.Label>Routing Table Size</Statistic.Label>
               </Statistic>
@@ -349,7 +412,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>DHT Nodes</List.Header>
                   <List.Description>
-                    {stats?.activeDhtSessions || 0} active connections
+                    {formatCount(stats?.activeDhtSessions)} active connections
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -357,7 +420,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>Overlay Sessions</List.Header>
                   <List.Description>
-                    {stats?.activeOverlaySessions || 0} active sessions
+                    {formatCount(stats?.activeOverlaySessions)} active sessions
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -365,7 +428,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>Mirrored Sessions</List.Header>
                   <List.Description>
-                    {stats?.activeMirroredSessions || 0} relay connections
+                    {formatCount(stats?.activeMirroredSessions)} relay connections
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -373,7 +436,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>Bootstrap Peers</List.Header>
                   <List.Description>
-                    {stats?.bootstrapPeers || 0} bootstrap nodes
+                    {formatCount(stats?.bootstrapPeers)} bootstrap nodes
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -396,7 +459,9 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>DHT Operations/sec</List.Header>
                   <List.Description>
-                    {stats?.dhtOperationsPerSecond?.toFixed(1) || '0.0'} ops/sec
+                    {Number.isFinite(Number(stats?.dhtOperationsPerSecond))
+                      ? Number(stats.dhtOperationsPerSecond).toFixed(1)
+                      : '—'} ops/sec
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -404,7 +469,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>Messages Sent</List.Header>
                   <List.Description>
-                    {stats?.messagesSent || 0} total messages
+                    {formatCount(stats?.messagesSent)} total messages
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -412,7 +477,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>Messages Received</List.Header>
                   <List.Description>
-                    {stats?.messagesReceived || 0} total messages
+                    {formatCount(stats?.messagesReceived)} total messages
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -420,7 +485,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
                 <List.Content>
                   <List.Header>Peer Churn Events</List.Header>
                   <List.Description>
-                    {stats?.peerChurnEvents || 0} churn events
+                    {formatCount(stats?.peerChurnEvents)} churn events
                   </List.Description>
                 </List.Content>
               </List.Item>
@@ -461,28 +526,54 @@ const Mesh = ({ runtimeProfile } = {}) => {
                       <List.Header>Health Indicators</List.Header>
                       <List.Description>
                         <Label
-                          color={stats?.routingTableHealthy ? 'green' : 'red'}
+                          color={
+                            stats?.routingTableHealthy == null
+                              ? 'grey'
+                              : stats.routingTableHealthy
+                                ? 'green'
+                                : 'red'
+                          }
                         >
                           Routing Table:{' '}
-                          {stats?.routingTableHealthy ? 'Healthy' : 'Unhealthy'}
+                          {stats?.routingTableHealthy == null
+                            ? 'Unavailable'
+                            : stats.routingTableHealthy
+                              ? 'Healthy'
+                              : 'Unhealthy'}
                         </Label>
                         <br />
                         <Label
                           color={
-                            stats?.peerConnectivityHealthy ? 'green' : 'red'
+                            stats?.peerConnectivityHealthy == null
+                              ? 'grey'
+                              : stats.peerConnectivityHealthy
+                                ? 'green'
+                                : 'red'
                           }
                         >
                           Peer Connectivity:{' '}
-                          {stats?.peerConnectivityHealthy
-                            ? 'Healthy'
-                            : 'Unhealthy'}
+                          {stats?.peerConnectivityHealthy == null
+                            ? 'Unavailable'
+                            : stats.peerConnectivityHealthy
+                              ? 'Healthy'
+                              : 'Unhealthy'}
                         </Label>
                         <br />
                         <Label
-                          color={stats?.messageFlowHealthy ? 'green' : 'red'}
+                          color={
+                            stats?.messageFlowHealthy == null
+                              ? 'grey'
+                              : stats.messageFlowHealthy
+                                ? 'green'
+                                : 'red'
+                          }
                         >
                           Message Flow:{' '}
-                          {stats?.messageFlowHealthy ? 'Healthy' : 'Unhealthy'}
+                          {stats?.messageFlowHealthy == null
+                            ? 'Unavailable'
+                            : stats.messageFlowHealthy
+                              ? 'Healthy'
+                              : 'Unhealthy'}
                         </Label>
                       </List.Description>
                     </List.Content>
@@ -499,35 +590,47 @@ const Mesh = ({ runtimeProfile } = {}) => {
               <Icon name="users" />
               Soulseek Mesh Rendezvous
             </Header>
-            <Message
-              icon
-              warning={!rendezvousStatus?.enabled}
-            >
-              <Icon name={rendezvousStatus?.enabled ? 'privacy' : 'lock'} />
-              <Message.Content>
-                <Message.Header>
-                  {rendezvousStatus?.enabled
-                    ? 'Opt-in public rendezvous is enabled'
-                    : 'Opt-in public rendezvous is disabled'}
-                </Message.Header>
-                <p>
-                  This feature uses the native Soulseek interest graph to find
-                  other slskr mesh-capable accounts. Publishing the interest
-                  tag makes this account visibly identifiable as a slskr mesh
-                  participant.
-                </p>
-                <p>
-                  Interest tag:{' '}
-                  <code>{rendezvousStatus?.interestTag || 'slskr-mesh-v1'}</code>
-                </p>
-                {!rendezvousStatus?.enabled && (
+            {(!rendezvousStatusError || rendezvousStatus) && (
+              <Message
+                icon
+                warning={!rendezvousStatus?.enabled}
+              >
+                <Icon name={rendezvousStatus?.enabled ? 'privacy' : 'lock'} />
+                <Message.Content>
+                  <Message.Header>
+                    {rendezvousStatus?.enabled
+                      ? 'Opt-in public rendezvous is enabled'
+                      : 'Opt-in public rendezvous is disabled'}
+                  </Message.Header>
                   <p>
-                    Enable <code>mesh.enableSoulseekRendezvous</code> in
-                    configuration before using these controls.
+                    This feature uses the native Soulseek interest graph to find
+                    other slskr mesh-capable accounts. Publishing the interest
+                    tag makes this account visibly identifiable as a slskr mesh
+                    participant.
                   </p>
-                )}
-              </Message.Content>
-            </Message>
+                  <p>
+                    Interest tag:{' '}
+                    <code>{rendezvousStatus?.interestTag || 'slskr-mesh-v1'}</code>
+                  </p>
+                  {!rendezvousStatus?.enabled && (
+                    <p>
+                      Enable <code>mesh.enableSoulseekRendezvous</code> in
+                      configuration before using these controls.
+                    </p>
+                  )}
+                </Message.Content>
+              </Message>
+            )}
+            {rendezvousStatusError && (
+              <Message
+                data-testid="mesh-rendezvous-status-error"
+                error
+              >
+                <Message.Header>Rendezvous status unavailable</Message.Header>
+                <p>{rendezvousStatusError}</p>
+                <p>Showing the last successfully loaded rendezvous status when available.</p>
+              </Message>
+            )}
             {rendezvousMessage && (
               <Message
                 negative={rendezvousMessage.negative}
