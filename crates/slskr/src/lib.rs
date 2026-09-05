@@ -58778,100 +58778,12 @@ async fn multisource_versioned_swarm_response(
     let expected_hash_value = payload
         .get("expectedHash")
         .or_else(|| payload.get("expected_hash"));
-    if expected_hash_value.is_some() {
-        return multisource_verified_swarm_response(
-            path, &payload, &filename, size, chunk_size, state,
-        )
-        .await;
-    }
-
-    let filename_matches = |result: &SearchResultEntry| {
-        filename.is_empty()
-            || virtual_basename(&result.filename).eq_ignore_ascii_case(virtual_basename(&filename))
-    };
-    let searches = state.searches.read().await;
-    let mut source_names = Vec::<String>::new();
-    for result in searches
-        .records
-        .iter()
-        .flat_map(|record| record.results.iter())
-        .filter(|result| result.size == size && filename_matches(result))
-    {
-        if source_names.len() >= multisource::MAX_SOURCES {
-            break;
-        }
-        let Some(username) = result.peer_username.as_deref() else {
-            continue;
-        };
-        if !source_names
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(username))
-        {
-            source_names.push(username.to_owned());
-        }
-    }
-    drop(searches);
-    if source_names.len() < 2 {
-        return routing::bad_request_response("Not enough sources for swarm download");
-    }
-    let total_chunks = size.div_ceil(chunk_size);
-    let id = uuid::Uuid::new_v4().to_string();
-    if path == "/api/multisource/swarm/async" {
-        let job = multisource::SwarmJob {
-            id: id.clone(),
-            status: "queued".to_owned(),
-            filename: if filename.is_empty() {
-                "multisource-swarm".to_owned()
-            } else {
-                filename.clone()
-            },
-            output_path: String::new(),
-            file_size: size,
-            chunk_size,
-            sources: source_names.clone(),
-            completed_chunks: 0,
-            total_chunks,
-            bytes_downloaded: 0,
-            created_at: unix_timestamp(),
-            updated_at: unix_timestamp(),
-            result: None,
-        };
-        state.multisource.write().await.insert(job);
-        return routing::ok_response(
-            serde_json::json!({
-                "jobId": id,
-                "message": "Swarm download started in background. Poll /api/v0/multisource/jobs/{jobId} for status.",
-                "totalSources": source_names.len(),
-                "verifiedSources": if payload.get("skipVerification").and_then(serde_json::Value::as_bool).unwrap_or(false) { source_names.len() } else { 0 },
-                "totalChunks": total_chunks,
-                "verificationEnabled": !payload.get("skipVerification").and_then(serde_json::Value::as_bool).unwrap_or(false),
-                "expectedHash": serde_json::Value::Null,
-            })
-            .to_string(),
+    if expected_hash_value.is_none() {
+        return routing::bad_request_response(
+            "expectedHash is required for verified swarm execution",
         );
     }
-    routing::ok_response(
-        serde_json::json!({
-            "mode": "SWARM",
-            "description": "All sources grabbing chunks from shared queue. Fast users do more!",
-            "success": false,
-            "fileSize": size,
-            "fileSizeMB": format!("{:.1} MB", size as f64 / 1024.0 / 1024.0),
-            "chunkSize": chunk_size,
-            "chunkSizeKB": chunk_size / 1024,
-            "totalChunks": total_chunks,
-            "totalSources": source_names.len(),
-            "sourcesUsed": 0,
-            "timeMs": 0,
-            "timeSeconds": "N/A",
-            "speedMBps": "N/A",
-            "outputPath": "",
-            "finalHash": "",
-            "error": "Swarm download is unavailable in the local compatibility runtime",
-            "chunks": [],
-        })
-        .to_string(),
-    )
+    multisource_verified_swarm_response(path, &payload, &filename, size, chunk_size, state).await
 }
 
 async fn multisource_controller_response(

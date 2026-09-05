@@ -1453,6 +1453,29 @@ async fn versioned_swarm_rejects_oversized_transfer_limits_before_discovery() {
 }
 
 #[tokio::test]
+async fn versioned_swarm_requires_expected_hash_before_queueing() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
+
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/multisource/swarm/async",
+        None,
+        r#"{"filename":"Track.flac","size":42}"#,
+        &state,
+    )
+    .await
+    .expect("missing expected hash response");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("expectedHash is required for verified swarm execution"));
+    assert!(state.multisource.read().await.list().is_empty());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn merge_routes_reject_oversized_arrays_before_store_deserialization() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
