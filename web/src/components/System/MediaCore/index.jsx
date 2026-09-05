@@ -355,6 +355,12 @@ const MediaCore = () => {
   );
   const [opinionsError, setOpinionsError] = useMountedState(mountedRef, null);
   const [opinionStatistics, setOpinionStatistics] = useMountedState(mountedRef, null);
+  const [opinionStatisticsLoadedFor, setOpinionStatisticsLoadedFor] =
+    useMountedState(mountedRef, null);
+  const [opinionStatisticsError, setOpinionStatisticsError] = useMountedState(
+    mountedRef,
+    null,
+  );
   const [publishOpinionLoading, setPublishOpinionLoading] = useMountedState(mountedRef, false);
   const [getOpinionsLoading, setGetOpinionsLoading] = useMountedState(mountedRef, false);
   const [getStatsLoading, setGetStatsLoading] = useMountedState(mountedRef, false);
@@ -362,13 +368,45 @@ const MediaCore = () => {
 
   // Pod Opinion Aggregation states
   const [aggregatedOpinions, setAggregatedOpinions] = useMountedState(mountedRef, null);
+  const [aggregatedOpinionsLoadedFor, setAggregatedOpinionsLoadedFor] =
+    useMountedState(mountedRef, null);
+  const [aggregatedOpinionsError, setAggregatedOpinionsError] = useMountedState(
+    mountedRef,
+    null,
+  );
   const [memberAffinities, setMemberAffinities] = useMountedState(mountedRef, {});
+  const [memberAffinitiesLoadedFor, setMemberAffinitiesLoadedFor] = useMountedState(
+    mountedRef,
+    null,
+  );
+  const [memberAffinitiesError, setMemberAffinitiesError] = useMountedState(
+    mountedRef,
+    null,
+  );
   const [consensusRecommendations, setConsensusRecommendations] = useMountedState(mountedRef, []);
+  const [consensusRecommendationsLoadedFor, setConsensusRecommendationsLoadedFor] =
+    useMountedState(mountedRef, null);
+  const [consensusRecommendationsError, setConsensusRecommendationsError] =
+    useMountedState(mountedRef, null);
   const [getAggregatedLoading, setGetAggregatedLoading] = useMountedState(mountedRef, false);
   const [getAffinitiesLoading, setGetAffinitiesLoading] = useMountedState(mountedRef, false);
   const [getRecommendationsLoading, setGetRecommendationsLoading] =
     useMountedState(mountedRef, false);
   const [updateAffinitiesLoading, setUpdateAffinitiesLoading] = useMountedState(mountedRef, false);
+
+  const resetOpinionReadState = () => {
+    setOpinionsLoadedFor(null);
+    setOpinionsError(null);
+    setOpinionStatisticsLoadedFor(null);
+    setOpinionStatisticsError(null);
+    setAggregatedOpinionsLoadedFor(null);
+    setAggregatedOpinionsError(null);
+    setMemberAffinitiesLoadedFor(null);
+    setMemberAffinitiesError(null);
+    setConsensusRecommendationsLoadedFor(null);
+    setConsensusRecommendationsError(null);
+  };
+
   const [publishContentId, setPublishContentId] = useMountedState(mountedRef, '');
   const [publishCodec, setPublishCodec] = useMountedState(mountedRef, 'mp3');
   const [publishSize, setPublishSize] = useMountedState(mountedRef, 1_024);
@@ -2312,21 +2350,38 @@ const MediaCore = () => {
   };
 
   const handleGetOpinionStatistics = async () => {
-    if (!opinionPodId.trim() || !opinionContentId.trim()) {
+    const requestedPodId = opinionPodId.trim();
+    const requestedContentId = opinionContentId.trim();
+    if (!requestedPodId || !requestedContentId) {
       toast.error('Pod ID and Content ID are required');
       return;
     }
 
     try {
       setGetStatsLoading(true);
+      setOpinionStatisticsError(null);
       const stats = await mediacore.getOpinionStatistics(
-        opinionPodId.trim(),
-        opinionContentId.trim(),
+        requestedPodId,
+        requestedContentId,
       );
+      if (
+        stats === null ||
+        typeof stats !== 'object' ||
+        Array.isArray(stats)
+      ) {
+        throw new Error('Invalid opinion statistics response');
+      }
       setOpinionStatistics(stats);
+      setOpinionStatisticsLoadedFor(
+        opinionQueryKey(requestedPodId, requestedContentId),
+      );
     } catch (error_) {
-      toast.error(`Failed to get opinion statistics: ${toDisplayError(error_)}`);
-      setOpinionStatistics(null);
+      const message = toDisplayError(
+        error_,
+        'Failed to get opinion statistics',
+      );
+      setOpinionStatisticsError(message);
+      toast.error(`Failed to get opinion statistics: ${message}`);
     } finally {
       setGetStatsLoading(false);
     }
@@ -2356,62 +2411,106 @@ const MediaCore = () => {
 
   // Pod Opinion Aggregation handlers
   const handleGetAggregatedOpinions = async () => {
-    if (!opinionPodId.trim() || !opinionContentId.trim()) {
+    const requestedPodId = opinionPodId.trim();
+    const requestedContentId = opinionContentId.trim();
+    if (!requestedPodId || !requestedContentId) {
       toast.error('Pod ID and Content ID are required');
       return;
     }
 
     try {
       setGetAggregatedLoading(true);
+      setAggregatedOpinionsError(null);
       const aggregated = await mediacore.getAggregatedOpinions(
-        opinionPodId.trim(),
-        opinionContentId.trim(),
+        requestedPodId,
+        requestedContentId,
       );
+      if (
+        aggregated === null ||
+        typeof aggregated !== 'object' ||
+        Array.isArray(aggregated)
+      ) {
+        throw new Error('Invalid aggregated opinions response');
+      }
       setAggregatedOpinions(aggregated);
+      setAggregatedOpinionsLoadedFor(
+        opinionQueryKey(requestedPodId, requestedContentId),
+      );
     } catch (error_) {
-      toast.error(`Failed to get aggregated opinions: ${toDisplayError(error_)}`);
-      setAggregatedOpinions(null);
+      const message = toDisplayError(
+        error_,
+        'Failed to get aggregated opinions',
+      );
+      setAggregatedOpinionsError(message);
+      toast.error(`Failed to get aggregated opinions: ${message}`);
     } finally {
       setGetAggregatedLoading(false);
     }
   };
 
   const handleGetMemberAffinities = async () => {
-    if (!opinionPodId.trim()) {
+    const requestedPodId = opinionPodId.trim();
+    if (!requestedPodId) {
       toast.error('Pod ID is required');
       return;
     }
 
     try {
       setGetAffinitiesLoading(true);
+      setMemberAffinitiesError(null);
       const affinities = await mediacore.getMemberAffinities(
-        opinionPodId.trim(),
+        requestedPodId,
       );
+      if (
+        affinities === null ||
+        typeof affinities !== 'object' ||
+        Array.isArray(affinities)
+      ) {
+        throw new Error('Invalid member affinities response');
+      }
       setMemberAffinities(affinities);
+      setMemberAffinitiesLoadedFor(requestedPodId);
     } catch (error_) {
-      toast.error(`Failed to get member affinities: ${toDisplayError(error_)}`);
-      setMemberAffinities({});
+      const message = toDisplayError(
+        error_,
+        'Failed to get member affinities',
+      );
+      setMemberAffinitiesError(message);
+      toast.error(`Failed to get member affinities: ${message}`);
     } finally {
       setGetAffinitiesLoading(false);
     }
   };
 
   const handleGetConsensusRecommendations = async () => {
-    if (!opinionPodId.trim() || !opinionContentId.trim()) {
+    const requestedPodId = opinionPodId.trim();
+    const requestedContentId = opinionContentId.trim();
+    if (!requestedPodId || !requestedContentId) {
       toast.error('Pod ID and Content ID are required');
       return;
     }
 
     try {
       setGetRecommendationsLoading(true);
+      setConsensusRecommendationsError(null);
       const recommendations = await mediacore.getConsensusRecommendations(
-        opinionPodId.trim(),
-        opinionContentId.trim(),
+        requestedPodId,
+        requestedContentId,
       );
+      if (!Array.isArray(recommendations)) {
+        throw new Error('Invalid consensus recommendations response');
+      }
       setConsensusRecommendations(recommendations);
+      setConsensusRecommendationsLoadedFor(
+        opinionQueryKey(requestedPodId, requestedContentId),
+      );
     } catch (error_) {
-      toast.error(`Failed to get consensus recommendations: ${toDisplayError(error_)}`);
-      setConsensusRecommendations([]);
+      const message = toDisplayError(
+        error_,
+        'Failed to get consensus recommendations',
+      );
+      setConsensusRecommendationsError(message);
+      toast.error(`Failed to get consensus recommendations: ${message}`);
     } finally {
       setGetRecommendationsLoading(false);
     }
@@ -2461,8 +2560,20 @@ const MediaCore = () => {
   const hasCurrentSearchResults =
     Array.isArray(searchResults) && searchResultsQuery === searchQuery.trim();
   const hasCurrentChannels = channelsLoadedFor === channelPodId.trim();
+  const currentOpinionQueryKey = opinionQueryKey(
+    opinionPodId,
+    opinionContentId,
+  );
   const hasCurrentOpinions =
-    opinionsLoadedFor === opinionQueryKey(opinionPodId, opinionContentId);
+    opinionsLoadedFor === currentOpinionQueryKey;
+  const hasCurrentOpinionStatistics =
+    opinionStatisticsLoadedFor === currentOpinionQueryKey;
+  const hasCurrentAggregatedOpinions =
+    aggregatedOpinionsLoadedFor === currentOpinionQueryKey;
+  const hasCurrentMemberAffinities =
+    memberAffinitiesLoadedFor === opinionPodId.trim();
+  const hasCurrentConsensusRecommendations =
+    consensusRecommendationsLoadedFor === currentOpinionQueryKey;
 
   if (loading && !stats) {
     return (
@@ -7835,8 +7946,7 @@ const MediaCore = () => {
                     opinionQueryKey(nextPodId, opinionContentId) !==
                     opinionQueryKey(opinionPodId, opinionContentId)
                   ) {
-                    setOpinionsError(null);
-                    setOpinionsLoadedFor(null);
+                    resetOpinionReadState();
                   }
                 }}
                 placeholder="Pod ID"
@@ -7864,8 +7974,7 @@ const MediaCore = () => {
                     opinionQueryKey(opinionPodId, nextContentId) !==
                     opinionQueryKey(opinionPodId, opinionContentId)
                   ) {
-                    setOpinionsError(null);
-                    setOpinionsLoadedFor(null);
+                    resetOpinionReadState();
                   }
                 }}
                 placeholder="Content ID (e.g., content:audio:album:mb-id)"
@@ -7908,7 +8017,20 @@ const MediaCore = () => {
               </div>
 
               {/* Opinion Statistics */}
-              {opinionStatistics && (
+              {opinionStatisticsError && (
+                <Message
+                  data-testid="media-core-opinion-statistics-error"
+                  negative
+                  size="small"
+                >
+                  {opinionStatisticsError}
+                  {hasCurrentOpinionStatistics && opinionStatistics && (
+                    <div>Showing last successfully loaded statistics.</div>
+                  )}
+                </Message>
+              )}
+
+              {hasCurrentOpinionStatistics && opinionStatistics && (
                 <Message
                   info
                   style={{ marginBottom: '1em' }}
@@ -8072,7 +8194,20 @@ const MediaCore = () => {
               </div>
 
               {/* Aggregated Opinions */}
-              {aggregatedOpinions && (
+              {aggregatedOpinionsError && (
+                <Message
+                  data-testid="media-core-aggregated-opinions-error"
+                  negative
+                  size="small"
+                >
+                  {aggregatedOpinionsError}
+                  {hasCurrentAggregatedOpinions && aggregatedOpinions && (
+                    <div>Showing last successfully loaded aggregate.</div>
+                  )}
+                </Message>
+              )}
+
+              {hasCurrentAggregatedOpinions && aggregatedOpinions && (
                 <div style={{ marginBottom: '1em' }}>
                   <Header size="tiny">Aggregated Opinion Results</Header>
                   <Message info>
@@ -8136,7 +8271,24 @@ const MediaCore = () => {
               )}
 
               {/* Consensus Recommendations */}
-              {consensusRecommendations.length > 0 && (
+              {consensusRecommendationsError && (
+                <Message
+                  data-testid="media-core-consensus-recommendations-error"
+                  negative
+                  size="small"
+                >
+                  {consensusRecommendationsError}
+                  {hasCurrentConsensusRecommendations &&
+                    consensusRecommendations.length > 0 && (
+                    <div>
+                      Showing last successfully loaded recommendations.
+                    </div>
+                  )}
+                </Message>
+              )}
+
+              {hasCurrentConsensusRecommendations &&
+                consensusRecommendations.length > 0 && (
                 <div style={{ marginBottom: '1em' }}>
                   <Header size="tiny">Consensus Recommendations</Header>
                   {consensusRecommendations.map((rec, index) => (
@@ -8182,7 +8334,22 @@ const MediaCore = () => {
               )}
 
               {/* Member Affinities */}
-              {Object.keys(memberAffinities).length > 0 && (
+              {memberAffinitiesError && (
+                <Message
+                  data-testid="media-core-member-affinities-error"
+                  negative
+                  size="small"
+                >
+                  {memberAffinitiesError}
+                  {hasCurrentMemberAffinities &&
+                    Object.keys(memberAffinities).length > 0 && (
+                    <div>Showing last successfully loaded affinities.</div>
+                  )}
+                </Message>
+              )}
+
+              {hasCurrentMemberAffinities &&
+                Object.keys(memberAffinities).length > 0 && (
                 <div style={{ marginBottom: '1em' }}>
                   <Header size="tiny">
                     Member Affinities ({Object.keys(memberAffinities).length})

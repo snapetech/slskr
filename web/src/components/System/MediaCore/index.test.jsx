@@ -10,9 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../lib/mediacore', () => ({
   getConflictStrategies: vi.fn(),
+  getAggregatedOpinions: vi.fn(),
   getContentIdStats: vi.fn(),
   getContentOpinions: vi.fn(),
   getChannels: vi.fn(),
+  getConsensusRecommendations: vi.fn(),
+  getMemberAffinities: vi.fn(),
+  getOpinionStatistics: vi.fn(),
   searchContent: vi.fn(),
   searchMessages: vi.fn(),
   getSupportedHashAlgorithms: vi.fn(),
@@ -38,8 +42,27 @@ describe('MediaCore', () => {
       descriptions: {},
     });
     mediacore.getConflictStrategies.mockResolvedValue([]);
+    mediacore.getAggregatedOpinions.mockResolvedValue({
+      consensusStrength: 0,
+      contributingMembers: 0,
+      totalOpinions: 0,
+      uniqueVariants: 0,
+      unweightedAverageScore: 0,
+      variantAggregates: [],
+      weightedAverageScore: 0,
+    });
     mediacore.getChannels.mockResolvedValue([]);
     mediacore.getContentOpinions.mockResolvedValue([]);
+    mediacore.getConsensusRecommendations.mockResolvedValue([]);
+    mediacore.getMemberAffinities.mockResolvedValue({});
+    mediacore.getOpinionStatistics.mockResolvedValue({
+      averageScore: 0,
+      lastUpdated: '2026-09-05T00:00:00.000Z',
+      maxScore: 0,
+      minScore: 0,
+      totalOpinions: 0,
+      uniqueVariants: 0,
+    });
     mediacore.searchContent.mockResolvedValue([]);
     mediacore.searchMessages.mockResolvedValue([]);
   });
@@ -247,5 +270,113 @@ describe('MediaCore', () => {
     expect(
       screen.getByText('Showing last successfully loaded opinions.'),
     ).toBeInTheDocument();
+  });
+
+  it('keeps opinion summaries visible when their refreshes fail', async () => {
+    mediacore.getOpinionStatistics
+      .mockResolvedValueOnce({
+        averageScore: 8,
+        lastUpdated: '2026-09-05T00:00:00.000Z',
+        maxScore: 10,
+        minScore: 6,
+        totalOpinions: 2,
+        uniqueVariants: 1,
+      })
+      .mockRejectedValueOnce(new Error('Statistics refresh unavailable'));
+    mediacore.getAggregatedOpinions
+      .mockResolvedValueOnce({
+        consensusStrength: 0.8,
+        contributingMembers: 2,
+        totalOpinions: 2,
+        uniqueVariants: 1,
+        unweightedAverageScore: 8,
+        variantAggregates: [],
+        weightedAverageScore: 8.5,
+      })
+      .mockRejectedValueOnce(new Error('Aggregate refresh unavailable'));
+    mediacore.getMemberAffinities
+      .mockResolvedValueOnce({
+        'peer-12345678': {
+          affinityScore: 0.8,
+          lastActivity: '2026-09-05T00:00:00.000Z',
+          messageCount: 4,
+          opinionCount: 2,
+          trustScore: 0.9,
+        },
+      })
+      .mockRejectedValueOnce(new Error('Affinity refresh unavailable'));
+    mediacore.getConsensusRecommendations
+      .mockResolvedValueOnce([
+        {
+          consensusScore: 0.8,
+          reasoning: 'consistent scores',
+          recommendation: 'Recommended',
+          supportingFactors: ['agreement'],
+          variantHash: 'variant-123456',
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Recommendation refresh unavailable'));
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+    fireEvent.change(screen.getByPlaceholderText('Pod ID'), {
+      target: { value: 'pod-1' },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText('Content ID (e.g., content:audio:album:mb-id)'),
+      { target: { value: 'content-1' } },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Statistics' }));
+    expect((await screen.findByText(/Average Score:/)).parentElement).toHaveTextContent(
+      '8.0',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Get Statistics' }));
+    expect(
+      await screen.findByTestId('media-core-opinion-statistics-error'),
+    ).toHaveTextContent('Statistics refresh unavailable');
+    expect(screen.getByText(/Average Score:/).parentElement).toHaveTextContent(
+      '8.0',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Get Aggregated Opinions' }),
+    );
+    expect((await screen.findByText(/Weighted Average:/)).parentElement).toHaveTextContent(
+      '8.50',
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Get Aggregated Opinions' }),
+    );
+    expect(
+      await screen.findByTestId('media-core-aggregated-opinions-error'),
+    ).toHaveTextContent('Aggregate refresh unavailable');
+    expect(screen.getByText(/Weighted Average:/).parentElement).toHaveTextContent(
+      '8.50',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Get Member Affinities' }),
+    );
+    expect(await screen.findByText('Member Affinities (1)')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Get Member Affinities' }),
+    );
+    expect(
+      await screen.findByTestId('media-core-member-affinities-error'),
+    ).toHaveTextContent('Affinity refresh unavailable');
+    expect(screen.getByText('Member Affinities (1)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Recommendations' }));
+    expect(
+      (await screen.findByText(/Recommendation:/)).parentElement,
+    ).toHaveTextContent('Recommended');
+    fireEvent.click(screen.getByRole('button', { name: 'Get Recommendations' }));
+    expect(
+      await screen.findByTestId('media-core-consensus-recommendations-error'),
+    ).toHaveTextContent('Recommendation refresh unavailable');
+    expect(screen.getByText(/Recommendation:/).parentElement).toHaveTextContent(
+      'Recommended',
+    );
   });
 });
