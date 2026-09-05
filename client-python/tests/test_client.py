@@ -509,6 +509,24 @@ async def test_websocket_client_restores_subscriptions_on_connect():
 
 
 @pytest.mark.asyncio
+async def test_websocket_client_omits_empty_authorization_header():
+    ws = MagicMock()
+    ws.closed = False
+    ws.close = AsyncMock()
+    ws.__aiter__.return_value = iter(())
+    session = MagicMock()
+    session.ws_connect = AsyncMock(return_value=ws)
+    session.close = AsyncMock()
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient("https://example.test", "")
+        await client.connect()
+
+        assert "headers" not in session.ws_connect.await_args.kwargs
+        await client.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_websocket_client_rejects_duplicate_connect_and_bounds_messages():
     ws = MagicMock()
     ws.closed = False

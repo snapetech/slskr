@@ -77,16 +77,21 @@ class WebSocketClient:
             await self._close_resources()
             self._intentional_disconnect = False
             try:
-                headers = {"Authorization": f"Bearer {self.token}"}
+                websocket_options = {
+                    "autoclose": False,
+                    "max_msg_size": MAX_WEBSOCKET_MESSAGE_BYTES,
+                }
+                if self.token:
+                    websocket_options["headers"] = {
+                        "Authorization": f"Bearer {self.token}"
+                    }
                 session = aiohttp.ClientSession()
                 self.session = session
 
                 self.ws = await asyncio.wait_for(
                     session.ws_connect(
                         self.url,
-                        headers=headers,
-                        autoclose=False,
-                        max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+                        **websocket_options,
                     ),
                     timeout=self.connect_timeout,
                 )
