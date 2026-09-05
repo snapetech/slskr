@@ -72,9 +72,21 @@ const normalizeDashboard = (value) => {
         requestCount: toNonNegativeNumber(client.requestCount),
       }))
     : [];
+  const connectedClientCount = Array.isArray(value.connectedClients)
+    ? connectedClients.length
+    : toNonNegativeNumber(
+        value.connectedClients ??
+          value.active_clients ??
+          stats.currentConnections ??
+          health.activeConnections,
+      );
+  const hasMeshBenefitMetrics =
+    meshBenefits.bytesViaMesh !== undefined ||
+    meshBenefits.meshPercentage !== undefined;
 
   return {
     ...value,
+    connectedClientCount,
     connectedClients,
     health: {
       ...health,
@@ -86,8 +98,12 @@ const normalizeDashboard = (value) => {
     },
     meshBenefits: {
       ...meshBenefits,
-      bytesViaMesh: toNonNegativeNumber(meshBenefits.bytesViaMesh),
-      meshPercentage: toNonNegativeNumber(meshBenefits.meshPercentage),
+      bytesViaMesh: hasMeshBenefitMetrics
+        ? toNonNegativeNumber(meshBenefits.bytesViaMesh)
+        : null,
+      meshPercentage: hasMeshBenefitMetrics
+        ? toNonNegativeNumber(meshBenefits.meshPercentage)
+        : null,
     },
     stats: {
       ...stats,
@@ -308,6 +324,7 @@ const Bridge = () => {
   const health = dashboard?.health;
   const stats = dashboard?.stats;
   const clients = dashboard?.connectedClients || [];
+  const connectedClientCount = dashboard?.connectedClientCount ?? clients.length;
   const meshBenefits = dashboard?.meshBenefits;
 
   return (
@@ -529,7 +546,9 @@ const Bridge = () => {
         )}
 
         {/* Mesh Benefits */}
-        {meshBenefits && (
+        {meshBenefits &&
+          meshBenefits.meshPercentage !== null &&
+          meshBenefits.bytesViaMesh !== null && (
           <Grid.Column width={8}>
             <Card fluid>
               <Card.Content>
@@ -564,12 +583,21 @@ const Bridge = () => {
             <Card.Content>
               <Card.Header>
                 <Icon name="users" />
-                Connected Clients ({clients.length})
+                Connected Clients ({connectedClientCount})
               </Card.Header>
             </Card.Content>
             <Card.Content>
               {clients.length === 0 ? (
-                <Message info>No clients connected</Message>
+                connectedClientCount > 0 ? (
+                  <Message
+                    data-testid="bridge-client-details-unavailable"
+                    warning
+                  >
+                    Client details are unavailable; {connectedClientCount} client(s) are connected.
+                  </Message>
+                ) : (
+                  <Message info>No clients connected</Message>
+                )
               ) : (
                 <Table
                   compact

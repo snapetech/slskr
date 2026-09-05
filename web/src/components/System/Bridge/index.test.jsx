@@ -58,4 +58,22 @@ describe('Bridge', () => {
     );
     expect(screen.getByText('12')).toBeInTheDocument();
   });
+
+  it('preserves target-compatible connected client counts without fabricating client rows', async () => {
+    bridge.getDashboard.mockResolvedValue({
+      connectedClients: 4,
+      health: 'Healthy',
+      meshBenefits: { enabled: true },
+      stats: { currentConnections: 4 },
+    });
+
+    render(<Bridge />);
+
+    expect(await screen.findByText('Connected Clients (4)')).toBeInTheDocument();
+    expect(screen.getByTestId('bridge-client-details-unavailable')).toHaveTextContent(
+      '4 client(s) are connected',
+    );
+    expect(screen.queryByText('No clients connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mesh Benefits')).not.toBeInTheDocument();
+  });
 });
