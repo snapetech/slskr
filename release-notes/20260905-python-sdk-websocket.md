@@ -1,6 +1,6 @@
 ---
 category: fixed
-audience: developers
+audience: users
 area: sdk
 action: none
 breaking: false
