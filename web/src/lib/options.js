@@ -17,13 +17,23 @@ export const getCurrentDebugView = async () => {
 export const getLogs = async () => {
   const logs = (await api.get('/logs')).data;
   if (!Array.isArray(logs)) {
+    if (
+      !logs ||
+      typeof logs !== 'object' ||
+      Array.isArray(logs) ||
+      !Array.isArray(logs.entries)
+    ) {
+      throw new Error('Options API returned an invalid logs response');
+    }
+
     return logs;
   }
 
   let levelInfo;
   try {
     levelInfo = (await api.get('/logs/level')).data || {};
-  } catch {
+  } catch (error) {
+    if (error?.response?.status !== 404) throw error;
     levelInfo = null;
   }
 

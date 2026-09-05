@@ -54,4 +54,22 @@ describe('options API helpers', () => {
     expect(api.get).toHaveBeenNthCalledWith(1, '/logs');
     expect(api.get).toHaveBeenNthCalledWith(2, '/logs/level');
   });
+
+  it('rejects malformed log envelopes', async () => {
+    api.get.mockResolvedValueOnce({ data: {} });
+
+    await expect(getLogs()).rejects.toThrow(
+      'Options API returned an invalid logs response',
+    );
+  });
+
+  it('surfaces non-404 log-level failures', async () => {
+    api.get
+      .mockResolvedValueOnce({ data: [{ message: 'ready' }] })
+      .mockRejectedValueOnce({ response: { status: 503 } });
+
+    await expect(getLogs()).rejects.toMatchObject({
+      response: { status: 503 },
+    });
+  });
 });
