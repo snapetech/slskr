@@ -42,3 +42,12 @@ func requireResponseIdentifier(result map[string]interface{}, resource string, k
 	}
 	return &ResponseContractError{Resource: resource}
 }
+
+func requireResponseText(result map[string]interface{}, resource string, keys ...string) error {
+	for _, key := range keys {
+		if value, ok := result[key].(string); ok && strings.TrimSpace(value) != "" {
+			return nil
+		}
+	}
+	return &ResponseContractError{Resource: resource}
+}

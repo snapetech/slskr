@@ -449,7 +449,7 @@ class SlskrClient:
         if query:
             params["q"] = query
         result = await self._get("/api/events", params=params)
-        return self._response_list(result, "events", "events", "entries")
+        return self._response_list_with_event_contract(result)
 
     # =========================================================================
     # Shares and filters
@@ -678,6 +678,10 @@ class SlskrClient:
             )
         return False
 
+    @staticmethod
+    def _valid_response_text(value: Any) -> bool:
+        return isinstance(value, str) and bool(value.strip())
+
     @classmethod
     def _response_object_with_identifier(
         cls, result: Any, resource: str, *keys: str
@@ -712,6 +716,18 @@ class SlskrClient:
             for value in values
         ):
             raise ResponseContractError(resource)
+        return values
+
+    @classmethod
+    def _response_list_with_event_contract(cls, result: Any) -> List[Dict]:
+        values = cls._response_list(result, "events", "events", "entries")
+        for value in values:
+            if not cls._valid_response_identifier(value.get("id")):
+                raise ResponseContractError("events")
+            if not any(
+                cls._valid_response_text(value.get(key)) for key in ("type", "kind")
+            ):
+                raise ResponseContractError("events")
         return values
 
     @staticmethod

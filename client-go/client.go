@@ -605,6 +605,12 @@ func (c *Client) GetEventsWithFilters(ctx context.Context, eventType, topic, que
 	var out []map[string]interface{}
 	for _, event := range events {
 		if object, ok := event.(map[string]interface{}); ok {
+			if err := requireResponseIdentifier(object, "event", "id"); err != nil {
+				return nil, err
+			}
+			if err := requireResponseText(object, "event", "type", "kind"); err != nil {
+				return nil, err
+			}
 			out = append(out, object)
 		}
 	}

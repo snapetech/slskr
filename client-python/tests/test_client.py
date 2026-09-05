@@ -98,7 +98,7 @@ async def test_python_client_covers_session_and_extended_api_routes():
             "/api/rooms/lounge%20room": {"name": "lounge room"},
             "/api/users/bob/browse": {"entries": [{"filename": "track.flac"}]},
             "/api/browse/requests": {"requests": [{"username": "bob"}]},
-            "/api/events": {"events": [{"type": "search.completed"}]},
+            "/api/events": {"events": [{"id": 1, "type": "search.completed"}]},
             "/api/shares": {"local": [{"filename": "track.flac"}]},
             "/api/config/download-filter": {"enabled": True},
             "/api/mediacore/retrieve/stats": {"cacheHits": 1},
@@ -152,13 +152,13 @@ async def test_python_client_covers_session_and_extended_api_routes():
         await client.respond_to_browse_request("bob", "ignore")
 
     assert await client.get_events(event_type="search.completed") == [
-        {"type": "search.completed"}
+        {"id": 1, "type": "search.completed"}
     ]
     assert await client.get_events(
         event_type="search.completed",
         topic="searches",
         query="ambient & live",
-    ) == [{"type": "search.completed"}]
+    ) == [{"id": 1, "type": "search.completed"}]
     assert await client.list_shares() == [{"filename": "track.flac"}]
     assert await client.refresh_shares() == {}
     assert await client.get_filters() == {"enabled": True}
@@ -239,6 +239,10 @@ async def test_python_client_rejects_malformed_success_response_contracts():
     client._get = AsyncMock(return_value={"entries": [{"status": "queued"}]})
     with pytest.raises(ResponseContractError, match="invalid transfers response"):
         await client.list_transfers()
+
+    client._get = AsyncMock(return_value={"entries": [{"id": 1}]})
+    with pytest.raises(ResponseContractError, match="invalid events response"):
+        await client.get_events()
 
 
 @pytest.mark.asyncio
