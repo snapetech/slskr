@@ -5,6 +5,25 @@
 import api from './api';
 import { normalizeSwarmJobList } from './swarmJobs';
 
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const requireRecord = (data, resource) => {
+  if (!isRecord(data)) {
+    throw new Error(`Jobs API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
+const requireJobsEnvelope = (data, resource) => {
+  if (Array.isArray(data)) return data;
+  const envelope = requireRecord(data, resource);
+  if (!Array.isArray(envelope.jobs)) {
+    throw new Error(`Jobs API returned an invalid ${resource} response`);
+  }
+  return envelope;
+};
+
 /**
  * Get all jobs with optional filtering, pagination, and sorting.
  * @param {object} options - Query parameters
@@ -35,7 +54,11 @@ export const getJobs = async ({
   const queryString = parameters.toString();
   const url = `/jobs${queryString ? `?${queryString}` : ''}`;
   const response = await api.get(url);
-  return response.data;
+  const data = requireRecord(response.data, 'job list');
+  if (!Array.isArray(data.jobs)) {
+    throw new Error('Jobs API returned an invalid job list response');
+  }
+  return data;
 };
 
 /**
@@ -45,7 +68,7 @@ export const getJobs = async ({
  */
 export const getJob = async (jobId) => {
   const response = await api.get(`/jobs/${encodeURIComponent(jobId)}`);
-  return response.data;
+  return requireRecord(response.data, 'job');
 };
 
 export const createDiscographyJob = async ({
@@ -58,7 +81,7 @@ export const createDiscographyJob = async ({
     profile,
     target_dir: targetDirectory,
   });
-  return response.data;
+  return requireRecord(response.data, 'discography job');
 };
 
 export const createMbReleaseJob = async ({
@@ -73,7 +96,7 @@ export const createMbReleaseJob = async ({
     tracks,
     constraints,
   });
-  return response.data;
+  return requireRecord(response.data, 'release job');
 };
 
 /**
@@ -83,7 +106,9 @@ export const createMbReleaseJob = async ({
 export const getActiveSwarmJobs = async () => {
   try {
     const response = await api.get('/multisource/jobs');
-    return normalizeSwarmJobList(response.data);
+    return normalizeSwarmJobList(
+      requireJobsEnvelope(response.data, 'swarm job list'),
+    );
   } catch (error) {
     if (error?.response?.status === 404) return [];
     throw error;
@@ -100,7 +125,7 @@ export const getSwarmJobStatus = async (jobId) => {
     const response = await api.get(
       `/multisource/jobs/${encodeURIComponent(jobId)}`,
     );
-    return response.data;
+    return requireRecord(response.data, 'swarm job');
   } catch (error) {
     if (error?.response?.status === 404) {
       return null;
@@ -120,7 +145,7 @@ export const getSwarmTraceSummary = async (jobId) => {
     const response = await api.get(
       `/traces/${encodeURIComponent(jobId)}/summary`,
     );
-    return response.data;
+    return requireRecord(response.data, 'swarm trace');
   } catch (error) {
     if (error?.response?.status === 404) {
       return null;

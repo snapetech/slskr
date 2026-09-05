@@ -1,5 +1,12 @@
 import api from './api';
-import { getHistogram } from './reports';
+import {
+  getExceptionPareto,
+  getExceptions,
+  getHistogram,
+  getLeaderboard,
+  getSummary,
+  getTopDirectories,
+} from './reports';
 
 vi.mock('./api', () => ({
   __esModule: true,
@@ -32,5 +39,31 @@ describe('transfer report helpers', () => {
     const request = api.get.mock.calls[0][0];
     const parameters = new URLSearchParams(request.split('?')[1]);
     expect(parameters.get('interval')).toBe('5');
+  });
+
+  it.each([
+    ['summary', getSummary, {}],
+    ['histogram', getHistogram, {}],
+    ['leaderboard', getLeaderboard, []],
+    ['directories', getTopDirectories, []],
+    ['exceptions', getExceptions, []],
+    ['exception pareto', getExceptionPareto, []],
+  ])('returns a validated %s response', async (_, helper, data) => {
+    api.get.mockResolvedValue({ data });
+    await expect(helper()).resolves.toEqual(data);
+  });
+
+  it.each([
+    ['summary', getSummary],
+    ['histogram', getHistogram],
+    ['leaderboard', getLeaderboard],
+    ['directories', getTopDirectories],
+    ['exceptions', getExceptions],
+    ['exception pareto', getExceptionPareto],
+  ])('rejects malformed %s responses', async (_, helper) => {
+    api.get.mockResolvedValue({ data: 'malformed' });
+    await expect(helper()).rejects.toThrow(
+      'Transfer reports API returned an invalid',
+    );
   });
 });

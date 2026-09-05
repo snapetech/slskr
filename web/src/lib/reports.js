@@ -1,5 +1,19 @@
 import api from './api';
 
+const requireRecord = (data, resource) => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Transfer reports API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
+const requireArray = (data, resource) => {
+  if (!Array.isArray(data)) {
+    throw new Error(`Transfer reports API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
 export const getSummary = async ({
   start,
   end,
@@ -13,8 +27,10 @@ export const getSummary = async ({
   if (direction) parameters.append('direction', direction);
   if (username) parameters.append('username', username);
 
-  return (await api.get(`/telemetry/reports/transfers/summary?${parameters}`))
-    .data;
+  return requireRecord(
+    (await api.get(`/telemetry/reports/transfers/summary?${parameters}`)).data,
+    'summary',
+  );
 };
 
 export const getHistogram = async ({
@@ -55,8 +71,10 @@ export const getHistogram = async ({
   if (direction) parameters.append('direction', direction);
   if (username) parameters.append('username', username);
 
-  return (await api.get(`/telemetry/reports/transfers/histogram?${parameters}`))
-    .data;
+  return requireRecord(
+    (await api.get(`/telemetry/reports/transfers/histogram?${parameters}`)).data,
+    'histogram',
+  );
 };
 
 export const getLeaderboard = async ({
@@ -79,9 +97,12 @@ export const getLeaderboard = async ({
   parameters.append('limit', limit);
   parameters.append('offset', offset);
 
-  return (
-    await api.get(`/telemetry/reports/transfers/leaderboard?${parameters}`)
-  ).data;
+  return requireArray(
+    (
+      await api.get(`/telemetry/reports/transfers/leaderboard?${parameters}`)
+    ).data,
+    'leaderboard',
+  );
 };
 
 export const getTopDirectories = async ({
@@ -100,9 +121,12 @@ export const getTopDirectories = async ({
   parameters.append('limit', limit);
   parameters.append('offset', offset);
 
-  return (
-    await api.get(`/telemetry/reports/transfers/directories?${parameters}`)
-  ).data;
+  return requireArray(
+    (
+      await api.get(`/telemetry/reports/transfers/directories?${parameters}`)
+    ).data,
+    'directory',
+  );
 };
 
 export const getExceptions = async ({
@@ -125,9 +149,12 @@ export const getExceptions = async ({
   parameters.append('limit', limit);
   parameters.append('offset', offset);
 
-  return (
-    await api.get(`/telemetry/reports/transfers/exceptions?${parameters}`)
-  ).data;
+  return requireArray(
+    (
+      await api.get(`/telemetry/reports/transfers/exceptions?${parameters}`)
+    ).data,
+    'exception',
+  );
 };
 
 export const getExceptionPareto = async ({
@@ -148,9 +175,12 @@ export const getExceptionPareto = async ({
   parameters.append('limit', limit);
   parameters.append('offset', offset);
 
-  return (
-    await api.get(
-      `/telemetry/reports/transfers/exceptions/pareto?${parameters}`,
-    )
-  ).data;
+  return requireArray(
+    (
+      await api.get(
+        `/telemetry/reports/transfers/exceptions/pareto?${parameters}`,
+      )
+    ).data,
+    'exception pareto',
+  );
 };

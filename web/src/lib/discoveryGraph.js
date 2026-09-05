@@ -38,6 +38,13 @@ const normalizeSavedDiscoveryGraphRequest = (request) => {
 
 export const buildDiscoveryGraph = async (request) => {
   const response = await api.post('/discovery-graph', request);
+  if (
+    !response.data ||
+    typeof response.data !== 'object' ||
+    Array.isArray(response.data)
+  ) {
+    throw new Error('Discovery graph API returned an invalid graph response');
+  }
   return response.data;
 };
 

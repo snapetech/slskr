@@ -223,20 +223,20 @@ describe('jobs', () => {
       ]);
     });
 
-    it('returns empty array when API response is not an array', async () => {
+    it('rejects an envelope without a jobs list', async () => {
       api.get.mockResolvedValue({ data: { jobs: null } });
 
-      const result = await jobs.getActiveSwarmJobs();
-
-      expect(result).toEqual([]);
+      await expect(jobs.getActiveSwarmJobs()).rejects.toThrow(
+        'Jobs API returned an invalid swarm job list response',
+      );
     });
 
-    it('returns empty array when API response has no jobs property', async () => {
+    it('rejects an envelope without a jobs property', async () => {
       api.get.mockResolvedValue({ data: {} });
 
-      const result = await jobs.getActiveSwarmJobs();
-
-      expect(result).toEqual([]);
+      await expect(jobs.getActiveSwarmJobs()).rejects.toThrow(
+        'Jobs API returned an invalid swarm job list response',
+      );
     });
 
     it('uses an empty list only when the optional endpoint is absent', async () => {
@@ -343,6 +343,14 @@ describe('jobs', () => {
       );
     });
 
+    it('rejects malformed successful status responses', async () => {
+      api.get.mockResolvedValue({ data: [] });
+
+      await expect(jobs.getSwarmJobStatus('swarm-1')).rejects.toThrow(
+        'Jobs API returned an invalid swarm job response',
+      );
+    });
+
     it('handles errors without response property', async () => {
       const error = new Error('Network error');
       api.get.mockRejectedValue(error);
@@ -351,5 +359,35 @@ describe('jobs', () => {
         'Network error',
       );
     });
+  });
+
+  it('rejects malformed job envelopes and mutation responses', async () => {
+    api.get.mockResolvedValue({ data: [] });
+    await expect(jobs.getJobs()).rejects.toThrow(
+      'Jobs API returned an invalid job list response',
+    );
+    await expect(jobs.getJob('job-1')).rejects.toThrow(
+      'Jobs API returned an invalid job response',
+    );
+
+    api.post.mockResolvedValue({ data: [] });
+    await expect(
+      jobs.createDiscographyJob({ artistId: 'artist-1' }),
+    ).rejects.toThrow('Jobs API returned an invalid discography job response');
+    await expect(
+      jobs.createMbReleaseJob({ mbReleaseId: 'release-1' }),
+    ).rejects.toThrow('Jobs API returned an invalid release job response');
+  });
+
+  it('rejects malformed swarm trace responses and accepts a missing trace', async () => {
+    api.get.mockResolvedValue({ data: [] });
+    await expect(jobs.getSwarmTraceSummary('swarm-1')).rejects.toThrow(
+      'Jobs API returned an invalid swarm trace response',
+    );
+
+    const error = new Error('Not found');
+    error.response = { status: 404 };
+    api.get.mockRejectedValue(error);
+    await expect(jobs.getSwarmTraceSummary('missing')).resolves.toBeNull();
   });
 });
