@@ -12,7 +12,7 @@ import aiohttp
 
 from .exceptions import ApiError, NetworkError, ResponseContractError, TimeoutError
 from .batch import BatchClient
-from .websocket import WebSocketClient
+from .websocket import DEFAULT_WEBSOCKET_CONNECT_TIMEOUT, WebSocketClient
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +92,16 @@ class SlskrClient:
         """Connect to WebSocket for real-time events"""
         async with self._ws_lock:
             if self.ws is None:
+                connect_timeout = (
+                    self.timeout
+                    if self.timeout > 0
+                    else DEFAULT_WEBSOCKET_CONNECT_TIMEOUT
+                )
                 self.ws = WebSocketClient(
                     self.base_url,
                     self.token,
                     debug=self.debug,
-                    connect_timeout=self.timeout,
+                    connect_timeout=connect_timeout,
                 )
 
             if not self.ws.is_connected():

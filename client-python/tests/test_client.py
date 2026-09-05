@@ -845,6 +845,24 @@ async def test_python_client_coalesces_concurrent_websocket_connects():
     websocket.disconnect.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_python_client_uses_default_websocket_deadline_when_http_timeout_is_disabled():
+    websocket = MagicMock()
+    websocket.is_connected.return_value = True
+    client = SlskrClient("https://example.test", "token", timeout=0)
+
+    with patch("slskr.client.WebSocketClient", return_value=websocket) as constructor:
+        result = await client.connect_ws()
+
+    assert result is websocket
+    constructor.assert_called_once_with(
+        "https://example.test",
+        "token",
+        debug=False,
+        connect_timeout=30.0,
+    )
+
+
 class FakeContent:
     def __init__(self, chunks):
         self.chunks = chunks
