@@ -364,6 +364,26 @@ describe('PlayerBar', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
+  it('does not show a previous browser page after a changed request fails', async () => {
+    renderPlayer();
+
+    fireEvent.click(screen.getByTestId('player-open-file-browser'));
+    fireEvent.click(await screen.findByTestId('player-file-folder-Downloads'));
+    expect(await screen.findByText('Library stream.ogg')).toBeInTheDocument();
+
+    collectionsAPI.browseLibraryItems.mockRejectedValueOnce(
+      new Error('Search unavailable'),
+    );
+    fireEvent.change(
+      screen.getByTestId('player-file-browser-search').querySelector('input'),
+      { target: { value: 'library' } },
+    );
+
+    expect(await screen.findByText('Search unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Library stream.ogg')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('player-file-folder-Downloads')).not.toBeInTheDocument();
+  });
+
   it('switches the visual tile from album art to the RustyMilk canvas', () => {
     renderPlayer();
 

@@ -105,6 +105,9 @@ const requireBrowserData = (response) => {
   return data;
 };
 
+const getBrowserRequestKey = (path, query, offset) =>
+  JSON.stringify([path, query, offset]);
+
 const readStoredBoolean = (key) => {
   return getLocalStorageItem(key) === 'true';
 };
@@ -1579,6 +1582,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
     totalDirectories: 0,
     totalFiles: 0,
   });
+  const [browserLoadedKey, setBrowserLoadedKey] = useState(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [itemsLoading, setItemsLoading] = useState(false);
@@ -1609,6 +1613,8 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
   useEffect(() => {
     if (!filesOpen) return undefined;
 
+    const requestKey = getBrowserRequestKey(browserPath, query, browserOffset);
+
     if (query && query.length < 2) {
       setItems([]);
       setBrowserDirectories([]);
@@ -1616,6 +1622,8 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
       setBrowserHasMore(false);
       setBrowserStats({ duplicatesRemoved: 0, totalDirectories: 0, totalFiles: 0 });
       setBrowserError('');
+      setBrowserLoadedKey(requestKey);
+      setItemsLoading(false);
       return undefined;
     }
 
@@ -1642,6 +1650,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
               totalDirectories: data.totalDirectories || 0,
               totalFiles: data.totalFiles || 0,
             });
+            setBrowserLoadedKey(requestKey);
             setBrowserError('');
           }
         })
@@ -1710,13 +1719,22 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
     setCollectionsOpen(false);
   };
 
+  const closeFileBrowser = () => {
+    setBrowserLoadedKey(null);
+    setItemsLoading(false);
+    setFilesOpen(false);
+  };
+
   const playAndClose = (item) => {
     onPlayItem(item);
-    setFilesOpen(false);
+    closeFileBrowser();
     closeCollections();
   };
 
   const openFileBrowser = () => {
+    setBrowserLoadedKey(null);
+    setBrowserError('');
+    setItemsLoading(false);
     setBrowserOffset(0);
     setBrowserPath('');
     setFilesOpen(true);
@@ -1724,19 +1742,46 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
   };
 
   const openBrowserPath = (path) => {
+    setBrowserLoadedKey(null);
+    setBrowserError('');
     setBrowserOffset(0);
     setBrowserPath(path || '');
     setQuery('');
   };
 
   const updateBrowserQuery = (value) => {
+    setBrowserLoadedKey(null);
+    setBrowserError('');
     setBrowserOffset(0);
     setQuery(value || '');
   };
 
+  const updateBrowserOffset = (offset) => {
+    setBrowserLoadedKey(null);
+    setBrowserError('');
+    setBrowserOffset(Math.max(0, offset));
+  };
+
+  const currentBrowserRequestKey = getBrowserRequestKey(
+    browserPath,
+    query,
+    browserOffset,
+  );
+  const hasCurrentBrowserData = browserLoadedKey === currentBrowserRequestKey;
+  const visibleBrowserItems = hasCurrentBrowserData ? items : [];
+  const visibleBrowserDirectories = hasCurrentBrowserData
+    ? browserDirectories
+    : [];
+  const visibleBrowserBreadcrumbs = hasCurrentBrowserData
+    ? browserBreadcrumbs
+    : [];
+  const visibleBrowserStats = hasCurrentBrowserData
+    ? browserStats
+    : { duplicatesRemoved: 0, totalDirectories: 0, totalFiles: 0 };
+
   const shownFileCount = Math.min(
-    browserOffset + items.length,
-    browserStats.totalFiles,
+    browserOffset + visibleBrowserItems.length,
+    visibleBrowserStats.totalFiles,
   );
 
   return (
@@ -1900,7 +1945,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
       <Modal
         className="player-browser-modal"
         data-testid="player-file-browser-modal"
-        onClose={() => setFilesOpen(false)}
+        onClose={closeFileBrowser}
         open={filesOpen}
         size="fullscreen"
       >
@@ -1919,17 +1964,17 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
               <div className="player-file-explorer-counts">
                 {itemsLoading
                   ? 'Loading...'
-                  : `${shownFileCount} of ${browserStats.totalFiles} tracks`}
-                {browserStats.duplicatesRemoved > 0
-                  ? `, ${browserStats.duplicatesRemoved} duplicates collapsed`
+                  : `${shownFileCount} of ${visibleBrowserStats.totalFiles} tracks`}
+                {visibleBrowserStats.duplicatesRemoved > 0
+                  ? `, ${visibleBrowserStats.duplicatesRemoved} duplicates collapsed`
                   : ''}
               </div>
             </div>
             {browserError && <Message negative>{browserError}</Message>}
 
             <div className="player-file-explorer-breadcrumbs">
-              {(browserBreadcrumbs.length > 0
-                ? browserBreadcrumbs
+              {(visibleBrowserBreadcrumbs.length > 0
+                ? visibleBrowserBreadcrumbs
                 : [{ name: 'Library', path: '' }]).map((breadcrumb, index) => (
                   <React.Fragment key={breadcrumb.path || 'library'}>
                     {index > 0 ? <Icon name="angle right" /> : null}
@@ -1951,16 +1996,18 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                 <div className="player-file-explorer-section-title">
                   Folders
                 </div>
-                {browserError && browserDirectories.length === 0 ? null : query ? (
+                {!hasCurrentBrowserData ? (
+                  browserError ? null : <Message info compact>Loading folders...</Message>
+                ) : query ? (
                   <Message info compact>
                     Clear search to browse folders.
                   </Message>
-                ) : browserDirectories.length === 0 ? (
+                ) : visibleBrowserDirectories.length === 0 ? (
                   <Message info compact>
                     No child folders here.
                   </Message>
                 ) : (
-                  browserDirectories.map((directory) => (
+                  visibleBrowserDirectories.map((directory) => (
                     <button
                       className="player-file-folder-row"
                       data-testid={`player-file-folder-${directory.path}`}
@@ -1990,7 +2037,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                 </div>
                 {itemsLoading ? (
                   <Message info>Loading audio files...</Message>
-                ) : browserError && items.length === 0 ? null : items.length === 0 ? (
+                ) : !hasCurrentBrowserData ? null : visibleBrowserItems.length === 0 ? (
                   <Message info>
                     {query && query.length < 2
                       ? 'Type at least two characters to search.'
@@ -2007,7 +2054,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                       </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                      {items.map((item) => (
+                      {visibleBrowserItems.map((item) => (
                         <Table.Row
                           data-testid={`player-file-row-${item.contentId}`}
                           key={`${item.contentId}-${item.path}`}
@@ -2054,9 +2101,9 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                     trigger={
                       <Button
                         disabled={browserOffset === 0 || itemsLoading}
-                        onClick={() =>
-                          setBrowserOffset(Math.max(0, browserOffset - playerBrowserPageSize))
-                        }
+                        onClick={() => updateBrowserOffset(
+                          browserOffset - playerBrowserPageSize,
+                        )}
                         size="small"
                       >
                         <Icon name="angle left" />
@@ -2068,10 +2115,10 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                     content="Move to the next page of files in this folder or search."
                     trigger={
                       <Button
-                        disabled={!browserHasMore || itemsLoading}
-                        onClick={() =>
-                          setBrowserOffset(browserOffset + playerBrowserPageSize)
-                        }
+                        disabled={!hasCurrentBrowserData || !browserHasMore || itemsLoading}
+                        onClick={() => updateBrowserOffset(
+                          browserOffset + playerBrowserPageSize,
+                        )}
                         size="small"
                       >
                         Next
@@ -2087,7 +2134,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
         <Modal.Actions>
           <Popup
             content="Close the local file browser without changing playback."
-            trigger={<Button onClick={() => setFilesOpen(false)}>Close</Button>}
+            trigger={<Button onClick={closeFileBrowser}>Close</Button>}
           />
         </Modal.Actions>
       </Modal>
