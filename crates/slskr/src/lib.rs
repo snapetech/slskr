@@ -584,6 +584,11 @@ const MAX_INCOMING_SHARE_ITEMS: usize = 10_000;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_CAPABILITY_NEGOTIATION_ITEMS: usize = 256;
 const MAX_MEDIACORE_BATCH_ITEMS: usize = 100;
+const MAX_MEDIACORE_PORTABILITY_ENTRIES: usize = 1_000;
+const MAX_QUARANTINE_JURY_ITEMS: usize = 100;
+const MAX_EXTENDED_DOWNLOAD_ITEMS: usize = 1_000;
+const MAX_RANKING_BATCH_ITEMS: usize = 1_000;
+const MAX_LISTENING_PARTY_TAGS: usize = 10;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 const MAX_TOTAL_SEARCH_RESULTS: usize = 50_000;
@@ -19792,6 +19797,14 @@ async fn legacy_route_http_request_with_headers_inner(
         let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
             return Ok(routing::bad_request_response("invalid JSON body"));
         };
+        if payload
+            .get("items")
+            .is_some_and(|items| json_array_exceeds_limit(items, MAX_INCOMING_SHARE_ITEMS))
+        {
+            return Ok(routing::bad_request_response(
+                "items must contain at most 10000 items",
+            ));
+        }
         let string_field = |field: &str| {
             payload
                 .get(field)
@@ -55801,7 +55814,12 @@ fn listening_party_normalize(
     let mut tags = payload
         .get("tags")
         .and_then(serde_json::Value::as_array)
-        .cloned()
+        .map(|tags| {
+            tags.iter()
+                .take(MAX_LISTENING_PARTY_TAGS)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default()
         .into_iter()
         .filter_map(|tag| {
@@ -55812,7 +55830,7 @@ fn listening_party_normalize(
         })
         .collect::<Vec<_>>();
     tags.retain(|tag| seen_tags.insert(tag.to_ascii_lowercase()));
-    tags.truncate(10);
+    tags.truncate(MAX_LISTENING_PARTY_TAGS);
     let album = payload
         .get("album")
         .and_then(serde_json::Value::as_str)
@@ -59308,6 +59326,12 @@ async fn multisource_controller_response(
                     .to_string(),
                 );
             }
+            if json_array_field_exceeds_limit(body, "sources", multisource::MAX_SOURCES) {
+                return routing::bad_request_response(&format!(
+                    "source count exceeds the {} source limit",
+                    multisource::MAX_SOURCES
+                ));
+            }
             let sources = serde_json::from_str::<serde_json::Value>(body)
                 .ok()
                 .and_then(|value| {
@@ -60803,6 +60827,15 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             Ok(_) => return routing::bad_request_response("request must be an object"),
             Err(_) => return routing::bad_request_response("invalid JSON body"),
         };
+        if request.get("jurors").is_some_and(|jurors| {
+            json_array_exceeds_limit(jurors, MAX_QUARANTINE_JURY_ITEMS)
+        }) || request.get("evidence").is_some_and(|evidence| {
+            json_array_exceeds_limit(evidence, MAX_QUARANTINE_JURY_ITEMS)
+        }) {
+            return routing::bad_request_response(
+                "quarantine jury arrays must contain at most 100 items",
+            );
+        }
         if request.as_object().is_none_or(serde_json::Map::is_empty) {
             return routing::bad_request_response("request fields are required");
         }
@@ -60877,6 +60910,13 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             Ok(_) => return routing::bad_request_response("verdict must be an object"),
             Err(_) => return routing::bad_request_response("invalid JSON body"),
         };
+        if verdict.get("evidence").is_some_and(|evidence| {
+            json_array_exceeds_limit(evidence, MAX_QUARANTINE_JURY_ITEMS)
+        }) {
+            return routing::bad_request_response(
+                "quarantine jury arrays must contain at most 100 items",
+            );
+        }
         let request_id = verdict
             .get("requestId")
             .and_then(serde_json::Value::as_str)
@@ -61598,6 +61638,13 @@ async fn quarantine_route_request_response(
     };
     let payload =
         serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::json!({}));
+    if payload.get("targetJurors").is_some_and(|jurors| {
+        json_array_exceeds_limit(jurors, MAX_QUARANTINE_JURY_ITEMS)
+    }) {
+        return routing::bad_request_response(
+            "quarantine jury arrays must contain at most 100 items",
+        );
+    }
     let unsafe_metadata = ["senderPeerId", "podId", "channelId"]
         .into_iter()
         .filter_map(|field| payload.get(field).and_then(serde_json::Value::as_str))
@@ -61818,6 +61865,9 @@ async fn ranking_history_mutation_response(body: &str, state: &AppState) -> Http
     if values.is_empty() {
         return ranking_bad_request_response("At least one username is required");
     }
+    if values.len() > MAX_RANKING_BATCH_ITEMS {
+        return ranking_bad_request_response("at most 1000 usernames may be requested");
+    }
     let mut usernames = Vec::new();
     let mut seen = HashSet::new();
     for value in values {
@@ -61923,6 +61973,9 @@ async fn ranking_sources_mutation_response(body: &str, state: &AppState) -> Http
     };
     if values.is_empty() {
         return ranking_bad_request_response("At least one source candidate is required");
+    }
+    if values.len() > MAX_RANKING_BATCH_ITEMS {
+        return ranking_bad_request_response("at most 1000 source candidates may be ranked");
     }
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
@@ -62390,6 +62443,15 @@ async fn extended_controller_download_response(
         Ok(payload) => payload,
         Err(_) => return Err(routing::bad_request_response("invalid JSON body")),
     };
+    if ["items", "Items"].into_iter().any(|field| {
+        payload
+            .get(field)
+            .is_some_and(|items| json_array_exceeds_limit(items, MAX_EXTENDED_DOWNLOAD_ITEMS))
+    }) {
+        return Err(routing::bad_request_response(
+            "items must contain at most 1000 items",
+        ));
+    }
     let items = payload
         .get("items")
         .or_else(|| payload.get("Items"))
@@ -65718,6 +65780,13 @@ async fn mediacore_mutation_response(
             Ok(payload) => payload,
             Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
+        if payload.get("links").is_some_and(|links| {
+            json_array_exceeds_limit(links, MAX_MEDIACORE_BATCH_ITEMS)
+        }) {
+            return Some(routing::bad_request_response(
+                "links must contain at most 100 items",
+            ));
+        }
         let links = payload
             .get("links")
             .and_then(serde_json::Value::as_array)
@@ -66234,6 +66303,13 @@ async fn mediacore_mutation_response(
                         "Metadata package is required",
                     ));
                 };
+                if package.get("entries").is_some_and(|entries| {
+                    json_array_exceeds_limit(entries, MAX_MEDIACORE_PORTABILITY_ENTRIES)
+                }) {
+                    return Some(routing::bad_request_response(
+                        "entries must contain at most 1000 items",
+                    ));
+                }
                 let entries = package
                     .get("entries")
                     .and_then(serde_json::Value::as_array)
@@ -66265,6 +66341,13 @@ async fn mediacore_mutation_response(
                 )
             }
             "export" => {
+                if payload.get("contentIds").is_some_and(|content_ids| {
+                    json_array_exceeds_limit(content_ids, MAX_MEDIACORE_PORTABILITY_ENTRIES)
+                }) {
+                    return Some(routing::bad_request_response(
+                        "contentIds must contain at most 1000 items",
+                    ));
+                }
                 let content_ids = payload
                     .get("contentIds")
                     .and_then(serde_json::Value::as_array)
@@ -66337,6 +66420,13 @@ async fn mediacore_mutation_response(
                         "Metadata package is required",
                     ));
                 };
+                if package.get("entries").is_some_and(|entries| {
+                    json_array_exceeds_limit(entries, MAX_MEDIACORE_PORTABILITY_ENTRIES)
+                }) {
+                    return Some(routing::bad_request_response(
+                        "entries must contain at most 1000 items",
+                    ));
+                }
                 let entries = package
                     .get("entries")
                     .and_then(serde_json::Value::as_array)
@@ -66375,7 +66465,7 @@ async fn mediacore_mutation_response(
                 let mut conflicts = 0_usize;
                 let mut errors = Vec::new();
                 let mut features = state.controller_features.write().await;
-                for entry in entries.iter().take(1_000) {
+                for entry in entries.iter().take(MAX_MEDIACORE_PORTABILITY_ENTRIES) {
                     let descriptor = entry
                         .get("descriptor")
                         .filter(|value| value.is_object())
@@ -66439,7 +66529,7 @@ async fn mediacore_mutation_response(
                 routing::ok_response(
                     serde_json::json!({
                         "success": errors.is_empty(),
-                        "entriesProcessed": entries.len().min(1_000),
+                        "entriesProcessed": entries.len().min(MAX_MEDIACORE_PORTABILITY_ENTRIES),
                         "entriesImported": imported,
                         "entriesSkipped": skipped,
                         "conflictsResolved": conflicts.saturating_sub(skipped),

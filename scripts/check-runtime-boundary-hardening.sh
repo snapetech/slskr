@@ -144,6 +144,12 @@ for anchor in \
   'string_array_routes_reject_oversized_wire_batches_before_mutation' \
   'MAX_MEDIACORE_BATCH_ITEMS' \
   'mediacore_rejects_oversized_wire_batches_before_work' \
+  'MAX_MEDIACORE_PORTABILITY_ENTRIES' \
+  'MAX_QUARANTINE_JURY_ITEMS' \
+  'MAX_EXTENDED_DOWNLOAD_ITEMS' \
+  'MAX_RANKING_BATCH_ITEMS' \
+  'MAX_LISTENING_PARTY_TAGS' \
+  'remaining_controller_array_routes_reject_oversized_wire_batches_before_work' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

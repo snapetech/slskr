@@ -1972,6 +1972,175 @@ async fn mediacore_rejects_oversized_wire_batches_before_work() {
 }
 
 #[tokio::test]
+async fn remaining_controller_array_routes_reject_oversized_wire_batches_before_work() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+
+    let download_items = (0..=super::MAX_EXTENDED_DOWNLOAD_ITEMS)
+        .map(|index| {
+            serde_json::json!({
+                "user": "peer",
+                "remotePath": format!("Music/{index}.flac"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/downloads",
+        None,
+        &serde_json::json!({"items": download_items}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized extended download request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("items must contain at most 1000 items"));
+    assert!(state.transfers.read().await.entries.is_empty());
+
+    let links = (0..=super::MAX_MEDIACORE_BATCH_ITEMS)
+        .map(|index| {
+            serde_json::json!({
+                "name": format!("link-{index}"),
+                "target": format!("target-{index}"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/mediacore/ipld/links/content:test:oversized",
+        None,
+        &serde_json::json!({"links": links}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized MediaCore links request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("links must contain at most 100 items"));
+
+    let entries = (0..=super::MAX_MEDIACORE_PORTABILITY_ENTRIES)
+        .map(|index| serde_json::json!({"contentId": format!("content:test:{index}")}))
+        .collect::<Vec<_>>();
+    for (path, body, expected) in [
+        (
+            "/api/v0/mediacore/portability/analyze",
+            serde_json::json!({"package": {"entries": entries.clone()}}).to_string(),
+            "entries must contain at most 1000 items",
+        ),
+        (
+            "/api/v0/mediacore/portability/import",
+            serde_json::json!({"package": {"entries": entries}}).to_string(),
+            "entries must contain at most 1000 items",
+        ),
+    ] {
+        let response = super::route_http_request("POST", path, None, &body, &state)
+            .await
+            .expect("oversized MediaCore portability request");
+        assert_eq!(response.status, "400 Bad Request", "{path}");
+        assert!(
+            response.body.contains(expected),
+            "{path}: {}",
+            response.body
+        );
+    }
+
+    let content_ids = (0..=super::MAX_MEDIACORE_PORTABILITY_ENTRIES)
+        .map(|index| serde_json::json!(format!("content:test:export:{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/mediacore/portability/export",
+        None,
+        &serde_json::json!({"contentIds": content_ids}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized MediaCore export request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("contentIds must contain at most 1000 items"));
+
+    let sources = (0..=super::multisource::MAX_SOURCES)
+        .map(|index| serde_json::json!({"username": format!("peer-{index}")}))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/multisource/test",
+        None,
+        &serde_json::json!({"sources": sources}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized multisource test request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("source count exceeds the 16 source limit"));
+
+    let jurors = (0..=super::MAX_QUARANTINE_JURY_ITEMS)
+        .map(|index| serde_json::json!(format!("juror-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/quarantine-jury/requests",
+        None,
+        &serde_json::json!({
+            "localReason": "test",
+            "jurors": jurors,
+            "evidence": [{"reference": "safe-reference", "summary": "test"}],
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized quarantine request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("quarantine jury arrays must contain at most 100 items"));
+
+    let usernames = (0..=super::MAX_RANKING_BATCH_ITEMS)
+        .map(|index| serde_json::json!(format!("peer-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/ranking/history",
+        None,
+        &serde_json::to_string(&usernames).expect("ranking usernames JSON"),
+        &state,
+    )
+    .await
+    .expect("oversized ranking history request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response.body.contains("at most 1000 usernames"));
+
+    let candidates = (0..=super::MAX_RANKING_BATCH_ITEMS)
+        .map(|index| {
+            serde_json::json!({
+                "username": format!("peer-{index}"),
+                "filename": "Music/test.flac",
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/ranking/rank",
+        None,
+        &serde_json::to_string(&candidates).expect("ranking candidates JSON"),
+        &state,
+    )
+    .await
+    .expect("oversized ranking request");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response.body.contains("at most 1000 source candidates"));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

@@ -1031,6 +1031,14 @@ async fn route_http_request_inner_with_batch(
         let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
             return Ok(routing::bad_request_response("invalid JSON body"));
         };
+        if payload
+            .get("items")
+            .is_some_and(|items| json_array_exceeds_limit(items, MAX_INCOMING_SHARE_ITEMS))
+        {
+            return Ok(routing::bad_request_response(
+                "items must contain at most 10000 items",
+            ));
+        }
         let string_field = |field: &str| {
             payload
                 .get(field)
