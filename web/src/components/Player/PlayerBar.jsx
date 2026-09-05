@@ -40,6 +40,7 @@ import {
 import { getPlayerShortcutAction } from '../../lib/playerShortcuts';
 import { copyToClipboard } from '../../lib/clipboard';
 import { toDisplayError } from '../../lib/errors';
+import { readFileTextBounded } from '../../lib/fileReaders';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import { useMountedRef } from '../../lib/useMountedRef';
 import * as searches from '../../lib/searches';
@@ -1220,13 +1221,13 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
     const isCurrentRequest = () =>
       isActive() && actionRequestIdRef.current === requestId;
 
-    file.text().then((content) => {
+    readFileTextBounded(file).then((content) => {
       if (!isCurrentRequest()) return;
       setImportText(content);
       setImportStatus(`Loaded ${file.name} for review.`);
-    }).catch(() => {
+    }).catch((error) => {
       if (!isCurrentRequest()) return;
-      setImportStatus(`Could not read ${file.name}.`);
+      setImportStatus(`Could not read ${file.name}: ${toDisplayError(error)}`);
     });
     event.target.value = '';
   };

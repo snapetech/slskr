@@ -7,6 +7,7 @@ import {
 } from '../../lib/storage';
 import { resumeAudioGraph } from './audioGraph';
 import { toDisplayError } from '../../lib/errors';
+import { readFileTextBounded } from '../../lib/fileReaders';
 import SpectrumAnalyzer from './SpectrumAnalyzer';
 import { createRustyMilkEngine } from './visualizers/rustyMilkEngine';
 import { useMountedRef } from '../../lib/useMountedRef';
@@ -26,6 +27,7 @@ const rustyMilkPresetLibraryLimit = 20;
 const rustyMilkPresetHistoryLimit = 12;
 const rustyMilkPresetPlaylistLimit = 12;
 const nativeTextureAssetMaxBytes = 1024 * 1024;
+const nativeTextSourceMaxBytes = 1024 * 1024;
 const nativeEditableParameters = [
   {
     defaultValue: 0.9,
@@ -1234,7 +1236,7 @@ const Visualizer = ({
       for (const file of files.filter(isRustyMilkPresetFile)) {
         if (!mountedRef.current) return;
         try {
-          const source = await file.text();
+          const source = await readFileTextBounded(file, nativeTextSourceMaxBytes);
           if (!mountedRef.current) return;
           const presetTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
           const importedPresetName = engineRef.current.inspectPresetText
@@ -1298,7 +1300,7 @@ const Visualizer = ({
           continue;
         }
         try {
-          const source = await file.text();
+          const source = await readFileTextBounded(file, nativeTextSourceMaxBytes);
           if (!mountedRef.current) return;
           const fragmentTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
           const mergedTextureAssets = {

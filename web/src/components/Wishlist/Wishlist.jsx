@@ -8,6 +8,7 @@ import {
   getRunnableWishlistRequests,
 } from '../../lib/acquisitionRequests';
 import { toDisplayError } from '../../lib/errors';
+import { readFileTextBounded } from '../../lib/fileReaders';
 import * as wishlistAPI from '../../lib/wishlist';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -444,7 +445,7 @@ const CsvImportModal = ({ onClose, onImport }) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
+      const text = await readFileTextBounded(file, 768 * 1024);
       if (mountedRef.current) {
         setCsvText(text);
       }
