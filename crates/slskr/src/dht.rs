@@ -435,7 +435,17 @@ mod tests {
         let rendezvous = Rendezvous::with_builder(0, None, Some(&testnet.bootstrap)).unwrap();
         let key = rendezvous_keys()[0];
         announcer.announce_peer(key, Some(50_305)).await.unwrap();
-        let peers = rendezvous.lookup(key).await.unwrap();
+        let peers = timeout(Duration::from_secs(10), async {
+            loop {
+                let peers = rendezvous.lookup(key).await.unwrap();
+                if peers.iter().any(|peer| peer.port() == 50_305) {
+                    break peers;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("announced peer was not visible before the lookup deadline");
         assert!(peers.iter().any(|peer| peer.port() == 50_305));
         rendezvous.refresh().await;
         let status =
