@@ -2,38 +2,86 @@ import {
   getLocalStorageItem,
   setLocalStorageItem,
 } from './storage';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
 import { getPlayerRatingKey } from './playerRatings';
 
 export const discoveryShelfStorageKey = 'slskr.discovery.shelf';
 
 const maxShelfItems = 200;
+const maxShelfTextCharacters = 2_048;
+const shelfActions = new Set([
+  'archive-preview',
+  'expiry-watch',
+  'keep-reviewing',
+  'promote-preview',
+]);
 
-const normalizeText = (value = '') => String(value).trim();
+const normalizeText = (value = '') =>
+  String(value).trim().slice(0, maxShelfTextCharacters);
 
 const normalizePositiveInteger = (value, fallback) => {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : fallback;
 };
 
+const normalizeShelfItem = (item = {}) => {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+
+  const key = normalizeText(item.key);
+  const title = normalizeText(item.title || item.fileName);
+  if (!key || !title) return null;
+
+  const rating = Number(item.rating);
+  return {
+    action: shelfActions.has(item.action) ? item.action : 'expiry-watch',
+    album: normalizeText(item.album),
+    artist: normalizeText(item.artist),
+    contentId: normalizeText(item.contentId),
+    key,
+    rating: Number.isInteger(rating) ? Math.min(Math.max(rating, 0), 5) : 0,
+    reviewedAt: normalizeText(item.reviewedAt),
+    sourceProviders: Array.isArray(item.sourceProviders)
+      ? item.sourceProviders.slice(0, 6).map(normalizeText).filter(Boolean)
+      : [],
+    title,
+  };
+};
+
 const readShelf = () => {
-  try {
-    const parsed = JSON.parse(getLocalStorageItem(discoveryShelfStorageKey, '[]'));
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (item) => item && typeof item === 'object' && !Array.isArray(item),
-        )
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = readBoundedJson(
+    getLocalStorageItem,
+    discoveryShelfStorageKey,
+    [],
+    maxPersistedJsonCharacters,
+  );
+
+  return Array.isArray(parsed)
+    ? parsed
+        .slice(0, maxShelfItems)
+        .map(normalizeShelfItem)
+        .filter(Boolean)
+    : [];
 };
 
 const writeShelf = (items) => {
-  const normalized = items
-    .filter((item) => item?.key && item?.title)
+  const normalized = (Array.isArray(items) ? items : [])
+    .map(normalizeShelfItem)
+    .filter(Boolean)
     .slice(0, maxShelfItems);
-  setLocalStorageItem(discoveryShelfStorageKey, JSON.stringify(normalized));
-  return normalized;
+
+  return writeBoundedList(
+    setLocalStorageItem,
+    discoveryShelfStorageKey,
+    normalized,
+    {
+      maxCharacters: maxPersistedJsonCharacters,
+      maxItems: maxShelfItems,
+    },
+  );
 };
 
 export const getDiscoveryShelfAction = (rating = 0) => {
@@ -77,7 +125,7 @@ export const upsertDiscoveryShelfItem = (
     rating: Number.isInteger(Number(rating)) ? Number(rating) : 0,
     reviewedAt,
     sourceProviders: Array.isArray(track.sourceProviders)
-      ? track.sourceProviders.slice(0, 6)
+      ? track.sourceProviders.slice(0, 6).map(normalizeText).filter(Boolean)
       : [],
     title,
   };

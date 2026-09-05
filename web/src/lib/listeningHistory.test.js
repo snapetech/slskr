@@ -11,6 +11,7 @@ import {
   listeningHistoryStorageKey,
   recordLocalPlay,
 } from './listeningHistory';
+import { maxPersistedJsonCharacters } from './persistedJson';
 
 describe('listeningHistory', () => {
   beforeEach(() => {
@@ -210,5 +211,24 @@ describe('listeningHistory', () => {
 
     clearListeningHistory();
     expect(getListeningHistory()).toEqual([]);
+  });
+
+  it('rejects oversized persisted history before parsing', () => {
+    window.localStorage.setItem(
+      listeningHistoryStorageKey,
+      JSON.stringify([{ contentId: 'sha256:oversized', title: 'x'.repeat(maxPersistedJsonCharacters) }]),
+    );
+
+    expect(getListeningHistory()).toEqual([]);
+  });
+
+  it('rejects oversized imports without parsing or storing them', () => {
+    const result = importListeningHistory('x'.repeat(1_048_577));
+
+    expect(result).toEqual({
+      history: [],
+      imported: 0,
+      skipped: 0,
+    });
   });
 });

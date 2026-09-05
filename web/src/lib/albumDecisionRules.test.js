@@ -3,6 +3,7 @@ import {
   getAlbumDecisionRules,
   saveAlbumDecisionRule,
 } from './albumDecisionRules';
+import { maxPersistedJsonCharacters } from './persistedJson';
 
 describe('albumDecisionRules', () => {
   beforeEach(() => {
@@ -55,5 +56,14 @@ describe('albumDecisionRules', () => {
     saveAlbumDecisionRule({ candidate, searchText: 'artist album deluxe' });
 
     expect(getAlbumDecisionRules()).toHaveLength(1);
+  });
+
+  it('rejects oversized persisted rules before parsing', () => {
+    localStorage.setItem(
+      'slskr.albumDecisionRules',
+      JSON.stringify([{ id: 'oversized', albumTitle: 'x'.repeat(maxPersistedJsonCharacters) }]),
+    );
+
+    expect(getAlbumDecisionRules()).toEqual([]);
   });
 });

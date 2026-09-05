@@ -2,33 +2,86 @@ import {
   getLocalStorageItem,
   setLocalStorageItem,
 } from './storage';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedList,
+} from './persistedJson';
 
 export const listeningHistoryStorageKey = 'slskr.listening.history';
 
 const maxHistoryEntries = 500;
+const maxHistoryImportEntries = 5_000;
+const maxHistoryImportCharacters = 1 * 1024 * 1024;
+const maxHistoryTextCharacters = 2_048;
 
-const normalizeText = (value = '') => String(value).trim();
+const normalizeText = (value = '') =>
+  String(value).trim().slice(0, maxHistoryTextCharacters);
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const getGenreValues = (track = {}) => [
+  normalizeText(track.genre),
+  ...asArray(track.genres).slice(0, 8).map(normalizeText),
+  ...asArray(track.tags).slice(0, 8).map(normalizeText),
+].filter(Boolean).slice(0, 8);
+
+const normalizePlayedAt = (value, fallback = null) => {
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? new Date(time).toISOString() : fallback;
+};
+
+const normalizeHistoryEntry = (entry = {}) => {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+
+  const contentId = normalizeText(entry.contentId);
+  const title = normalizeText(entry.title || entry.fileName || contentId);
+  if (!contentId && !title) return null;
+
+  return {
+    album: normalizeText(entry.album),
+    artist: normalizeText(entry.artist),
+    contentId,
+    genres: getGenreValues(entry),
+    playedAt: normalizePlayedAt(entry.playedAt, normalizeText(entry.playedAt)),
+    ...(normalizeText(entry.source)
+      ? { source: normalizeText(entry.source) }
+      : {}),
+    title,
+  };
+};
 
 const readHistory = () => {
-  try {
-    const parsed = JSON.parse(getLocalStorageItem(listeningHistoryStorageKey, '[]'));
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (entry) =>
-            entry && typeof entry === 'object' && !Array.isArray(entry),
-        )
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = readBoundedJson(
+    getLocalStorageItem,
+    listeningHistoryStorageKey,
+    [],
+    maxPersistedJsonCharacters,
+  );
+
+  return Array.isArray(parsed)
+    ? parsed
+        .slice(0, maxHistoryEntries)
+        .map(normalizeHistoryEntry)
+        .filter(Boolean)
+    : [];
 };
 
 const writeHistory = (entries) => {
-  const normalized = entries
-    .filter((entry) => entry?.contentId || entry?.title)
+  const normalized = (Array.isArray(entries) ? entries : [])
+    .map(normalizeHistoryEntry)
+    .filter(Boolean)
     .slice(0, maxHistoryEntries);
-  setLocalStorageItem(listeningHistoryStorageKey, JSON.stringify(normalized));
-  return normalized;
+
+  return writeBoundedList(
+    setLocalStorageItem,
+    listeningHistoryStorageKey,
+    normalized,
+    {
+      maxCharacters: maxPersistedJsonCharacters,
+      maxItems: maxHistoryEntries,
+    },
+  );
 };
 
 const getTrackKey = (track = {}) =>
@@ -42,19 +95,6 @@ const getTrackKey = (track = {}) =>
 const incrementCount = (map, key) => {
   if (!key) return;
   map.set(key, (map.get(key) || 0) + 1);
-};
-
-const asArray = (value) => (Array.isArray(value) ? value : []);
-
-const getGenreValues = (track = {}) => [
-  normalizeText(track.genre),
-  ...(Array.isArray(track.genres) ? track.genres.map(normalizeText) : []),
-  ...(Array.isArray(track.tags) ? track.tags.map(normalizeText) : []),
-].filter(Boolean);
-
-const normalizePlayedAt = (value, fallback = null) => {
-  const time = Date.parse(value || '');
-  return Number.isFinite(time) ? new Date(time).toISOString() : fallback;
 };
 
 const topCounts = (map, limit) =>
@@ -123,17 +163,17 @@ const normalizeImportItem = (item = {}, source = 'media-server-import') => {
     contentId,
     genres: getGenreValues(item).slice(0, 8),
     playedAt,
-    source,
+    source: normalizeText(source, 'media-server-import'),
     title: title || contentId,
   };
 };
 
 const parseJsonImport = (raw) => {
   const parsed = JSON.parse(raw);
-  if (Array.isArray(parsed)) return parsed;
-  if (Array.isArray(parsed.history)) return parsed.history;
-  if (Array.isArray(parsed.items)) return parsed.items;
-  if (Array.isArray(parsed.plays)) return parsed.plays;
+  if (Array.isArray(parsed)) return parsed.slice(0, maxHistoryImportEntries);
+  if (Array.isArray(parsed.history)) return parsed.history.slice(0, maxHistoryImportEntries);
+  if (Array.isArray(parsed.items)) return parsed.items.slice(0, maxHistoryImportEntries);
+  if (Array.isArray(parsed.plays)) return parsed.plays.slice(0, maxHistoryImportEntries);
   return [];
 };
 
@@ -146,7 +186,7 @@ const parseCsvImport = (raw) => {
   if (lines.length < 2) return [];
 
   const headers = parseCsvLine(lines[0]).map((header) => header.trim());
-  return lines.slice(1).map((line) => {
+  return lines.slice(1, maxHistoryImportEntries + 1).map((line) => {
     const values = parseCsvLine(line);
     return headers.reduce((item, header, index) => ({
       ...item,
@@ -156,7 +196,10 @@ const parseCsvImport = (raw) => {
 };
 
 const parseHistoryImport = (raw) => {
-  const content = normalizeText(raw);
+  if (typeof raw !== 'string') return [];
+
+  const content = raw.trim();
+  if (content.length > maxHistoryImportCharacters) return [];
   if (!content) return [];
 
   try {
@@ -259,10 +302,11 @@ export const clearListeningHistory = () => writeHistory([]);
 
 export const importListeningHistory = (raw, source = 'media-server-import') => {
   const existing = getListeningHistory();
+  const parsedItems = parseHistoryImport(raw);
   const seen = new Set(existing.map((entry) => `${getTrackKey(entry)}|${entry.playedAt}`));
   const imported = [];
 
-  parseHistoryImport(raw).forEach((item) => {
+  parsedItems.forEach((item) => {
     const entry = normalizeImportItem(item, source);
     if (!entry) return;
 
@@ -284,7 +328,7 @@ export const importListeningHistory = (raw, source = 'media-server-import') => {
   return {
     history,
     imported: imported.length,
-    skipped: Math.max(parseHistoryImport(raw).length - imported.length, 0),
+    skipped: Math.max(parsedItems.length - imported.length, 0),
   };
 };
 

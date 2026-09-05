@@ -9,6 +9,7 @@ import {
   removeDiscoveryShelfItem,
   upsertDiscoveryShelfItem,
 } from './discoveryShelf';
+import { maxPersistedJsonCharacters } from './persistedJson';
 
 describe('discoveryShelf', () => {
   beforeEach(() => {
@@ -141,5 +142,14 @@ describe('discoveryShelf', () => {
         title: 'Fixture Artist - Fixture Album - Promote Track',
       }),
     ]);
+  });
+
+  it('rejects oversized persisted shelf state before parsing', () => {
+    localStorage.setItem(
+      discoveryShelfStorageKey,
+      JSON.stringify([{ key: 'content:oversized', title: 'x'.repeat(maxPersistedJsonCharacters) }]),
+    );
+
+    expect(getDiscoveryShelfSummary().total).toBe(0);
   });
 });
