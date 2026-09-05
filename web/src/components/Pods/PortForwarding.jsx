@@ -36,13 +36,17 @@ const initialState = {
   creatingForwarding: false,
   error: null,
   forwardingStatus: [],
+  forwardingStatusError: null,
   loading: false,
   pods: [],
+  podsError: null,
   selectedPodDetail: null,
   selectedPodId: null,
   showCreateModal: false,
   stoppingForwarding: false,
   success: null,
+  availablePortsError: null,
+  vpnPodStatusError: null,
   vpnPodStatus: {},
 };
 
@@ -152,7 +156,7 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.pods
       ) {
-        this.setState({ pods: normalizedPods });
+        this.setState({ pods: normalizedPods, podsError: null });
       }
       return normalizedPods;
     } catch (error) {
@@ -161,9 +165,11 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.pods
       ) {
-        this.setState({ pods: [] });
+        this.setState({
+          podsError: toDisplayError(error, 'Failed to load pods'),
+        });
       }
-      return [];
+      return this.state.pods;
     }
   };
 
@@ -179,6 +185,7 @@ class PortForwarding extends Component {
           availablePorts: Array.isArray(result?.availablePorts)
             ? result.availablePorts
             : [],
+          availablePortsError: null,
         });
       }
     } catch (error) {
@@ -187,7 +194,12 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.availablePorts
       ) {
-        this.setState({ availablePorts: [] });
+        this.setState({
+          availablePortsError: toDisplayError(
+            error,
+            'Failed to load available ports',
+          ),
+        });
       }
     }
   };
@@ -201,7 +213,10 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.forwardingStatus
       ) {
-        this.setState({ forwardingStatus: normalizedStatus });
+        this.setState({
+          forwardingStatus: normalizedStatus,
+          forwardingStatusError: null,
+        });
       }
       return normalizedStatus;
     } catch (error) {
@@ -210,7 +225,12 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.forwardingStatus
       ) {
-        this.setState({ forwardingStatus: [] });
+        this.setState({
+          forwardingStatusError: toDisplayError(
+            error,
+            'Failed to load forwarding status',
+          ),
+        });
       }
       return [];
     }
@@ -268,10 +288,28 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.vpnPodStatus
       ) {
-        this.setState({ vpnPodStatus: status });
+        this.setState({
+          vpnPodStatus: status,
+          vpnPodStatusError: Object.values(status).some(
+            (pod) => pod.status === 'Error',
+          )
+            ? 'One or more VPN pod status checks failed.'
+            : null,
+        });
       }
     } catch (error) {
       console.error('Failed to fetch VPN pod status:', error);
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.vpnPodStatus
+      ) {
+        this.setState({
+          vpnPodStatusError: toDisplayError(
+            error,
+            'Failed to load VPN pod status',
+          ),
+        });
+      }
     }
   };
 
@@ -460,13 +498,17 @@ class PortForwarding extends Component {
       creatingForwarding,
       error,
       forwardingStatus,
+      forwardingStatusError,
       loading,
       pods,
+      podsError,
       selectedPodDetail,
       selectedPodId,
       showCreateModal,
       stoppingForwarding,
       success,
+      availablePortsError,
+      vpnPodStatusError,
       vpnPodStatus,
     } = this.state;
 
@@ -509,13 +551,28 @@ class PortForwarding extends Component {
         menuItem: 'Active Forwarding',
         render: () => (
           <Tab.Pane>
+            {forwardingStatusError && (
+              <Message
+                data-testid="port-forwarding-status-error"
+                error
+              >
+                <Message.Header>Forwarding status unavailable</Message.Header>
+                <p>{forwardingStatusError}</p>
+                <p>Showing the last successfully received forwarding status.</p>
+              </Message>
+            )}
             {forwardingStatus.length === 0 ? (
               <Segment placeholder>
                 <Icon name="exchange" />
-                <h3>No active port forwarding</h3>
+                <h3>
+                  {forwardingStatusError
+                    ? 'Forwarding status unavailable'
+                    : 'No active port forwarding'}
+                </h3>
                 <p>
-                  Start forwarding local ports to remote services through VPN
-                  tunnels.
+                  {forwardingStatusError
+                    ? 'The daemon did not return the current forwarding status.'
+                    : 'Start forwarding local ports to remote services through VPN tunnels.'}
                 </p>
                 <Button
                   disabled={vpnCapablePods.length === 0}
@@ -612,6 +669,15 @@ class PortForwarding extends Component {
         menuItem: 'Available Ports',
         render: () => (
           <Tab.Pane>
+            {availablePortsError && (
+              <Message
+                data-testid="available-ports-error"
+                error
+              >
+                <Message.Header>Available ports unavailable</Message.Header>
+                <p>{availablePortsError}</p>
+              </Message>
+            )}
             <div style={{ marginBottom: '20px' }}>
               <Statistic.Group size="small">
                 <Statistic>
@@ -644,7 +710,11 @@ class PortForwarding extends Component {
                     ? ` ... (+${availablePorts.length - 100} more)`
                     : '')
                 ) : (
-                  <em>No ports available or still loading...</em>
+                  <em>
+                    {availablePortsError
+                      ? 'Available ports are unavailable.'
+                      : 'No ports available or still loading...'}
+                  </em>
                 )}
               </div>
             </Segment>
@@ -760,6 +830,24 @@ class PortForwarding extends Component {
         menuItem: 'VPN Pods',
         render: () => (
           <Tab.Pane>
+            {podsError && (
+              <Message
+                data-testid="vpn-pods-load-error"
+                error
+              >
+                <Message.Header>VPN pod list unavailable</Message.Header>
+                <p>{podsError}</p>
+              </Message>
+            )}
+            {vpnPodStatusError && (
+              <Message
+                data-testid="vpn-pod-status-error"
+                warning
+              >
+                <Message.Header>VPN pod status incomplete</Message.Header>
+                <p>{vpnPodStatusError}</p>
+              </Message>
+            )}
             <div style={{ marginBottom: '20px' }}>
               <Statistic.Group widths="three">
                 <Statistic>
@@ -885,7 +973,16 @@ class PortForwarding extends Component {
           </Message>
         )}
 
-        {vpnCapablePods.length === 0 && (
+        {podsError ? (
+          <Message
+            data-testid="port-forwarding-pods-error"
+            error
+          >
+            <Message.Header>VPN pod list unavailable</Message.Header>
+            <p>{podsError}</p>
+            <p>VPN capability cannot be determined until the pod list reloads.</p>
+          </Message>
+        ) : vpnCapablePods.length === 0 && (
           <Message warning>
             <Message.Header>No VPN-Capable Pods</Message.Header>
             <p>

@@ -50,6 +50,7 @@ const initialState = {
   leavingPod: false,
   savingPod: false,
   sendingMessage: false,
+  podsError: null,
 };
 
 const GOLD_STAR_CLUB_POD_ID = 'pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0';
@@ -229,15 +230,17 @@ class Pods extends Component {
       const podsList = await pods.list();
       const normalizedPods = asRecords(podsList).map(normalizePod).filter(Boolean);
       if (this.isMountedFlag && requestId === this.requestIds.pods) {
-        this.setState({ pods: normalizedPods });
+        this.setState({ pods: normalizedPods, podsError: null });
       }
       return normalizedPods;
     } catch (error) {
       console.error('Failed to fetch pods:', error);
       if (this.isMountedFlag && requestId === this.requestIds.pods) {
-        this.setState({ pods: [] });
+        this.setState({
+          podsError: toDisplayError(error, 'Failed to load pods'),
+        });
       }
-      return [];
+      return this.state.pods;
     }
   };
 
@@ -661,6 +664,7 @@ class Pods extends Component {
       discoveryLoading,
       discoveryQuery,
       discoveryResults,
+      podsError,
     } = this.state;
 
     const currentMessages =
@@ -679,6 +683,16 @@ class Pods extends Component {
 
     return (
       <div className="pods-workspace">
+        {podsError && (
+          <Message
+            data-testid="pods-load-error"
+            error
+          >
+            <Message.Header>Pods unavailable</Message.Header>
+            <p>{podsError}</p>
+            <p>Showing the last successfully loaded pod list.</p>
+          </Message>
+        )}
         {/* Pod List Sidebar */}
         <Segment className="pods-sidebar">
           <div className="pods-sidebar-header">
@@ -785,7 +799,7 @@ class Pods extends Component {
           )}
           {podsList.length === 0 ? (
             <PlaceholderSegment
-              caption="No pods yet"
+              caption={podsError ? 'Pods unavailable' : 'No pods yet'}
               icon="users"
             />
           ) : (
