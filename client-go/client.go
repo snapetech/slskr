@@ -710,19 +710,8 @@ func (c *Client) doJSON(req *http.Request, auth bool) (interface{}, error) {
 	if c.HTTPClient != nil {
 		httpClient = *c.HTTPClient
 	}
-	configuredRedirect := httpClient.CheckRedirect
-	baseURL, _ := url.Parse(c.BaseURL)
-	httpClient.CheckRedirect = func(redirected *http.Request, via []*http.Request) error {
-		if redirected.URL.Scheme != baseURL.Scheme || redirected.URL.Host != baseURL.Host {
-			return fmt.Errorf("refusing redirect outside configured API origin")
-		}
-		if configuredRedirect != nil {
-			return configuredRedirect(redirected, via)
-		}
-		if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
-		}
-		return nil
+	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return fmt.Errorf("refusing HTTP redirects")
 	}
 
 	resp, err := httpClient.Do(req)

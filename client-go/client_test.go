@@ -72,12 +72,36 @@ func TestClientRejectsAuthenticatedCrossOriginRedirects(t *testing.T) {
 	defer source.Close()
 
 	_, err := NewClient(source.URL, "secret-token").GetConfig(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "outside configured API origin") {
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
 		t.Fatalf("expected cross-origin redirect rejection, got %v", err)
 	}
 	select {
 	case authorization := <-receivedAuthorization:
 		t.Fatalf("redirect target received Authorization header %q", authorization)
+	default:
+	}
+}
+
+func TestClientRejectsSameOriginRedirects(t *testing.T) {
+	targetRequests := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/config" {
+			http.Redirect(writer, request, "/api/config/", http.StatusFound)
+			return
+		}
+		targetRequests <- struct{}{}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	_, err := NewClient(server.URL, "secret-token").GetConfig(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("expected same-origin redirect rejection, got %v", err)
+	}
+	select {
+	case <-targetRequests:
+		t.Fatal("same-origin redirect target was contacted")
 	default:
 	}
 }
