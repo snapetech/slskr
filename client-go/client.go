@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -803,6 +804,9 @@ func (c *Client) doJSON(req *http.Request, auth bool) (interface{}, error) {
 	if resp.StatusCode >= 400 {
 		bodyBytes, err := readBoundedBody(resp, maxHTTPErrorBytes)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
 			return nil, fmt.Errorf("API error: %d - %w", resp.StatusCode, err)
 		}
 		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, redactErrorBody(bodyBytes))

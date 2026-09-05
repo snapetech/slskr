@@ -12,6 +12,25 @@ import (
 	"time"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+type contextBody struct {
+	context context.Context
+}
+
+func (body contextBody) Read(_ []byte) (int, error) {
+	<-body.context.Done()
+	return 0, body.context.Err()
+}
+
+func (contextBody) Close() error {
+	return nil
+}
+
 func TestClientValidatesAndNormalizesRESTBaseURL(t *testing.T) {
 	for _, baseURL := range []string{"ftp://example.test", "example.test", "https://user:pass@example.test"} {
 		_, err := NewClient(baseURL, "token").Health(context.Background())
@@ -129,6 +148,30 @@ func TestClientBoundsChunkedErrorResponse(t *testing.T) {
 	_, err := NewClient(server.URL, "token").Health(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "response body exceeds") {
 		t.Fatalf("expected bounded API error, got %v", err)
+	}
+}
+
+func TestClientPreservesTimeoutWhileReadingErrorResponse(t *testing.T) {
+	client := NewClient("http://example.test", "token")
+	client.Timeout = 10 * time.Millisecond
+	client.HTTPClient = &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Status:     "502 Bad Gateway",
+				Header:     make(http.Header),
+				Body:       contextBody{context: request.Context()},
+				Request:    request,
+			}, nil
+		}),
+	}
+
+	_, err := client.Health(context.Background())
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected response-body timeout, got %v", err)
+	}
+	if strings.Contains(err.Error(), "API error") {
+		t.Fatalf("response-body timeout was mislabeled as an API error: %v", err)
 	}
 }
 
