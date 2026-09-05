@@ -1,12 +1,20 @@
 import '../System.css';
 import { createLogsHubConnection } from '../../../lib/hubFactory';
+import { toDisplayError } from '../../../lib/errors';
 import { getLogs, updateLogLevel } from '../../../lib/options';
 import { LoaderSegment } from '../../Shared';
 import React, { Component } from 'react';
-import { Button, ButtonGroup, Dropdown, Table } from 'semantic-ui-react';
+import {
+  Button,
+  ButtonGroup,
+  Dropdown,
+  Message,
+  Table,
+} from 'semantic-ui-react';
 
 const initialState = {
   connected: false,
+  error: null,
   filterLevel: 'all',
   level: 'Information',
   levels: ['Trace', 'Debug', 'Information', 'Warning', 'Error'],
@@ -88,6 +96,7 @@ class Logs extends Component {
         requestId === this.logsRequestId
       ) {
         this.setState((previousState) => ({
+          error: null,
           level: response?.level || 'Information',
           levels: Array.isArray(response?.levels)
             ? response.levels
@@ -102,7 +111,10 @@ class Logs extends Component {
         this.isMountedFlag &&
         requestId === this.logsRequestId
       ) {
-        this.setState({ loading: false });
+        this.setState({
+          error: toDisplayError(error, 'Failed to load logs'),
+          loading: false,
+        });
       }
     }
   };
@@ -194,13 +206,24 @@ class Logs extends Component {
         this.isMountedFlag &&
         requestId === this.levelRequestId
       ) {
-        this.setState({ savingLevel: false });
+        this.setState({
+          error: toDisplayError(error, 'Failed to update log level'),
+          savingLevel: false,
+        });
       }
     }
   };
 
   render() {
-    const { connected, filterLevel, level, levels: levelOptions, loading, savingLevel } = this.state;
+    const {
+      connected,
+      error,
+      filterLevel,
+      level,
+      levels: levelOptions,
+      loading,
+      savingLevel,
+    } = this.state;
     const filteredLogs = this.getFilteredLogs();
     const dropdownOptions = levelOptions.map((option) => ({
       key: option,
@@ -264,6 +287,15 @@ class Logs extends Component {
               : 'Connecting to logs...'}
           </span>
         </div>
+        {error && (
+          <Message
+            data-testid="logs-error"
+            error
+          >
+            <Message.Header>Logs unavailable</Message.Header>
+            <p>{error}</p>
+          </Message>
+        )}
         {loading && <LoaderSegment />}
         {!loading && (
           <Table
@@ -285,7 +317,9 @@ class Logs extends Component {
                     colSpan="4"
                     textAlign="center"
                   >
-                    No logs match the selected filter
+                    {error
+                      ? 'No logs are available from the server'
+                      : 'No logs match the selected filter'}
                   </Table.Cell>
                 </Table.Row>
               ) : (

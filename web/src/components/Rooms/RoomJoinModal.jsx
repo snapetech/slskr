@@ -11,6 +11,7 @@ import {
   Icon,
   Input,
   Loader,
+  Message,
   Modal,
   Segment,
   Table,
@@ -23,6 +24,7 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState('desc');
   const [filter, setFilter] = useState('');
+  const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const mountedRef = useMountedRef();
@@ -35,6 +37,7 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
     const getAvailableRooms = async () => {
       if (!mountedRef.current) return;
       setLoading(true);
+      setLoadError(null);
       try {
         const availableResult = await rooms.getAvailable();
         if (
@@ -43,6 +46,7 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
         ) {
           return;
         }
+        setLoadError(null);
         setAvailable(
           Array.isArray(availableResult)
             ? availableResult.filter(
@@ -50,13 +54,12 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
             )
             : [],
         );
-      } catch {
+      } catch (error) {
         if (
           mountedRef.current &&
           loadRequestIdRef.current === requestId
         ) {
-          toast.error('Failed to load room list');
-          setAvailable([]);
+          setLoadError(toDisplayError(error, 'Failed to load room list'));
         }
       } finally {
         if (
@@ -106,6 +109,7 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
     joinRequestIdRef.current += 1;
     setAvailable([]);
     setSelected(undefined);
+    setLoadError(null);
     setSortBy('name');
     setSortOrder('desc');
     setFilter('');
@@ -160,6 +164,15 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
           </Dimmer>
         ) : (
           <>
+            {loadError && (
+              <Message
+                data-testid="room-join-load-error"
+                error
+              >
+                <Message.Header>Room list unavailable</Message.Header>
+                <p>{loadError}</p>
+              </Message>
+            )}
             <Input
               fluid
               icon="filter"
@@ -173,9 +186,13 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
               >
                 <Header icon>
                   <Icon name="comments outline" />
-                  No rooms available
+                  {loadError ? 'Rooms unavailable' : 'No rooms available'}
                 </Header>
-                <p>Try refreshing or check your connection to the server.</p>
+                <p>
+                  {loadError
+                    ? 'Try closing and reopening the room picker.'
+                    : 'Try refreshing or check your connection to the server.'}
+                </p>
               </Segment>
             ) : (
               <Table
