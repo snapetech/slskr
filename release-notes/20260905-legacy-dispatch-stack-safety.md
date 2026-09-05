@@ -1,6 +1,6 @@
 ---
 category: fixed
-audience: operators, maintainers
+audience: operators
 area: release-ops
 action: none
 breaking: false
