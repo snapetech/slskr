@@ -49,11 +49,13 @@ export default class Collections extends Component {
       addItemModalOpen: false,
       addingItem: false,
       collections: [],
+      collectionsLoadError: null,
       creatingCollection: false,
       creatingShare: false,
       createModalOpen: false,
       deletingCollectionId: null,
       error: null,
+      collectionItemsError: null,
       itemSearchLoading: false,
       itemSearchQuery: '',
       itemSearchResults: [],
@@ -63,6 +65,7 @@ export default class Collections extends Component {
       newCollectionType: 'Playlist',
       selectedCollection: null,
       selectedCollectionItems: [],
+      sharesError: null,
       removingItemId: null,
       shareAllowDownload: true,
       shareAllowStream: true,
@@ -111,6 +114,7 @@ export default class Collections extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({
           collections: requireArrayData(response, 'collections'),
+          collectionsLoadError: null,
           loading: false,
         });
       }
@@ -120,6 +124,7 @@ export default class Collections extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({
           error: errorMessage,
+          collectionsLoadError: errorMessage,
           loading: false,
         });
       }
@@ -168,12 +173,13 @@ export default class Collections extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.shares) {
         this.setState({
           shares: requireArrayData(response, 'collection shares'),
+          sharesError: null,
         });
       }
     } catch (error) {
       if (this.isMountedFlag && requestId === this.requestIds.shares) {
         this.setState({
-          error: toDisplayError(error, 'Failed to load collection shares'),
+          sharesError: toDisplayError(error, 'Failed to load collection shares'),
           shares: [],
         });
       }
@@ -189,6 +195,7 @@ export default class Collections extends Component {
         requestId === this.requestIds.collectionItems
       ) {
         this.setState({
+          collectionItemsError: null,
           selectedCollectionItems: requireArrayData(
             response,
             'collection items',
@@ -201,7 +208,7 @@ export default class Collections extends Component {
         requestId === this.requestIds.collectionItems
       ) {
         this.setState({
-          error: toDisplayError(error, 'Failed to load collection items'),
+          collectionItemsError: toDisplayError(error, 'Failed to load collection items'),
           selectedCollectionItems: [],
         });
       }
@@ -308,8 +315,10 @@ export default class Collections extends Component {
     this.setState({
       error: null,
       selectedCollection: collection,
+      collectionItemsError: null,
       selectedCollectionItems: [],
       shares: [],
+      sharesError: null,
     });
     await this.loadCollectionItems(collection.id);
     if (
@@ -574,6 +583,8 @@ export default class Collections extends Component {
       addItemModalOpen,
       addingItem,
       collections,
+      collectionsLoadError,
+      collectionItemsError,
       creatingCollection,
       creatingShare,
       createModalOpen,
@@ -596,6 +607,7 @@ export default class Collections extends Component {
       shareGroupsLoading,
       shareModalOpen,
       shares,
+      sharesError,
     } = this.state;
 
     if (loading) return <LoaderSegment />;
@@ -633,7 +645,15 @@ export default class Collections extends Component {
             </Button>
           </div>
 
-          {collections.length === 0 ? (
+          {collectionsLoadError ? (
+            <Message
+              data-testid="collections-load-error"
+              error
+            >
+              <Message.Header>Collections unavailable</Message.Header>
+              <p>{collectionsLoadError}</p>
+            </Message>
+          ) : collections.length === 0 ? (
             <Segment placeholder>
               <Header icon>
                 <Icon name="list" />
@@ -717,7 +737,15 @@ export default class Collections extends Component {
               </div>
 
               <div data-testid="collection-items-table">
-                {selectedCollectionItems.length === 0 ? (
+                {collectionItemsError ? (
+                  <Message
+                    data-testid="collection-items-load-error"
+                    error
+                  >
+                    <Message.Header>Collection items unavailable</Message.Header>
+                    <p>{collectionItemsError}</p>
+                  </Message>
+                ) : selectedCollectionItems.length === 0 ? (
                   <Message info>No items in this collection yet.</Message>
                 ) : (
                   <Table>
@@ -768,7 +796,15 @@ export default class Collections extends Component {
                 style={{ marginTop: '1em' }}
               >
                 <Header as="h4">Shares</Header>
-                {collectionShares.length === 0 ? (
+                {sharesError ? (
+                  <Message
+                    data-testid="collection-shares-load-error"
+                    error
+                  >
+                    <Message.Header>Collection shares unavailable</Message.Header>
+                    <p>{sharesError}</p>
+                  </Message>
+                ) : collectionShares.length === 0 ? (
                   <Message info>No shares yet.</Message>
                 ) : (
                   <Table>
