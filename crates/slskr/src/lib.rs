@@ -390,6 +390,38 @@ mod mesh_sync_security_state_tests {
         assert_eq!(mesh.sync_invalid_entries.len(), 1);
         assert!(mesh.sync_invalid_entries.contains_key("reclaimed-peer"));
     }
+
+    #[test]
+    fn sync_violation_state_enforces_message_and_entry_limits_separately() {
+        let mut settings = crate::config::MeshSyncSecuritySettings {
+            max_invalid_entries_per_window: 50,
+            max_invalid_messages_per_window: 2,
+            rate_limit_window: std::time::Duration::from_secs(60),
+            quarantine_violation_threshold: 10,
+            quarantine_duration: std::time::Duration::from_secs(1_800),
+            proof_of_possession_enabled: false,
+            require_signed_entries: false,
+            consensus_min_peers: 5,
+            consensus_min_agreements: 3,
+            alert_threshold_signature_failures: 50,
+            alert_threshold_rate_limit_violations: 20,
+            alert_threshold_quarantine_events: 10,
+        };
+        let mut mesh = super::MeshState::new();
+
+        assert!(!mesh.record_invalid_sync_entries("peer", 1, &settings, 1_000));
+        assert!(!mesh.record_invalid_sync_entries("peer", 1, &settings, 1_001));
+        assert!(mesh.record_invalid_sync_entries("peer", 1, &settings, 1_002));
+        assert_eq!(mesh.sync_invalid_entries["peer"].1, 3);
+        assert_eq!(mesh.sync_invalid_messages["peer"].1, 3);
+
+        settings.max_invalid_entries_per_window = 2;
+        settings.max_invalid_messages_per_window = 50;
+        let mut entry_limited = super::MeshState::new();
+        assert!(!entry_limited.record_invalid_sync_entries("peer", 2, &settings, 1_000));
+        assert!(entry_limited.record_invalid_sync_entries("peer", 1, &settings, 1_001));
+        assert!(!entry_limited.record_invalid_sync_entries("peer", 1, &settings, 1_060));
+    }
 }
 
 #[cfg(test)]
@@ -5749,6 +5781,7 @@ struct MeshState {
     soulseek_rendezvous_enabled: bool,
     capability_records: Vec<PeerCapabilityDescriptor>,
     sync_invalid_entries: BTreeMap<String, (u64, u32)>,
+    sync_invalid_messages: BTreeMap<String, (u64, u32)>,
     sync_rate_violations: BTreeMap<String, (u64, u32)>,
     sync_quarantined_until: BTreeMap<String, u64>,
     sync_rejected_messages: u64,
@@ -5809,6 +5842,7 @@ impl MeshState {
             soulseek_rendezvous_enabled,
             capability_records: Vec::new(),
             sync_invalid_entries: BTreeMap::new(),
+            sync_invalid_messages: BTreeMap::new(),
             sync_rate_violations: BTreeMap::new(),
             sync_quarantined_until: BTreeMap::new(),
             sync_rejected_messages: 0,
@@ -5849,6 +5883,8 @@ impl MeshState {
         let window = settings.rate_limit_window.as_secs().max(1);
         self.sync_invalid_entries
             .retain(|_, (started_at, _)| now.saturating_sub(*started_at) < window);
+        self.sync_invalid_messages
+            .retain(|_, (started_at, _)| now.saturating_sub(*started_at) < window);
         self.sync_rate_violations
             .retain(|_, (started_at, _)| now.saturating_sub(*started_at) < window);
         self.sync_quarantined_until
@@ -5858,15 +5894,32 @@ impl MeshState {
         {
             return true;
         }
-        let entry = self
+        if !self.sync_invalid_messages.contains_key(&key)
+            && self.sync_invalid_messages.len() >= MAX_MESH_SYNC_SECURITY_PEERS
+        {
+            return true;
+        }
+        let invalid_messages = self
+            .sync_invalid_messages
+            .entry(key.clone())
+            .or_insert((now, 0));
+        if now.saturating_sub(invalid_messages.0) >= window {
+            *invalid_messages = (now, 0);
+        }
+        invalid_messages.1 = invalid_messages.1.saturating_add(1);
+        let invalid_message_count = invalid_messages.1;
+        let invalid_entries = self
             .sync_invalid_entries
             .entry(key.clone())
             .or_insert((now, 0));
-        if now.saturating_sub(entry.0) >= window {
-            *entry = (now, 0);
+        if now.saturating_sub(invalid_entries.0) >= window {
+            *invalid_entries = (now, 0);
         }
-        entry.1 = entry.1.saturating_add(invalid);
-        if entry.1 <= settings.max_invalid_entries_per_window {
+        invalid_entries.1 = invalid_entries.1.saturating_add(invalid);
+        let invalid_entry_count = invalid_entries.1;
+        if invalid_entry_count <= settings.max_invalid_entries_per_window
+            && invalid_message_count <= settings.max_invalid_messages_per_window
+        {
             return false;
         }
         self.sync_rejected_messages = self.sync_rejected_messages.saturating_add(1);

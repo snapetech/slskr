@@ -134,6 +134,8 @@ for anchor in \
   'destinations_bound_deduplicate_and_select_one_default' \
   'MAX_SEARCH_RECORDS' \
   'searches_bound_active_records_and_avoid_identity_collisions' \
+  'sync_invalid_messages' \
+  'sync_violation_state_enforces_message_and_entry_limits_separately' \
   'transfer_ids_and_tokens_wrap_without_collisions' \
   'finite transfer history must leave an available u64 id' \
   'bounded_store_ids_wrap_without_collisions' \
