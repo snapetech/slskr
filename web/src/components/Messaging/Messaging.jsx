@@ -392,6 +392,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const [joinedRooms, setJoinedRooms] = useState([]);
   const [podChannels, setPodChannels] = useState([]);
   const [availableRooms, setAvailableRooms] = useState([]);
+  const [availableRoomsError, setAvailableRoomsError] = useState('');
   const [workspaceError, setWorkspaceError] = useState('');
   const [batchMessage, setBatchMessage] = useState('');
   const [batchModalOpen, setBatchModalOpen] = useState(false);
@@ -768,13 +769,16 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                 : 0,
             })),
         );
+        setAvailableRoomsError('');
       }
-    } catch {
+    } catch (error) {
       if (
         mountedRef.current &&
         requestId === availableRoomsRequestIdRef.current
       ) {
-        setAvailableRooms([]);
+        setAvailableRoomsError(
+          toDisplayError(error, 'Failed to load available rooms'),
+        );
       }
     } finally {
       if (
@@ -1138,6 +1142,9 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
               />
               <RoomCreateModal onCreateRoom={(roomName) => joinRoom(roomName)} />
             </div>
+            {availableRoomsError ? (
+              <Message negative>{availableRoomsError}</Message>
+            ) : null}
           </div>
 
           <div className="messaging-sidebar-section">

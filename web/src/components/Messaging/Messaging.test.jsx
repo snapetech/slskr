@@ -212,6 +212,23 @@ describe('Messaging', () => {
     expect(screen.getAllByText('#indie').length).toBeGreaterThan(0);
   });
 
+  it('surfaces room-search failures instead of presenting an empty selector', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    rooms.getAvailable.mockRejectedValue(new Error('Room search unavailable'));
+    pods.list.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Messaging />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search rooms' }));
+
+    expect(await screen.findByText('Room search unavailable')).toBeInTheDocument();
+  });
+
   it('starts a direct-message panel from the username input', async () => {
     chat.getAll.mockResolvedValue([]);
     pods.list.mockResolvedValue([]);
