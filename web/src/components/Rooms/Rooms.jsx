@@ -2,6 +2,12 @@ import './Rooms.css';
 import { toDisplayError } from '../../lib/errors';
 import { createRoomsHubConnection } from '../../lib/hubFactory';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import {
+  boundedTabText,
+  maxStoredTabs,
+  readBoundedTabState,
+  writeBoundedTabState,
+} from '../../lib/tabStorage';
 import * as rooms from '../../lib/rooms';
 import { usePolling } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
@@ -29,43 +35,33 @@ const asRecords = (value) =>
 
 const normalizeTab = (tab) => {
   if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
-  const roomName = `${tab.roomName ?? ''}`.trim();
+  const roomName = boundedTabText(tab.roomName);
+  const key = boundedTabText(tab.key);
+  const label = boundedTabText(tab.label);
   return {
-    ...tab,
-    key: `${tab.key || `room-tab-${roomName || tabCounter}`}`,
-    label: `${tab.label || roomName || 'New Room Tab'}`,
+    key: key || `room-tab-${roomName || tabCounter}`,
+    label: label || roomName || 'New Room Tab',
     roomName,
   };
 };
 
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
-  try {
-    const saved = getLocalStorageItem('slskr-room-tabs');
-
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
-      // Restore tabCounter to avoid key collisions
-      tabCounter = Number.isInteger(parsed.tabCounter) && parsed.tabCounter >= 0
-        ? parsed.tabCounter
-        : 0;
-      return Array.isArray(parsed.tabs)
-        ? parsed.tabs.map(normalizeTab).filter(Boolean)
-        : [];
-    }
-  } catch {
-    // ignore
-  }
-
-  return [];
+  const { tabCounter: restoredCounter, tabs } = readBoundedTabState(
+    getLocalStorageItem,
+    'slskr-room-tabs',
+  );
+  tabCounter = restoredCounter;
+  return tabs.map(normalizeTab).filter(Boolean);
 };
 
 // Save tabs to localStorage
 const saveTabsToStorage = (tabsToSave) => {
-  setLocalStorageItem(
+  writeBoundedTabState(
+    setLocalStorageItem,
     'slskr-room-tabs',
-    JSON.stringify({ tabCounter, tabs: tabsToSave }),
+    tabCounter,
+    tabsToSave.map(normalizeTab).filter(Boolean),
   );
 };
 
@@ -123,11 +119,12 @@ const Rooms = ({ runtimeProfile } = {}) => {
 
   const createTab = useCallback((roomName = '') => {
     tabCounter += 1;
+    const safeRoomName = boundedTabText(roomName);
     const tabKey = `room-tab-${tabCounter}`;
     return {
       key: tabKey,
-      label: roomName || 'New Room Tab',
-      roomName,
+      label: safeRoomName || 'New Room Tab',
+      roomName: safeRoomName,
     };
   }, []);
 
@@ -160,7 +157,7 @@ const Rooms = ({ runtimeProfile } = {}) => {
       const existingTabIndex = tabs.findIndex((t) => t.roomName === roomName);
       if (existingTabIndex === -1) {
         setTabs((previous) => {
-          const newTabs = [...previous, createTab(roomName)];
+          const newTabs = [...previous, createTab(roomName)].slice(-maxStoredTabs);
           setActiveIndex(newTabs.length - 1);
           return newTabs;
         });
@@ -198,7 +195,7 @@ const Rooms = ({ runtimeProfile } = {}) => {
             .map((roomName) => createTab(roomName));
 
           return restoredTabs.length > 0
-            ? [...previous.filter((tab) => tab.roomName), ...restoredTabs]
+            ? [...previous.filter((tab) => tab.roomName), ...restoredTabs].slice(-maxStoredTabs)
             : previous;
         });
       }
@@ -342,7 +339,7 @@ const Rooms = ({ runtimeProfile } = {}) => {
 
   const handleAddTab = () => {
     setTabs((previous) => {
-      const newTabs = [...previous, createTab()];
+      const newTabs = [...previous, createTab()].slice(-maxStoredTabs);
       setActiveIndex(newTabs.length - 1);
       return newTabs;
     });

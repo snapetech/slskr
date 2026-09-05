@@ -1,5 +1,11 @@
 import BrowseSession from './BrowseSession';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import {
+  boundedTabText,
+  maxStoredTabs,
+  readBoundedTabState,
+  writeBoundedTabState,
+} from '../../lib/tabStorage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Icon, Menu, Tab } from 'semantic-ui-react';
@@ -8,27 +14,37 @@ let tabCounter = 0;
 
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
-  try {
-    const saved = getLocalStorageItem('slskr-browse-tabs');
-
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Restore tabCounter to avoid key collisions
-      tabCounter = parsed.tabCounter || 0;
-      return parsed.tabs || [];
-    }
-  } catch {
-    // ignore
-  }
-
-  return [];
+  const { tabCounter: restoredCounter, tabs } = readBoundedTabState(
+    getLocalStorageItem,
+    'slskr-browse-tabs',
+  );
+  tabCounter = restoredCounter;
+  return tabs
+    .map((tab) => {
+      if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
+      const username = boundedTabText(tab.username);
+      const key = boundedTabText(tab.key);
+      const label = boundedTabText(tab.label);
+      return {
+        key: key || `tab-${tabCounter}`,
+        label: label || username || 'New Tab',
+        username,
+      };
+    })
+    .filter(Boolean);
 };
 
 // Save tabs to localStorage
 const saveTabsToStorage = (tabsToSave) => {
-  setLocalStorageItem(
+  writeBoundedTabState(
+    setLocalStorageItem,
     'slskr-browse-tabs',
-    JSON.stringify({ tabCounter, tabs: tabsToSave }),
+    tabCounter,
+    tabsToSave.map((tab) => ({
+      key: boundedTabText(tab.key),
+      label: boundedTabText(tab.label),
+      username: boundedTabText(tab.username),
+    })),
   );
 };
 
@@ -52,10 +68,11 @@ const Browse = () => {
   }, []);
 
   const updateTabLabel = useCallback((tabKey, newUsername) => {
+    const username = boundedTabText(newUsername);
     setTabs((previous) =>
       previous.map((t) =>
         t.key === tabKey
-          ? { ...t, label: newUsername, username: newUsername }
+          ? { ...t, label: username, username }
           : t,
       ),
     );
@@ -66,11 +83,12 @@ const Browse = () => {
 
   const createTab = useCallback((username = '') => {
     tabCounter += 1;
+    const safeUsername = boundedTabText(username);
     const tabKey = `tab-${tabCounter}`;
     return {
       key: tabKey,
-      label: username || 'New Tab',
-      username,
+      label: safeUsername || 'New Tab',
+      username: safeUsername,
     };
   }, []);
 
@@ -110,7 +128,7 @@ const Browse = () => {
       if (existingIndex === -1) {
         // Create new tab for this user - use callback to get correct index
         setTabs((previous) => {
-          const newTabs = [...previous, createTab(requestedUser)];
+      const newTabs = [...previous, createTab(requestedUser)].slice(-maxStoredTabs);
           setActiveIndex(newTabs.length - 1);
           return newTabs;
         });
@@ -126,7 +144,7 @@ const Browse = () => {
 
   const handleAddTab = () => {
     setTabs((previous) => {
-      const newTabs = [...previous, createTab()];
+      const newTabs = [...previous, createTab()].slice(-maxStoredTabs);
       setActiveIndex(newTabs.length - 1);
       return newTabs;
     });

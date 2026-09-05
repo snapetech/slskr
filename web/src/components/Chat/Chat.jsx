@@ -2,6 +2,12 @@ import './Chat.css';
 import * as chat from '../../lib/chat';
 import { toDisplayError } from '../../lib/errors';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import {
+  boundedTabText,
+  maxStoredTabs,
+  readBoundedTabState,
+  writeBoundedTabState,
+} from '../../lib/tabStorage';
 import { useMountedRef } from '../../lib/useMountedRef';
 import ChatSession from './ChatSession';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,11 +28,12 @@ let tabCounter = 0;
 
 const normalizeTab = (tab) => {
   if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
-  const username = `${tab.username ?? ''}`.trim();
+  const username = boundedTabText(tab.username);
+  const key = boundedTabText(tab.key);
+  const label = boundedTabText(tab.label);
   return {
-    ...tab,
-    key: `${tab.key || `chat-tab-${username || tabCounter}`}`,
-    label: `${tab.label || username || 'New Chat'}`,
+    key: key || `chat-tab-${username || tabCounter}`,
+    label: label || username || 'New Chat',
     username,
   };
 };
@@ -38,32 +45,21 @@ const asRecords = (value) =>
 
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
-  try {
-    const saved = getLocalStorageItem('slskr-chat-tabs');
-
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
-      // Restore tabCounter to avoid key collisions
-      tabCounter = Number.isInteger(parsed.tabCounter) && parsed.tabCounter >= 0
-        ? parsed.tabCounter
-        : 0;
-      return Array.isArray(parsed.tabs)
-        ? parsed.tabs.map(normalizeTab).filter(Boolean)
-        : [];
-    }
-  } catch {
-    // ignore
-  }
-
-  return [];
+  const { tabCounter: restoredCounter, tabs } = readBoundedTabState(
+    getLocalStorageItem,
+    'slskr-chat-tabs',
+  );
+  tabCounter = restoredCounter;
+  return tabs.map(normalizeTab).filter(Boolean);
 };
 
 // Save tabs to localStorage
 const saveTabsToStorage = (tabsToSave) => {
-  setLocalStorageItem(
+  writeBoundedTabState(
+    setLocalStorageItem,
     'slskr-chat-tabs',
-    JSON.stringify({ tabCounter, tabs: tabsToSave }),
+    tabCounter,
+    tabsToSave.map(normalizeTab).filter(Boolean),
   );
 };
 
@@ -93,10 +89,11 @@ const Chat = ({ runtimeProfile, state }) => {
   }, []);
 
   const updateTabLabel = useCallback((tabKey, newUsername) => {
+    const username = boundedTabText(newUsername);
     setTabs((previous) =>
       previous.map((t) =>
         t.key === tabKey
-          ? { ...t, label: newUsername, username: newUsername }
+          ? { ...t, label: username, username }
           : t,
       ),
     );
@@ -107,11 +104,12 @@ const Chat = ({ runtimeProfile, state }) => {
 
   const createTab = useCallback((username = '') => {
     tabCounter += 1;
+    const safeUsername = boundedTabText(username);
     const tabKey = `chat-tab-${tabCounter}`;
     return {
       key: tabKey,
-      label: username || 'New Chat',
-      username,
+      label: safeUsername || 'New Chat',
+      username: safeUsername,
     };
   }, []);
 
@@ -126,7 +124,7 @@ const Chat = ({ runtimeProfile, state }) => {
 
       if (existingIndex === -1) {
         setTabs((previous) => {
-          const newTabs = [...previous, createTab(trimmedUsername)];
+          const newTabs = [...previous, createTab(trimmedUsername)].slice(-maxStoredTabs);
           setActiveIndex(newTabs.length - 1);
           return newTabs;
         });
@@ -175,7 +173,7 @@ const Chat = ({ runtimeProfile, state }) => {
             .map((conversation) => createTab(conversation.username));
 
           return restoredTabs.length > 0
-            ? [...previous.filter((tab) => tab.username), ...restoredTabs]
+            ? [...previous.filter((tab) => tab.username), ...restoredTabs].slice(-maxStoredTabs)
             : previous;
         });
       }
@@ -225,7 +223,7 @@ const Chat = ({ runtimeProfile, state }) => {
       if (existingIndex === -1) {
         // Create new tab for this user
         setTabs((previous) => {
-          const newTabs = [...previous, createTab(username)];
+          const newTabs = [...previous, createTab(username)].slice(-maxStoredTabs);
           setActiveIndex(newTabs.length - 1);
           return newTabs;
         });
@@ -241,7 +239,7 @@ const Chat = ({ runtimeProfile, state }) => {
 
   const handleAddTab = () => {
     setTabs((previous) => {
-      const newTabs = [...previous, createTab()];
+      const newTabs = [...previous, createTab()].slice(-maxStoredTabs);
       setActiveIndex(newTabs.length - 1);
       return newTabs;
     });
