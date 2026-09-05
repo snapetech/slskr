@@ -5,12 +5,14 @@ WebSocket client for real-time events
 import asyncio
 import inspect
 import json
-from typing import Callable, Dict, Set, Optional
+import logging
+from typing import Any, Callable, Dict, Set, Optional
 from urllib.parse import urlsplit, urlunsplit
 import aiohttp
 
 MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
 DEFAULT_WEBSOCKET_CONNECT_TIMEOUT = 30.0
+logger = logging.getLogger(__name__)
 
 
 class WebSocketClient:
@@ -327,19 +329,39 @@ class WebSocketClient:
 
     def _notify_connection_listeners(self, connected: bool):
         """Notify connection listeners"""
-        for listener in self.connection_listeners:
-            try:
-                asyncio.create_task(self._call_listener(listener, connected))
-            except Exception as e:
-                print(f"Error in connection listener: {e}")
+        for listener in tuple(self.connection_listeners):
+            self._schedule_listener(listener, connected, report_errors=True)
 
     def _notify_error_listeners(self, error: Exception):
         """Notify error listeners"""
-        for listener in self.error_listeners:
-            try:
-                asyncio.create_task(self._call_listener(listener, error))
-            except Exception as e:
-                print(f"Error in error listener: {e}")
+        for listener in tuple(self.error_listeners):
+            self._schedule_listener(listener, error, report_errors=False)
+
+    def _schedule_listener(self, listener: Callable, argument: Any, report_errors: bool):
+        try:
+            task = asyncio.create_task(self._call_listener(listener, argument))
+        except Exception as error:
+            self._handle_listener_error(error, report_errors)
+            return
+        task.add_done_callback(
+            lambda completed: self._finish_listener(completed, report_errors)
+        )
+
+    def _finish_listener(self, task: asyncio.Task, report_errors: bool):
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except Exception as exception:
+            error = exception
+        if error is not None:
+            self._handle_listener_error(error, report_errors)
+
+    def _handle_listener_error(self, error: Exception, report_errors: bool):
+        if report_errors:
+            self._notify_error_listeners(error)
+        else:
+            logger.error("WebSocket error listener failed: %s", error)
 
     async def _call_listener(self, listener: Callable, *args):
         """Call listener function"""

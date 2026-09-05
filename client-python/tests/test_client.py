@@ -582,6 +582,33 @@ async def test_websocket_listener_cleanup_and_mutation_are_safe():
     unsubscribe_first()
 
 
+@pytest.mark.asyncio
+async def test_websocket_connection_and_error_listener_failures_are_consumed(caplog):
+    client = WebSocketClient("https://example.test", "token")
+    errors = []
+
+    def bad_connection_listener(_connected):
+        raise RuntimeError("connection callback failed")
+
+    def good_error_listener(error):
+        errors.append(error)
+
+    def bad_error_listener(_error):
+        raise RuntimeError("error callback failed")
+
+    client.on_connection_change(bad_connection_listener)
+    client.on_error(good_error_listener)
+    client.on_error(bad_error_listener)
+
+    with caplog.at_level("ERROR"):
+        client._notify_connection_listeners(True)
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+    assert [str(error) for error in errors] == ["connection callback failed"]
+    assert "error callback failed" in caplog.text
+
+
 def test_api_error_helpers():
     not_found = ApiError(404, "not_found")
     server_error = ApiError(503, "unavailable")

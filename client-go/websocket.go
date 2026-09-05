@@ -577,15 +577,12 @@ func (w *WebSocketClient) processMessage(msg map[string]interface{}) {
 	}
 
 	w.mu.RLock()
-	listeners := w.eventChannels[eventType]
+	listeners := append([]chan interface{}(nil), w.eventChannels[eventType]...)
 	w.mu.RUnlock()
 
 	for _, ch := range listeners {
-		select {
-		case ch <- msg:
-		default:
-			// Channel full, skip
-		}
+		var value interface{} = msg
+		sendNonBlocking(ch, value)
 	}
 }
 
@@ -596,11 +593,7 @@ func (w *WebSocketClient) notifyConnectionListeners(connected bool) {
 	w.mu.RUnlock()
 
 	for _, ch := range listeners {
-		select {
-		case ch <- connected:
-		default:
-			// Channel full, skip
-		}
+		sendNonBlocking(ch, connected)
 	}
 }
 
@@ -611,11 +604,20 @@ func (w *WebSocketClient) notifyErrorListeners(err error) {
 	w.mu.RUnlock()
 
 	for _, ch := range listeners {
-		select {
-		case ch <- err:
-		default:
-			// Channel full, skip
-		}
+		sendNonBlocking(ch, err)
+	}
+}
+
+func sendNonBlocking[T any](ch chan T, value T) {
+	defer func() {
+		// Listener channels are supplied and owned by callers. A caller may
+		// close one without an unsubscribe API; that must not kill the reader.
+		_ = recover()
+	}()
+	select {
+	case ch <- value:
+	default:
+		// Channel full, skip
 	}
 }
 

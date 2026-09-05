@@ -367,3 +367,20 @@ func TestWebSocketConnectUsesClientTimeout(t *testing.T) {
 		t.Fatal("WebSocket dial did not reach the test server")
 	}
 }
+
+func TestWebSocketClosedListenerChannelsDoNotPanic(t *testing.T) {
+	client := NewClient("http://example.test", "token").NewWebSocketClient(false)
+	eventChannel := make(chan interface{}, 1)
+	connectionChannel := make(chan bool, 1)
+	errorChannel := make(chan error, 1)
+	client.On("search.completed", eventChannel)
+	client.OnConnectionChange(connectionChannel)
+	client.OnError(errorChannel)
+	close(eventChannel)
+	close(connectionChannel)
+	close(errorChannel)
+
+	client.processMessage(map[string]interface{}{"type": "search.completed"})
+	client.notifyConnectionListeners(true)
+	client.notifyErrorListeners(fmt.Errorf("listener test"))
+}
