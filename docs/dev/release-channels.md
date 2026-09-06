@@ -12,11 +12,17 @@ slskdN release system, with slskR-specific package and project names.
 | Docker Hub | `snapetech/slskr` | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` |
 | AUR source package | `slskr` | `AUR_SSH_KEY` |
 | AUR binary package | `slskr-bin` | `AUR_SSH_KEY` |
-| COPR | `slskdn/slskr` | Preferred: `COPR_KERBEROS_PRINCIPAL`, `COPR_KERBEROS_KEYTAB_B64`; fallback: `COPR_LOGIN`, `COPR_TOKEN` |
-| Launchpad PPA | `~keefshape/ubuntu/slskr` | `GPG_PRIVATE_KEY`, optional `LAUNCHPAD_SFTP_KEY`, optional `LAUNCHPAD_SFTP_USER` |
+| COPR | `slskdn/slskr` (x86_64 and aarch64) | Preferred: `COPR_KERBEROS_PRINCIPAL`, `COPR_KERBEROS_KEYTAB_B64`; fallback: `COPR_LOGIN`, `COPR_TOKEN` |
+| Launchpad PPA | `~keefshape/ubuntu/slskr` (amd64 and arm64) | `GPG_PRIVATE_KEY`, optional `LAUNCHPAD_SFTP_KEY`, optional `LAUNCHPAD_SFTP_USER` |
 | Homebrew tap | `snapetech/homebrew-slskr` | `TAP_GITHUB_TOKEN` |
-| Winget | `snapetech.slskr` | `WINGETCREATE_GITHUB_TOKEN` |
-| Chocolatey | `slskr` | `CHOCO_API_KEY` |
+| Snap | `slskr` (amd64 and arm64) | Snap Store credentials managed outside this workflow |
+| Flatpak | `io.github.slskd.slskr` (x86_64 and aarch64) | Flathub credentials managed outside this workflow |
+| Helm | `packaging/helm/slskr` (multi-arch GHCR image) | none |
+| TrueNAS SCALE | `packaging/truenas-scale/charts/slskr` (multi-arch GHCR image) | none |
+| Unraid | `packaging/unraid/slskr.xml` (multi-arch GHCR image) | none |
+| Synology SPK | `packaging/synology-spk` (x86_64 or aarch64 build) | none |
+| Winget | `snapetech.slskr` (Windows x64) | `WINGETCREATE_GITHUB_TOKEN` |
+| Chocolatey | `slskr` (Windows x64) | `CHOCO_API_KEY` |
 | Nix flake | `slskr` | none |
 
 The release workflow skips credentialed channels whose secrets are not available,
@@ -53,3 +59,8 @@ That script recalculates package metadata from the actual release assets and
 updates AUR, Winget, Homebrew, RPM, Debian, Chocolatey, Snap, Flatpak, Helm,
 TrueNAS, Unraid, Synology, and Nix release metadata before downstream
 publishing or manual packaging runs.
+
+The binary release matrix currently covers Linux GNU and musl on x86_64 and
+aarch64, macOS on Intel and Apple Silicon, and Windows x64. Windows ARM64 is
+not advertised or published until it has a native release runner and package
+installer coverage.

@@ -26,6 +26,9 @@ the release is prepared. Do not rewrite audited release history.
 - Repaired Winget fork synchronization with recoverable backups, and aligned
   package metadata, architecture-aware installers, Nix sources, and release
   documentation with the actual artifact matrix.
+- Expanded downstream packaging and deployment validation across Linux
+  amd64/AArch64, native macOS, Snap, Flatpak, RPM, Debian, containers, and
+  supported operator manifests.
 
 ## [0.2.38] — 2026-08-30
 

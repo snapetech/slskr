@@ -158,7 +158,7 @@ jobs:
             apt: ''
             native_tests: true
           - name: macos-arm64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
             apt: ''
             native_tests: true
@@ -274,3 +274,111 @@ jobs:
             target/dist/*.sha256
           if-no-files-found: error
           retention-days: 7
+
+  package-surfaces:
+    name: Package and deployment surfaces
+    needs: platform-builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact@v8.3.0
+        with:
+          pattern: ci-linux-*
+          merge-multiple: true
+          path: target/dist
+      - name: Install package builders
+        run: |
+          set -euo pipefail
+          # Ubuntu's amd64 archive does not carry arm64 packages. Keep the
+          # host repositories amd64-only and add Ubuntu Ports for the
+          # foreign architecture used by dpkg-shlibdeps below.
+          codename="$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")"
+          if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+            sudo sed -i '/^Components:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          elif [[ -f /etc/apt/sources.list ]]; then
+            sudo sed -i -E 's|^deb[[:space:]]+|deb [arch=amd64] |' /etc/apt/sources.list
+          fi
+          sudo tee /etc/apt/sources.list.d/slskr-arm64.sources >/dev/null <<EOF
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports/
+          Suites: ${codename} ${codename}-updates ${codename}-security
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          if apt-cache show libssl3:arm64 >/dev/null 2>&1; then
+            arm_ssl_package=libssl3
+          else
+            arm_ssl_package=libssl3t64
+          fi
+          sudo apt-get install -y \
+            binutils-aarch64-linux-gnu \
+            debhelper \
+            devscripts \
+            flatpak-builder \
+            libc6:arm64 \
+            libgcc-s1:arm64 \
+            "${arm_ssl_package}:arm64" \
+            libstdc++6:arm64 \
+            rpm
+      - name: Run release surface policy checks
+        run: |
+          scripts/check-workflow-release-policy.sh
+          scripts/check-package-artifact-matrix.sh
+          scripts/check-aur-packaging-checksums.sh
+          scripts/check-release-version-metadata.sh
+          scripts/check-kubernetes-public-posture.sh
+      - name: Lint deployment charts
+        run: |
+          helm lint packaging/helm/slskr
+          helm lint packaging/truenas-scale/charts/slskr
+      - name: Validate Flatpak sources for both Linux architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak-builder --show-manifest packaging/flatpak/io.github.slskd.slskr.yml >/dev/null
+          for flatpak_arch in x86_64 aarch64; do
+            flatpak-builder \
+              --download-only \
+              --allow-missing-runtimes \
+              --arch "$flatpak_arch" \
+              "$RUNNER_TEMP/slskr-flatpak-$flatpak_arch" \
+              packaging/flatpak/io.github.slskd.slskr.yml
+          done
+      - name: Build Debian packages for amd64 and arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          for deb_arch in amd64 arm64; do
+            build_root="$RUNNER_TEMP/slskr-deb-$deb_arch"
+            rm -rf "$build_root"
+            mkdir -p "$build_root/vendor" "$build_root/lib/systemd/system" "$build_root/usr/lib/sysusers.d" "$build_root/usr/lib/tmpfiles.d"
+            cp -a packaging/debian "$build_root/debian"
+            cp packaging/aur/slskr.service "$build_root/lib/systemd/system/slskr.service"
+            cp packaging/aur/slskr.sysusers "$build_root/usr/lib/sysusers.d/slskr.conf"
+            cp packaging/aur/slskr.tmpfiles "$build_root/usr/lib/tmpfiles.d/slskr.conf"
+            cp target/dist/slskr-ci-*-x86_64-unknown-linux-gnu.tar.gz "$build_root/vendor/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz"
+            cp target/dist/slskr-ci-*-aarch64-unknown-linux-gnu.tar.gz "$build_root/vendor/slskr-v0.2.38-aarch64-unknown-linux-gnu.tar.gz"
+            (cd "$build_root" && dpkg-buildpackage -us -uc -d -b -a "$deb_arch")
+          done
+      - name: Build RPMs for x86_64 and aarch64
+        shell: bash
+        run: |
+          set -euo pipefail
+          for rpm_arch in x86_64 aarch64; do
+            rpm_top="$RUNNER_TEMP/slskr-rpm-$rpm_arch"
+            rm -rf "$rpm_top"
+            mkdir -p "$rpm_top"/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
+            cp target/dist/slskr-ci-*-x86_64-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz"
+            cp target/dist/slskr-ci-*-aarch64-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/slskr-v0.2.38-aarch64-unknown-linux-gnu.tar.gz"
+            cp packaging/aur/slskr.service "$rpm_top/SOURCES/slskr.service"
+            cp packaging/aur/slskr.sysusers "$rpm_top/SOURCES/slskr.sysusers"
+            cp packaging/aur/slskr.tmpfiles "$rpm_top/SOURCES/slskr.tmpfiles"
+            cp packaging/rpm/slskr.spec "$rpm_top/SPECS/slskr.spec"
+            rpmbuild -ba --nodeps --target "$rpm_arch" \
+              --define "_topdir $rpm_top" \
+              "$rpm_top/SPECS/slskr.spec"
+          done

@@ -51,6 +51,10 @@ for expected in \
   'scripts/verify-release-artifacts.sh target/dist' \
   'Run Windows archive smoke' \
   'Expand-Archive' \
+  'flatpak-builder' \
+  '--download-only' \
+  '--allow-missing-runtimes' \
+  'for flatpak_arch in x86_64 aarch64' \
   'actions/upload-artifact@'; do
   if ! rg -n -F -- "$expected" .github/workflows/ci.yml >/dev/null; then
     printf 'package artifact matrix check failed: CI platform coverage token missing: %s\n' "$expected"
@@ -82,6 +86,76 @@ for expected in \
 done
 
 for expected in \
+  'Architecture: amd64 arm64' \
+  'DEB_HOST_ARCH' \
+  'aarch64-unknown-linux-gnu' \
+  'Source1:        slskr-v' \
+  'ExclusiveArch:  x86_64 aarch64' \
+  'build-for: [arm64]' \
+  'on arm64:' \
+  'source-type: file' \
+  'override-pull:' \
+  'CRAFT_ARCH_BUILD_FOR' \
+  'CRAFT_PART_SRC' \
+  'sha256sum --check --status' \
+  'only-arches: [aarch64]' \
+  'fedora-43-aarch64' \
+  'SLSKR_HTTP_BIND' \
+  'SLSKR_STATE_DIR' \
+  'runAsGroup: 1000' \
+  'fsGroup: 1000'; do
+  if ! rg -n -F -- "$expected" \
+    packaging/debian packaging/rpm packaging/snap packaging/flatpak \
+    .github/workflows/release-publish.yml packaging/helm packaging/truenas-scale \
+    packaging/unraid k8s >/dev/null; then
+    printf 'package artifact matrix check failed: downstream architecture/runtime token missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+if rg -n -F 'ref: main' .github/workflows/release-publish.yml >/dev/null; then
+  printf 'package artifact matrix check failed: release publishing must check out the selected release tag\n' >&2
+  status=1
+fi
+
+for expected in \
+  'ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}' \
+  'release_sha="$(git rev-parse HEAD)"' \
+  'for target in x86_64 aarch64' \
+  'cp dist/slskr-${{ needs.metadata.outputs.release_version }}-*-unknown-linux-gnu.tar.gz' \
+  'cp /tmp/slskr-${release_version}-*-unknown-linux-gnu.tar.gz' \
+  'copr-cli modify slskr' \
+  '--chroot "${chroots[3]}"'; do
+  if ! rg -n -F -- "$expected" .github/workflows/release-publish.yml >/dev/null; then
+    printf 'package artifact matrix check failed: release publish architecture/tag token missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for dockerfile in Dockerfile packaging/docker/release.Dockerfile; do
+  for expected in 'groupadd --gid 1000 slskr' '--uid 1000 --gid 1000' 'USER slskr'; do
+    if ! rg -n -F -- "$expected" "$dockerfile" >/dev/null; then
+      printf 'package artifact matrix check failed: container identity token missing from %s: %s\n' "$dockerfile" "$expected"
+      status=1
+    fi
+  done
+done
+
+for expected in 'target' '**/target' 'node_modules' 'web/build'; do
+  if ! rg -n -F -- "$expected" .dockerignore >/dev/null; then
+    printf 'package artifact matrix check failed: source Docker context exclusion missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in 'TARGETARCH' 'SHA256SUMS.txt' 'sha256sum --check --ignore-missing'; do
+  if ! rg -n -F -- "$expected" packaging/docker/release.Dockerfile >/dev/null; then
+    printf 'package artifact matrix check failed: release Docker checksum/architecture token missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in \
   'rm -f aur-slskr-bin/slskr.install' \
   'rm -f aur-slskr/slskr.install'; do
   if ! rg -n -F -- "$expected" .github/workflows/release-publish.yml >/dev/null; then
@@ -105,6 +179,11 @@ done
 
 if ! rg -n -U 'name: macos-x64\n[[:space:]]+os: macos-15-intel\n[[:space:]]+target: x86_64-apple-darwin' .github/workflows/release.yml >/dev/null; then
   printf 'package artifact matrix check failed: macOS x64 releases must build on a native Intel runner\n' >&2
+  status=1
+fi
+
+if ! rg -n -U 'name: macos-arm64\n[[:space:]]+os: macos-15\n[[:space:]]+target: aarch64-apple-darwin' .github/workflows/release.yml >/dev/null; then
+  printf 'package artifact matrix check failed: macOS ARM64 releases must build on a current native Apple Silicon runner\n' >&2
   status=1
 fi
 

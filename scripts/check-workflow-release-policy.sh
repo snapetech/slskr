@@ -116,6 +116,16 @@ if rg -n -F "types: [published]" .github/workflows/release-publish.yml >/dev/nul
   status=1
 fi
 
+if rg -n -F 'ref: main' .github/workflows/release-publish.yml >/dev/null; then
+  printf 'workflow release policy check failed: downstream publishing must check out the selected release tag, not main\n' >&2
+  status=1
+fi
+
+if ! rg -n -F 'ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}' .github/workflows/release-publish.yml >/dev/null; then
+  printf 'workflow release policy check failed: downstream publishing tag checkout expression is missing\n' >&2
+  status=1
+fi
+
 for expected in \
   'workflow_call:' \
   'Build and push (ghcr)' \

@@ -552,10 +552,18 @@ def snap_cases(local_root: Path, target_root: Path) -> dict[str, bool]:
         return {case: False for case in CASES}
     local = text(local_path)
     target = text(target_path)
+    # Snapcraft's source-checksum field is scalar and cannot use the
+    # architecture-conditional grammar accepted by source.  slskr uses file
+    # source mode and verifies the selected archive before extracting it.
+    local_source_integrity = all_present(
+        local,
+        ("source-type: file", "override-pull:", "CRAFT_PART_SRC", "sha256sum --check"),
+    ) or all_present(local, ("source-checksum:",))
     return {
         "build-render-and-artifact-contents": all_present(
-            local, ("name:", "base:", "parts:", "source-checksum:")
+            local, ("name:", "base:", "parts:")
         )
+        and local_source_integrity
         and all_present(target, ("name:", "base:", "parts:", "source-checksum:")),
         "fresh-install-and-upgrade": all_present(local, ("confinement:", "architectures:"))
         and all_present(target, ("confinement:", "architectures:")),

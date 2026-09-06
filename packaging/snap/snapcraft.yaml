@@ -7,7 +7,10 @@ description: |
 grade: stable
 confinement: strict
 architectures:
-  - amd64
+  - build-on: [amd64]
+    build-for: [amd64]
+  - build-on: [amd64, arm64]
+    build-for: [arm64]
 
 apps:
   slskr:
@@ -20,5 +23,28 @@ apps:
 parts:
   slskr:
     plugin: dump
-    source: https://github.com/snapetech/slskr/releases/download/release-v0.2.38/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz
-    source-checksum: sha256/254ef1125c7e15f015ec0ead8b563e8755b8be16b74f9261b8592c5202fb95f0
+    source:
+      - on amd64: https://github.com/snapetech/slskr/releases/download/release-v0.2.38/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz
+      - on arm64: https://github.com/snapetech/slskr/releases/download/release-v0.2.38/slskr-v0.2.38-aarch64-unknown-linux-gnu.tar.gz
+    source-type: file
+    override-pull: |
+      craftctl default
+      case "${CRAFT_ARCH_BUILD_FOR:-${SNAPCRAFT_ARCH_BUILD_FOR:-}}" in
+        amd64)
+          archive="slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz"
+          expected="254ef1125c7e15f015ec0ead8b563e8755b8be16b74f9261b8592c5202fb95f0"
+          ;;
+        arm64)
+          archive="slskr-v0.2.38-aarch64-unknown-linux-gnu.tar.gz"
+          expected="1e1c09c61674afaba716c2cf15cc9afcbf7462f845b16d91e91a91650f366df1"
+          ;;
+        *)
+          echo "unsupported Snap architecture: ${CRAFT_ARCH_BUILD_FOR:-${SNAPCRAFT_ARCH_BUILD_FOR:-}}" >&2
+          exit 1
+          ;;
+      esac
+      archive_path="$CRAFT_PART_SRC/$archive"
+      test -f "$archive_path"
+      printf '%s  %s\n' "$expected" "$archive_path" | sha256sum --check --status
+      tar -xzf "$archive_path" -C "$CRAFT_PART_SRC" --strip-components=1
+      rm -f "$archive_path"

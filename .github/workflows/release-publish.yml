@@ -64,12 +64,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - name: Resolve version
         id: version
         env:
           RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag || github.event.release.tag_name }}
-          RELEASE_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -77,11 +76,12 @@ jobs:
           tag="${RELEASE_TAG}"
           release_version="$(slskr_release_version_from_tag "$tag")"
           pkgver="${release_version#v}"
+          release_sha="$(git rev-parse HEAD)"
           {
             echo "tag=${tag}"
             echo "release_version=${release_version}"
             echo "pkgver=${pkgver}"
-            echo "release_sha=${RELEASE_SHA}"
+            echo "release_sha=${release_sha}"
           } >> "$GITHUB_OUTPUT"
       - name: Download release assets
         env:
@@ -120,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -174,20 +174,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
           path: packaging
-      - name: Download Linux asset
+      - name: Download Linux assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           . packaging/scripts/release-assets.sh
           mkdir -p dist
-          asset="slskr-${{ needs.metadata.outputs.release_version }}-x86_64-unknown-linux-gnu.tar.gz"
-          slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "dist/$asset"
+          for target in x86_64 aarch64; do
+            asset="slskr-${{ needs.metadata.outputs.release_version }}-${target}-unknown-linux-gnu.tar.gz"
+            slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "dist/$asset"
+          done
       - name: Install COPR tooling
         run: |
           sudo apt-get update
@@ -305,10 +307,9 @@ jobs:
             exit 1
           fi
           version="${{ needs.metadata.outputs.pkgver }}"
-          asset="slskr-${{ needs.metadata.outputs.release_version }}-x86_64-unknown-linux-gnu.tar.gz"
           rpm_top="$(mktemp -d "/tmp/slskr-rpmbuild-${version}.XXXXXX")"
           mkdir -p "$rpm_top"/{SOURCES,SPECS,SRPMS}
-          cp "dist/$asset" "$rpm_top/SOURCES/"
+          cp dist/slskr-${{ needs.metadata.outputs.release_version }}-*-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/"
           cp packaging/aur/slskr.service "$rpm_top/SOURCES/"
           cp packaging/aur/slskr.sysusers "$rpm_top/SOURCES/"
           cp packaging/aur/slskr.tmpfiles "$rpm_top/SOURCES/"
@@ -317,8 +318,26 @@ jobs:
           srpm="$rpm_top/SRPMS/slskr-${version}-1.src.rpm"
           test -f "$srpm"
           cp "$srpm" "dist/slskr-${version}-1.src.rpm"
+          chroots=(
+            fedora-43-x86_64
+            fedora-43-aarch64
+            fedora-rawhide-x86_64
+            fedora-rawhide-aarch64
+          )
           if ! copr-cli get slskr >/dev/null 2>&1; then
-            copr-cli create slskr --chroot fedora-43-x86_64 --chroot fedora-rawhide-x86_64 --description "slskr RPM builds" --instructions "dnf copr enable slskdn/slskr && dnf install slskr"
+            copr-cli create slskr \
+              --chroot "${chroots[0]}" \
+              --chroot "${chroots[1]}" \
+              --chroot "${chroots[2]}" \
+              --chroot "${chroots[3]}" \
+              --description "slskr RPM builds" \
+              --instructions "dnf copr enable slskdn/slskr && dnf install slskr"
+          else
+            copr-cli modify slskr \
+              --chroot "${chroots[0]}" \
+              --chroot "${chroots[1]}" \
+              --chroot "${chroots[2]}" \
+              --chroot "${chroots[3]}"
           fi
           copr-cli build slskr "dist/slskr-${version}-1.src.rpm" --nowait
 
@@ -329,7 +348,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -360,15 +379,13 @@ jobs:
           . packaging/scripts/release-assets.sh
           version="${{ needs.metadata.outputs.pkgver }}"
           release_version="${{ needs.metadata.outputs.release_version }}"
-          asset="slskr-${release_version}-x86_64-unknown-linux-gnu.tar.gz"
-          slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "/tmp/$asset"
+          for target in x86_64 aarch64; do
+            asset="slskr-${release_version}-${target}-unknown-linux-gnu.tar.gz"
+            slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "/tmp/$asset"
+          done
           src="slskr-${version}"
-          mkdir -p "$src/usr/lib/slskr" "$src/usr/bin" "$src/lib/systemd/system" "$src/etc/slskr" "$src/usr/lib/sysusers.d" "$src/usr/lib/tmpfiles.d"
-          tar -xzf "/tmp/$asset" -C /tmp
-          extracted="/tmp/slskr-${release_version}-x86_64-unknown-linux-gnu"
-          cp "$extracted/slskr" "$src/usr/lib/slskr/slskr"
-          cp -R "$extracted/web" "$src/usr/lib/slskr/web"
-          cp "$extracted/docs/slskr.config.example.toml" "$src/etc/slskr/config.toml"
+          mkdir -p "$src/vendor" "$src/lib/systemd/system" "$src/usr/lib/sysusers.d" "$src/usr/lib/tmpfiles.d"
+          cp /tmp/slskr-${release_version}-*-unknown-linux-gnu.tar.gz "$src/vendor/"
           cp packaging/aur/slskr.service "$src/lib/systemd/system/slskr.service"
           cp packaging/aur/slskr.sysusers "$src/usr/lib/sysusers.d/slskr.conf"
           cp packaging/aur/slskr.tmpfiles "$src/usr/lib/tmpfiles.d/slskr.conf"
@@ -522,7 +539,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # docker/setup-qemu-action@v4.2.0
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # docker/setup-buildx-action@v4.3.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action@v4.6.0
@@ -597,7 +614,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -628,7 +645,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: main
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata

@@ -55,6 +55,7 @@ sed -i \
 sed -i \
   -e "s/^Version:.*/Version:        ${pkgver}/" \
   -e "s|^Source0:.*|Source0:        ${linux_x64}|" \
+  -e "s|^Source1:.*|Source1:        ${linux_arm64}|" \
   packaging/rpm/slskr.spec
 
 cat > packaging/debian/changelog <<EOF
@@ -161,18 +162,101 @@ write("packaging/homebrew/Formula/slskr.rb", f'''class Slskr < Formula
   end
 end
 ''')
+
+write("packaging/snap/snapcraft.yaml", f'''name: slskr
+base: core22
+version: '{pkgver}'
+summary: Rust Soulseek daemon with bundled Web UI
+description: |
+  slskR is a Rust Soulseek client and daemon with a local web interface.
+grade: stable
+confinement: strict
+architectures:
+  - build-on: [amd64]
+    build-for: [amd64]
+  - build-on: [amd64, arm64]
+    build-for: [arm64]
+
+apps:
+  slskr:
+    command: slskr
+    daemon: simple
+    plugs: [network, network-bind, home, removable-media]
+    environment:
+      SLSKR_CONFIG: $SNAP_USER_COMMON/config.toml
+
+parts:
+  slskr:
+    plugin: dump
+    source:
+      - on amd64: https://github.com/snapetech/slskr/releases/download/{tag}/slskr-{rel}-x86_64-unknown-linux-gnu.tar.gz
+      - on arm64: https://github.com/snapetech/slskr/releases/download/{tag}/slskr-{rel}-aarch64-unknown-linux-gnu.tar.gz
+    source-type: file
+    override-pull: |
+      craftctl default
+      case "${{CRAFT_ARCH_BUILD_FOR:-${{SNAPCRAFT_ARCH_BUILD_FOR:-}}}}" in
+        amd64)
+          archive="slskr-{rel}-x86_64-unknown-linux-gnu.tar.gz"
+          expected="{linux_x64}"
+          ;;
+        arm64)
+          archive="slskr-{rel}-aarch64-unknown-linux-gnu.tar.gz"
+          expected="{linux_arm64}"
+          ;;
+        *)
+          echo "unsupported Snap architecture: ${{CRAFT_ARCH_BUILD_FOR:-${{SNAPCRAFT_ARCH_BUILD_FOR:-}}}}" >&2
+          exit 1
+          ;;
+      esac
+      archive_path="$CRAFT_PART_SRC/$archive"
+      test -f "$archive_path"
+      printf '%s  %s\\n' "$expected" "$archive_path" | sha256sum --check --status
+      tar -xzf "$archive_path" -C "$CRAFT_PART_SRC" --strip-components=1
+      rm -f "$archive_path"
+''')
+
+write("packaging/flatpak/io.github.slskd.slskr.yml", f'''app-id: io.github.slskd.slskr
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: slskr-wrapper
+
+finish-args:
+  - --share=network
+  - --filesystem=xdg-download
+  - --filesystem=xdg-music
+  - --filesystem=~/.config/slskr:create
+  - --filesystem=~/.local/share/slskr:create
+
+modules:
+  - name: slskr
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/bin /app/lib/slskr
+      - cp -r . /app/lib/slskr/
+      - |
+        cat > /app/bin/slskr-wrapper <<'EOF'
+        #!/usr/bin/env bash
+        set -e
+        CONFIG_DIR="${{XDG_CONFIG_HOME:-$HOME}}/slskr"
+        mkdir -p "$CONFIG_DIR"
+        if [ ! -f "$CONFIG_DIR/config.toml" ]; then
+          printf '%s\\n' '[web]' 'port = 5030' > "$CONFIG_DIR/config.toml"
+        fi
+        exec /app/lib/slskr/slskr serve --config "$CONFIG_DIR/config.toml"
+        EOF
+      - chmod +x /app/bin/slskr-wrapper
+    sources:
+      - type: archive
+        url: https://github.com/snapetech/slskr/releases/download/{tag}/slskr-{rel}-x86_64-unknown-linux-gnu.tar.gz
+        sha256: {linux_x64}
+        only-arches: [x86_64]
+      - type: archive
+        url: https://github.com/snapetech/slskr/releases/download/{tag}/slskr-{rel}-aarch64-unknown-linux-gnu.tar.gz
+        sha256: {linux_arm64}
+        only-arches: [aarch64]
+''')
 PY
-
-sed -i \
-  -e "s|^version: .*|version: '${pkgver}'|" \
-  -e "s|^    source: https://github.com/snapetech/slskr/releases/download/[^/]*/.*|    source: https://github.com/snapetech/slskr/releases/download/${tag}/${linux_x64}|" \
-  -e "s|^    source-checksum: sha256/.*|    source-checksum: sha256/${linux_x64_sha}|" \
-  packaging/snap/snapcraft.yaml
-
-sed -i \
-  -e "s|^        url: https://github.com/snapetech/slskr/releases/download/[^/]*/.*|        url: https://github.com/snapetech/slskr/releases/download/${tag}/${linux_x64}|" \
-  -e "s|^        sha256: .*|        sha256: ${linux_x64_sha}|" \
-  packaging/flatpak/io.github.slskd.slskr.yml
 
 sed -i \
   -e "s|<version>[^<]*</version>|<version>${pkgver}</version>|" \
@@ -185,6 +269,7 @@ sed -i \
 for chart in \
   packaging/helm/slskr/Chart.yaml \
   packaging/truenas-scale/charts/slskr/Chart.yaml; do
+  sed -i "s|^version: .*|version: ${pkgver}|" "$chart"
   sed -i "s|^appVersion: .*|appVersion: \"${pkgver}\"|" "$chart"
 done
 for values in \

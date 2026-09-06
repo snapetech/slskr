@@ -122,7 +122,7 @@ The release workflow uses the same native runner and target mapping:
 | `linux-arm64` | `ubuntu-24.04-arm` | `aarch64-unknown-linux-gnu` | Full AArch64 tests and archive smoke |
 | `linux-musl-arm64` | `ubuntu-24.04-arm` | `aarch64-unknown-linux-musl` | Static archive build and smoke |
 | `macos-x64` | `macos-15-intel` | `x86_64-apple-darwin` | Native workspace tests and archive smoke |
-| `macos-arm64` | `macos-14` | `aarch64-apple-darwin` | Native workspace tests and archive smoke |
+| `macos-arm64` | `macos-15` | `aarch64-apple-darwin` | Native workspace tests and archive smoke |
 | `windows-x64` | `windows-latest` | `x86_64-pc-windows-msvc` | Native workspace tests and archive smoke |
 
 Push a tag named:
