@@ -2,5 +2,5 @@ apiVersion: v2
 name: slskr
 description: Rust Soulseek daemon with bundled Web UI
 type: application
-version: 0.2.39
-appVersion: "0.2.39"
+version: 0.2.40
+appVersion: "0.2.40"
