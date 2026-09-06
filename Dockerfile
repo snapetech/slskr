@@ -19,7 +19,7 @@ RUN apt-get update \
 
 COPY . .
 COPY --from=web-builder /src/web/build web/build
-RUN SLSKR_RELEASE_VERSION="${VERSION}" cargo build --release -p slskr
+RUN SLSKR_RELEASE_VERSION="${VERSION}" cargo build --release -p slskr --locked
 
 FROM debian:bookworm-slim
 
@@ -38,7 +38,14 @@ LABEL org.opencontainers.image.title="slskr" \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --home-dir /var/lib/slskr --create-home --shell /usr/sbin/nologin slskr \
+    && if ! getent group slskr >/dev/null; then \
+         existing_group="$(getent group 1000 | cut -d: -f1 || true)"; \
+         if [ -n "$existing_group" ]; then groupmod --new-name slskr "$existing_group"; else groupadd --gid 1000 slskr; fi; \
+       fi \
+    && if ! getent passwd slskr >/dev/null; then \
+         existing_user="$(getent passwd 1000 | cut -d: -f1 || true)"; \
+         if [ -n "$existing_user" ]; then usermod --login slskr --home /var/lib/slskr --shell /usr/sbin/nologin "$existing_user"; else useradd --system --uid 1000 --gid 1000 --home-dir /var/lib/slskr --create-home --shell /usr/sbin/nologin slskr; fi; \
+       fi \
     && mkdir -p /usr/share/slskr/web /etc/slskr /var/lib/slskr \
     && chown -R slskr:slskr /var/lib/slskr
 

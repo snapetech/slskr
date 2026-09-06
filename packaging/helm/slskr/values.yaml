@@ -11,7 +11,8 @@ service:
 
 env:
   SLSKR_CONFIG: /app/config/config.toml
-  SLSKR_HTTP_PORT: "5030"
+  SLSKR_HTTP_BIND: 0.0.0.0:5030
+  SLSKR_STATE_DIR: /var/lib/slskr
 
 persistence:
   config:
@@ -27,10 +28,15 @@ persistence:
     enabled: true
     size: 10Gi
     readOnly: true
+  state:
+    enabled: true
+    size: 5Gi
 
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
 

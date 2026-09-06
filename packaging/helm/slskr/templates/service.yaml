@@ -8,5 +8,5 @@ spec:
     app.kubernetes.io/name: {{ include "slskr.name" . }}
   ports:
     - name: http
-      port: 5030
+      port: {{ .Values.service.port }}
       targetPort: http

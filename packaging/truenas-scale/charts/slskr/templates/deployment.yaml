@@ -15,15 +15,25 @@ spec:
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
         runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
       containers:
         - name: slskr
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
           ports:
             - name: http
               containerPort: 5030
+          env:
+            - name: SLSKR_CONFIG
+              value: {{ .Values.env.SLSKR_CONFIG | quote }}
+            - name: SLSKR_HTTP_BIND
+              value: {{ .Values.env.SLSKR_HTTP_BIND | quote }}
+            - name: SLSKR_STATE_DIR
+              value: {{ .Values.env.SLSKR_STATE_DIR | quote }}
           livenessProbe:
             httpGet:
               path: /health
@@ -43,6 +53,8 @@ spec:
               mountPath: /app/incomplete
             - name: shares
               mountPath: /app/shares
+            - name: state
+              mountPath: /var/lib/slskr
       volumes:
         - name: config
           hostPath:
@@ -59,4 +71,8 @@ spec:
         - name: shares
           hostPath:
             path: {{ .Values.persistence.shares.hostPath }}
+            type: DirectoryOrCreate
+        - name: state
+          hostPath:
+            path: {{ .Values.persistence.state.hostPath }}
             type: DirectoryOrCreate

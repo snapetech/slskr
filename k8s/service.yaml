@@ -11,6 +11,6 @@ spec:
     app: slskr-api
   ports:
   - name: http
-    port: 8080
+    port: 5030
     targetPort: http
     protocol: TCP

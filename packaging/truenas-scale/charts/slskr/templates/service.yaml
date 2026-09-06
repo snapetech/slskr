@@ -8,5 +8,5 @@ spec:
     app: slskr
   ports:
     - name: http
-      port: 5030
+      port: {{ .Values.service.port }}
       targetPort: http

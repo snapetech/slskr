@@ -22,10 +22,21 @@ persistence:
   shares:
     enabled: true
     hostPath: /mnt/tank/apps/slskr/shares
+  state:
+    enabled: true
+    hostPath: /mnt/tank/apps/slskr/state
 
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+
+env:
+  SLSKR_CONFIG: /app/config/config.toml
+  SLSKR_HTTP_BIND: 0.0.0.0:5030
+  SLSKR_STATE_DIR: /var/lib/slskr
 
 resources: {}

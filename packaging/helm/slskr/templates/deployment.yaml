@@ -17,6 +17,8 @@ spec:
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
         runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
       containers:
         - name: slskr
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -31,8 +33,10 @@ spec:
           env:
             - name: SLSKR_CONFIG
               value: {{ .Values.env.SLSKR_CONFIG | quote }}
-            - name: SLSKR_HTTP_PORT
-              value: {{ .Values.env.SLSKR_HTTP_PORT | quote }}
+            - name: SLSKR_HTTP_BIND
+              value: {{ .Values.env.SLSKR_HTTP_BIND | quote }}
+            - name: SLSKR_STATE_DIR
+              value: {{ .Values.env.SLSKR_STATE_DIR | quote }}
           livenessProbe:
             httpGet:
               path: /health
@@ -55,6 +59,8 @@ spec:
             - name: shares
               mountPath: /app/shares
               readOnly: {{ .Values.persistence.shares.readOnly }}
+            - name: state
+              mountPath: /var/lib/slskr
       volumes:
         - name: config
           persistentVolumeClaim:
@@ -68,3 +74,6 @@ spec:
         - name: shares
           persistentVolumeClaim:
             claimName: {{ include "slskr.fullname" . }}-shares
+        - name: state
+          persistentVolumeClaim:
+            claimName: {{ include "slskr.fullname" . }}-state

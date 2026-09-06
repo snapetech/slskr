@@ -25,11 +25,11 @@ spec:
           service:
             name: slskr-api
             port:
-              number: 8080
+              number: 5030
       - path: /
         pathType: Prefix
         backend:
           service:
             name: slskr-api
             port:
-              number: 8080
+              number: 5030

@@ -23,8 +23,8 @@
   </Networking>
   <Environment>
     <Variable>
-      <Name>SLSKR_HTTP_PORT</Name>
-      <Value>5030</Value>
+      <Name>SLSKR_HTTP_BIND</Name>
+      <Value>0.0.0.0:5030</Value>
     </Variable>
     <Variable>
       <Name>SLSKR_CONFIG</Name>
@@ -44,6 +44,7 @@
     <Config Name="Downloads" Target="/app/downloads" Default="/mnt/user/data/slskr/downloads" Mode="rw" />
     <Config Name="Incomplete" Target="/app/incomplete" Default="/mnt/user/data/slskr/incomplete" Mode="rw" />
     <Config Name="Shares" Target="/app/shares" Default="/mnt/user/data/slskr/shares" Mode="ro" />
+    <Config Name="State" Target="/var/lib/slskr" Default="/mnt/user/appdata/slskr/state" Mode="rw" />
     <Config Name="Music" Target="/music" Default="/mnt/user/music" Mode="ro" Optional="true" />
   </Data>
   <ExtraParams>--restart=unless-stopped</ExtraParams>

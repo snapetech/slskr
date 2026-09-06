@@ -16,9 +16,12 @@ RUN set -eux; \
     test "$VERSION" != "dev"; \
     archive="slskr-${VERSION}-${rust_target}.tar.gz"; \
     url="https://github.com/snapetech/slskr/releases/download/release-${VERSION}/${archive}"; \
-    curl -fsSL "$url" -o /tmp/slskr.tar.gz; \
+    curl -fsSL "$url" -o "/tmp/$archive"; \
+    curl -fsSL "https://github.com/snapetech/slskr/releases/download/release-${VERSION}/SHA256SUMS.txt" -o /tmp/SHA256SUMS.txt; \
+    grep -Eq "^[0-9a-fA-F]{64}[[:space:]]+\\*?(\\./)?$archive$" /tmp/SHA256SUMS.txt; \
+    (cd /tmp && sha256sum --check --ignore-missing SHA256SUMS.txt); \
     mkdir -p /out; \
-    tar -xzf /tmp/slskr.tar.gz -C /out --strip-components=1; \
+    tar -xzf "/tmp/$archive" -C /out --strip-components=1; \
     test -x /out/slskr; \
     test -f /out/web/build/index.html; \
     test -f /out/docs/slskr.config.example.toml
@@ -40,7 +43,14 @@ LABEL org.opencontainers.image.title="slskr" \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --home-dir /var/lib/slskr --create-home --shell /usr/sbin/nologin slskr \
+    && if ! getent group slskr >/dev/null; then \
+         existing_group="$(getent group 1000 | cut -d: -f1 || true)"; \
+         if [ -n "$existing_group" ]; then groupmod --new-name slskr "$existing_group"; else groupadd --gid 1000 slskr; fi; \
+       fi \
+    && if ! getent passwd slskr >/dev/null; then \
+         existing_user="$(getent passwd 1000 | cut -d: -f1 || true)"; \
+         if [ -n "$existing_user" ]; then usermod --login slskr --home /var/lib/slskr --shell /usr/sbin/nologin "$existing_user"; else useradd --system --uid 1000 --gid 1000 --home-dir /var/lib/slskr --create-home --shell /usr/sbin/nologin slskr; fi; \
+       fi \
     && mkdir -p /usr/share/slskr/web /etc/slskr /var/lib/slskr \
     && chown -R slskr:slskr /var/lib/slskr
 

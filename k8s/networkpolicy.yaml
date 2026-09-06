@@ -15,7 +15,7 @@ spec:
     - namespaceSelector: {}
     ports:
     - protocol: TCP
-      port: 8080
+      port: 5030
   egress:
   - to:
     - namespaceSelector: {}

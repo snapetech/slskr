@@ -37,3 +37,13 @@ spec:
   resources:
     requests:
       storage: {{ .Values.persistence.shares.size }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "slskr.fullname" . }}-state
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.persistence.state.size }}
