@@ -82,6 +82,15 @@ for expected in \
 done
 
 for expected in \
+  'rm -f aur-slskr-bin/slskr.install' \
+  'rm -f aur-slskr/slskr.install'; do
+  if ! rg -n -F -- "$expected" .github/workflows/release-publish.yml >/dev/null; then
+    printf 'package artifact matrix check failed: AUR stale install script cleanup missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in \
   '"x86_64-linux"' \
   '"aarch64-linux"' \
   '"x86_64-darwin"' \

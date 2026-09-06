@@ -147,6 +147,7 @@ jobs:
           set -euo pipefail
           [[ -n "${AUR_SSH_KEY:-}" ]] || exit 0
           bash packaging/scripts/checkout-aur-repo.sh slskr-bin aur-slskr-bin
+          rm -f aur-slskr-bin/slskr.install
           cp packaging/aur/PKGBUILD-bin aur-slskr-bin/PKGBUILD
           cp packaging/aur/slskr.{service,sysusers,tmpfiles} aur-slskr-bin/
           bash packaging/scripts/generate-aur-srcinfo.sh aur-slskr-bin/PKGBUILD > aur-slskr-bin/.SRCINFO
@@ -159,6 +160,7 @@ jobs:
           set -euo pipefail
           [[ -n "${AUR_SSH_KEY:-}" ]] || exit 0
           bash packaging/scripts/checkout-aur-repo.sh slskr aur-slskr
+          rm -f aur-slskr/slskr.install
           cp packaging/aur/PKGBUILD aur-slskr/PKGBUILD
           cp packaging/aur/slskr.{service,sysusers,tmpfiles} aur-slskr/
           bash packaging/scripts/generate-aur-srcinfo.sh aur-slskr/PKGBUILD > aur-slskr/.SRCINFO
