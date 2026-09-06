@@ -113,6 +113,31 @@ for expected in \
   fi
 done
 
+for expected in \
+  'package_version="$(awk' \
+  'slskr-v${package_version}-x86_64-unknown-linux-gnu.tar.gz' \
+  'slskr-v${package_version}-aarch64-unknown-linux-gnu.tar.gz'; do
+  if ! rg -n -F -- "$expected" .github/workflows/ci.yml >/dev/null; then
+    printf 'package artifact matrix check failed: CI package version must come from checked-in package metadata: %s\n' "$expected"
+    status=1
+  fi
+done
+
+if rg -n -e 'slskr-v[0-9]+\.[0-9]+\.[0-9]+-(x86_64|aarch64)-unknown-linux-gnu\.tar\.gz' .github/workflows/ci.yml >/dev/null; then
+  printf 'package artifact matrix check failed: CI package inputs must not hard-code a release version\n' >&2
+  status=1
+fi
+
+if ! rg -n -F 'CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/slskr"' packaging/flatpak/io.github.slskd.slskr.yml >/dev/null; then
+  printf 'package artifact matrix check failed: Flatpak wrapper config path must match its sandbox permission\n' >&2
+  status=1
+fi
+
+if ! rg -n -F 'CONFIG_DIR="${{XDG_CONFIG_HOME:-$HOME/.config}}/slskr"' packaging/scripts/update-release-metadata.sh >/dev/null; then
+  printf 'package artifact matrix check failed: release metadata generator must preserve the Flatpak config path\n' >&2
+  status=1
+fi
+
 if rg -n -F 'ref: main' .github/workflows/release-publish.yml >/dev/null; then
   printf 'package artifact matrix check failed: release publishing must check out the selected release tag\n' >&2
   status=1

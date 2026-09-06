@@ -1,5 +1,5 @@
 package="slskr"
-version="0.2.38"
+version="0.2.39"
 arch="x86_64"
 description="slskR Rust Soulseek daemon with bundled Web UI"
 displayname="slskR"

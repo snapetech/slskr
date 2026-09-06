@@ -238,7 +238,7 @@ modules:
         cat > /app/bin/slskr-wrapper <<'EOF'
         #!/usr/bin/env bash
         set -e
-        CONFIG_DIR="${{XDG_CONFIG_HOME:-$HOME}}/slskr"
+        CONFIG_DIR="${{XDG_CONFIG_HOME:-$HOME/.config}}/slskr"
         mkdir -p "$CONFIG_DIR"
         if [ ! -f "$CONFIG_DIR/config.toml" ]; then
           printf '%s\\n' '[web]' 'port = 5030' > "$CONFIG_DIR/config.toml"

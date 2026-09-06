@@ -353,6 +353,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          package_version="$(awk '/^Version:/ { print $2; exit }' packaging/rpm/slskr.spec)"
+          debian_version="$(sed -n '1s/^slskr (\([^)]*\)-[0-9][^)]*).*/\1/p' packaging/debian/changelog)"
+          test -n "$package_version"
+          test "$package_version" = "$debian_version"
           for deb_arch in amd64 arm64; do
             build_root="$RUNNER_TEMP/slskr-deb-$deb_arch"
             rm -rf "$build_root"
@@ -361,20 +365,22 @@ jobs:
             cp packaging/aur/slskr.service "$build_root/lib/systemd/system/slskr.service"
             cp packaging/aur/slskr.sysusers "$build_root/usr/lib/sysusers.d/slskr.conf"
             cp packaging/aur/slskr.tmpfiles "$build_root/usr/lib/tmpfiles.d/slskr.conf"
-            cp target/dist/slskr-ci-*-x86_64-unknown-linux-gnu.tar.gz "$build_root/vendor/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz"
-            cp target/dist/slskr-ci-*-aarch64-unknown-linux-gnu.tar.gz "$build_root/vendor/slskr-v0.2.38-aarch64-unknown-linux-gnu.tar.gz"
+            cp target/dist/slskr-ci-*-x86_64-unknown-linux-gnu.tar.gz "$build_root/vendor/slskr-v${package_version}-x86_64-unknown-linux-gnu.tar.gz"
+            cp target/dist/slskr-ci-*-aarch64-unknown-linux-gnu.tar.gz "$build_root/vendor/slskr-v${package_version}-aarch64-unknown-linux-gnu.tar.gz"
             (cd "$build_root" && dpkg-buildpackage -us -uc -d -b -a "$deb_arch")
           done
       - name: Build RPMs for x86_64 and aarch64
         shell: bash
         run: |
           set -euo pipefail
+          package_version="$(awk '/^Version:/ { print $2; exit }' packaging/rpm/slskr.spec)"
+          test -n "$package_version"
           for rpm_arch in x86_64 aarch64; do
             rpm_top="$RUNNER_TEMP/slskr-rpm-$rpm_arch"
             rm -rf "$rpm_top"
             mkdir -p "$rpm_top"/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
-            cp target/dist/slskr-ci-*-x86_64-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz"
-            cp target/dist/slskr-ci-*-aarch64-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/slskr-v0.2.38-aarch64-unknown-linux-gnu.tar.gz"
+            cp target/dist/slskr-ci-*-x86_64-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/slskr-v${package_version}-x86_64-unknown-linux-gnu.tar.gz"
+            cp target/dist/slskr-ci-*-aarch64-unknown-linux-gnu.tar.gz "$rpm_top/SOURCES/slskr-v${package_version}-aarch64-unknown-linux-gnu.tar.gz"
             cp packaging/aur/slskr.service "$rpm_top/SOURCES/slskr.service"
             cp packaging/aur/slskr.sysusers "$rpm_top/SOURCES/slskr.sysusers"
             cp packaging/aur/slskr.tmpfiles "$rpm_top/SOURCES/slskr.tmpfiles"
