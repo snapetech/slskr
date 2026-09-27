@@ -5677,3 +5677,15 @@ The full daemon library run found a deterministic split-router regression: an un
 Scan production Rust sources for calls to the 92 mutating `DatabaseManager` methods and all checked persistence helpers, then inspect paths without a nearby persistence turn. Helper bodies delegate turn ownership to callers. Startup share-index, stale-grant, token, and HashDb writes occur before app state publication; the two wishlist scheduler saves run in the owning session loop; transfer projection writes use monotonic revision checks; PodCore's `vacuum` call is a different store. Lidarr wanted sync holds its Wishlist turn through the page write despite the call lying farther than the scan window from acquisition. The paired Wishlist/Search transaction has exactly three production callers, and each acquires Wishlist then Search before mutation and commit.
 
 The full 640-test daemon library suite passes, including the direct/batch route regression; the focused Wishlist contention and Lidarr failure tests recorded in Batches 362-373 pass. The full-controller/legacy feature compile and scoped Clippy with `-D clippy::await_holding_lock` pass. This closes the local write-ordering and held-guard audit for RF-002; the existing release-note fragments cover its user-facing fixes.
+
+## Live Parity Artifact Scope (2026-09-27)
+
+The manual/scheduled Live Parity workflow placed its temporary `live.env` in
+`target/live-interop/` and previously uploaded that entire directory. Its upload
+now selects only `*.tsv`, and the workflow policy check rejects the broad glob.
+All 12 accessible historical `credentialed-live-interop-*` artifacts were
+inspected through the GitHub API: each contains only
+`credentialed-live-interop.tsv` with status `skipped`. No accessible artifact
+contains `live.env`; the credentialed hosted run remains unproven because the
+GitHub secret has not been configured. The narrowed upload has a validated
+operator release note.

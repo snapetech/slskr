@@ -81,13 +81,18 @@ for expected in \
   'Credentialed public live interop' \
   'SLSKR_LIVE_INTEROP_ENV: ${{ secrets.SLSKR_LIVE_INTEROP_ENV }}' \
   'scripts/run-live-interop-matrix.sh' \
-  'target/live-interop/**' \
+  'target/live-interop/*.tsv' \
   'credentialed-live-interop.tsv'; do
   if ! rg -n -F -- "$expected" .github/workflows/live-parity.yml >/dev/null; then
     printf 'workflow release policy check failed: live parity workflow token missing: %s\n' "$expected" >&2
     status=1
   fi
 done
+
+if rg -n -F 'path: target/live-interop/**' .github/workflows/live-parity.yml; then
+  printf 'workflow release policy check failed: live parity artifacts must exclude the credential file\n' >&2
+  status=1
+fi
 
 if rg -n 'go install "github.com/rhysd/actionlint/cmd/actionlint@latest"|go install github.com/rhysd/actionlint/cmd/actionlint@latest' .github/workflows; then
   printf 'workflow release policy check failed: actionlint install must stay pinned\n' >&2
