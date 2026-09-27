@@ -11,17 +11,17 @@ cp "$repo_root/docs/dev/council-scan-inventory.md" "$tmp_root/docs/dev/council-s
 cp "$repo_root/docs/dev/bug-council-active-backlog.md" "$tmp_root/docs/dev/bug-council-active-backlog.md"
 
 expected_date="$(rg -o '^Scan date: [0-9]{4}-[0-9]{2}-[0-9]{2}$' "$tmp_root/.council/latest-candidate-counts.md" | cut -d' ' -f3)"
-expected_commit="$(rg -o '^Source commit: [0-9a-f]{40}$' "$tmp_root/.council/latest-candidate-counts.md" | cut -d' ' -f3)"
+expected_digest="$(rg -o '^Source digest: [0-9a-f]{64}$' "$tmp_root/.council/latest-candidate-counts.md" | cut -d' ' -f3)"
 
 SLSKR_COUNCIL_FRESHNESS_ROOT="$tmp_root" \
 SLSKR_COUNCIL_EXPECTED_DATE="$expected_date" \
-SLSKR_COUNCIL_EXPECTED_COMMIT="$expected_commit" \
+SLSKR_COUNCIL_EXPECTED_DIGEST="$expected_digest" \
   "$repo_root/scripts/check-council-freshness.sh" >/dev/null
 
 sed -i "s/^Scan date: .*/Scan date: 2000-01-01/" "$tmp_root/docs/dev/council-scan-inventory.md"
 if SLSKR_COUNCIL_FRESHNESS_ROOT="$tmp_root" \
   SLSKR_COUNCIL_EXPECTED_DATE="$expected_date" \
-  SLSKR_COUNCIL_EXPECTED_COMMIT="$expected_commit" \
+  SLSKR_COUNCIL_EXPECTED_DIGEST="$expected_digest" \
   "$repo_root/scripts/check-council-freshness.sh" >/dev/null 2>&1; then
   printf 'council freshness test failed: stale scan date was not rejected\n' >&2
   exit 1

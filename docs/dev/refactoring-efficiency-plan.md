@@ -186,7 +186,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
-| RF-070 | Council count files had no scan date/commit and checks regenerated only when a report was missing. | Stale counts could pass active-backlog checks. | `run-council-scan.sh` stamps the report; `check-council-freshness.sh` validates date and full source commit across the report, inventory, and backlog, with a negative test and all-phases/remediation wiring. | Verified locally |
+| RF-070 | Council count files had no scan date/commit and checks regenerated only when a report was missing. | Stale counts could pass active-backlog checks. | `run-council-scan.sh` stamps the report; `check-council-freshness.sh` validates date and the SHA-256 digest of tracked scan inputs across the report, inventory, and backlog, with a negative test and all-phases/remediation wiring. Generated records are excluded so committing them cannot invalidate their own stamp, including on shallow CI checkouts. | Verified locally |
 | RF-071 | The audit PASS matrix records a SHA but not toolchain/node/npm versions, lock hashes, or retained artifact links. | A clean checkout cannot reproduce the evidence exactly. | `scripts/collect-reproducibility-metadata.py` records the source SHA, dirty-worktree state, required tool versions, lock/config SHA-256 values, and optional artifact hashes; the remediation baseline validates a current local snapshot. Retained hosted artifact links remain external. | In progress, local metadata gate |
 | RF-072 | `docs/live-interop-test-matrix.md:39,119` referenced absent `web/e2e/live-surfaces.spec.ts`; the current batch updates it to maintained specs and keeps historical results explicitly dated. | Operators previously could not reproduce the stated live matrix. | Docs freshness and maintained Playwright pass locally. A fresh 2026-09-27 live interop run passed four login, one local-peer, and two social probes; its sanitized result and raw TSV hashes are in `benchmarks/artifacts/20260927-live-interop-summary.md`. Retained hosted artifact links remain open. | In progress; local live matrix passed |
 | RF-073 | `scripts/run-release-gate.sh:69-74` makes the slskd API compatibility smoke opt-in; `docs/release.md:41-63` intentionally assigns that smoke to scheduled/manual Live Parity. The current batch now labels the skipped local check as a certification artifact requirement. | This is a policy boundary, not a code defect, but release certification could be misread if artifact freshness was not visible. | Keep the opt-in behavior and require a retained scheduled artifact for certification. | In progress, policy |
@@ -5740,3 +5740,19 @@ frozen-source exception constants/functions moved into the 2,336-line
 byte-for-byte against the committed source. Audit tooling, CLI import, and diff
 checks pass. This is an actual module boundary; the Rust test segment splits
 above remain flat-scope interim work.
+
+## Council Scan Provenance And Scalar Boundary Review (2026-09-27)
+
+Council freshness previously required the stamp to equal `HEAD`; committing a
+refreshed stamp immediately made it stale. The source stamp now hashes the
+tracked files read by the scan and excludes its generated inventory/backlog.
+The protocol scalar scan now includes extracted production daemon modules and
+excludes controller test segments. It reports 305 candidate lines: 24 `u8`,
+21 `u16`, 42 `u32`, 184 `u64` casts, with the balance mainly checked
+length conversions. Review of the narrowing candidates and suspicious signed
+conversions found four concrete wrapping paths. Oversized share media values
+now saturate; distributed and wishlist scheduler SQLite values reject invalid
+depths/indices/intervals; persisted user timestamps clamp negative values.
+Focused regressions pass, as do the protocol taint lens and adversarial corpus.
+Council candidate counts remain heuristic line counts, not a proof that every
+cast is dangerous.
