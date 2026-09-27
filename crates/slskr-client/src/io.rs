@@ -245,7 +245,13 @@ pub async fn write_obfuscated_init_frame<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    write_obfuscated_init_frame_with_key(writer, frame, rand::random()).await
+    let key = loop {
+        let key: u32 = rand::random();
+        if key as usize > DEFAULT_MAX_FRAME_LEN {
+            break key;
+        }
+    };
+    write_obfuscated_init_frame_with_key(writer, frame, key).await
 }
 
 pub async fn write_obfuscated_init_frame_with_key<W>(

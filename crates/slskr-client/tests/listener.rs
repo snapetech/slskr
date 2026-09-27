@@ -216,6 +216,45 @@ fn shared_wire_bytes_can_form_valid_plain_and_obfuscated_init_frames() {
 }
 
 #[tokio::test]
+async fn shared_demux_rejects_dual_valid_init_prefix() {
+    let obfuscated_message = InitMessage::PeerInit {
+        username: "a".repeat(252),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+    let wire = encode_rotated(&obfuscated_message.encode().unwrap().encode().unwrap(), 5);
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+
+    let error = demux_shared_incoming(server).await.unwrap_err();
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::AmbiguousInitFrame
+    ));
+}
+
+#[tokio::test]
+async fn obfuscated_init_writer_avoids_plain_length_prefixes() {
+    let frame = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "P".to_owned(),
+        token: 0,
+    }
+    .encode()
+    .unwrap();
+
+    for _ in 0..32 {
+        let (mut writer, mut reader) = duplex(128);
+        write_obfuscated_init_frame(&mut writer, &frame)
+            .await
+            .unwrap();
+        assert!(
+            reader.read_u32_le().await.unwrap() as usize > slskr_client::io::DEFAULT_MAX_FRAME_LEN
+        );
+    }
+}
+
+#[tokio::test]
 async fn dedicated_listener_accepts_raw_connection_kind() {
     let listener = Listener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

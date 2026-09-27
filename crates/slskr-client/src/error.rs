@@ -98,6 +98,8 @@ pub enum ClientError {
     },
     #[error("frame length {length} exceeds configured maximum {max}")]
     FrameTooLarge { length: usize, max: usize },
+    #[error("shared initialization bytes are ambiguous between plain and obfuscated frames")]
+    AmbiguousInitFrame,
     #[error("decompressed payload length exceeds configured maximum {max}")]
     PayloadTooLarge { max: usize },
     #[error("compressed payload has {remaining} trailing bytes")]
