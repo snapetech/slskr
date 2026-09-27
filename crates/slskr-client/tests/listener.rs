@@ -12,10 +12,15 @@ use slskr_client::{
     ClientError,
 };
 use slskr_protocol::{
-    distributed::DistributedMessage, init::InitMessage, peer::PeerMessage, InitFrame,
+    decode_rotated,
+    distributed::DistributedMessage,
+    encode_rotated,
+    init::{InitCode, InitMessage, MAX_PEER_INIT_FRAME_LEN},
+    peer::PeerMessage,
+    InitFrame,
 };
 use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Duration;
 
 #[tokio::test]
@@ -155,7 +160,7 @@ async fn shared_demux_accepts_plain_and_obfuscated_initialization() {
         token: 0,
     };
 
-    let (mut plain_client, plain_server) = duplex(512);
+    let (mut plain_client, plain_server) = tcp_pair().await;
     write_init_frame(&mut plain_client, &init.encode().unwrap())
         .await
         .unwrap();
@@ -169,7 +174,7 @@ async fn shared_demux_accepts_plain_and_obfuscated_initialization() {
         }
     ));
 
-    let (mut obfuscated_client, obfuscated_server) = duplex(512);
+    let (mut obfuscated_client, obfuscated_server) = tcp_pair().await;
     write_obfuscated_init_frame_with_key(
         &mut obfuscated_client,
         &init.encode().unwrap(),
@@ -184,8 +189,34 @@ async fn shared_demux_accepts_plain_and_obfuscated_initialization() {
     ));
 }
 
+#[test]
+fn shared_wire_bytes_can_form_valid_plain_and_obfuscated_init_frames() {
+    let obfuscated_message = InitMessage::PeerInit {
+        username: "a".repeat(252),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+    let obfuscated_frame = obfuscated_message.encode().unwrap().encode().unwrap();
+    let wire = encode_rotated(&obfuscated_frame, 5);
+
+    assert_eq!(wire.len(), 274);
+
+    let plain_frame = InitFrame::decode(&wire[..9]).unwrap();
+    assert_eq!(
+        InitMessage::decode(plain_frame).unwrap(),
+        InitMessage::PierceFirewall { token: 0x1500_0001 }
+    );
+
+    let decoded_obfuscated_frame = decode_rotated(&wire).unwrap();
+    let decoded_obfuscated_frame = InitFrame::decode(&decoded_obfuscated_frame).unwrap();
+    assert_eq!(
+        InitMessage::decode(decoded_obfuscated_frame).unwrap(),
+        obfuscated_message
+    );
+}
+
 #[tokio::test]
-async fn shared_listener_accepts_raw_connection_kind() {
+async fn dedicated_listener_accepts_raw_connection_kind() {
     let listener = Listener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let client_task = tokio::spawn(async move {
@@ -195,9 +226,86 @@ async fn shared_listener_accepts_raw_connection_kind() {
             .unwrap();
     });
 
-    let (incoming, _) = listener.accept_shared().await.unwrap();
+    let (incoming, _) = listener.accept().await.unwrap();
     assert!(matches!(incoming, IncomingConnection::Distributed(_)));
     client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_demux_accepts_obfuscated_keys_starting_with_connection_kind_bytes() {
+    let init = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+
+    for first in [b'P', b'F', b'D'] {
+        let key = u32::from_le_bytes([first, 0, 0, 0]);
+        let (mut client, server) = tcp_pair().await;
+        write_obfuscated_init_frame_with_key(&mut client, &init.encode().unwrap(), key)
+            .await
+            .unwrap();
+
+        let incoming = demux_shared_incoming(server).await.unwrap();
+        assert!(matches!(
+            incoming,
+            IncomingConnection::ObfuscatedPeerMessages(_)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn shared_demux_accepts_plain_init_lengths_starting_with_connection_kind_bytes() {
+    for (first, username_len) in [(b'P', 66), (b'F', 56), (b'D', 54)] {
+        let init = InitMessage::PeerInit {
+            username: "a".repeat(username_len),
+            connection_type: "P".to_owned(),
+            token: 0,
+        };
+        let encoded = init.encode().unwrap();
+        let wire = encoded.encode().unwrap();
+        assert_eq!(wire[0], first);
+
+        let (mut client, server) = tcp_pair().await;
+        write_init_frame(&mut client, &encoded).await.unwrap();
+
+        let incoming = demux_shared_incoming(server).await.unwrap();
+        let IncomingConnection::PeerInit {
+            username,
+            kind,
+            obfuscated,
+            ..
+        } = incoming
+        else {
+            panic!("expected a plain peer init");
+        };
+        assert_eq!(username.len(), username_len);
+        assert_eq!(kind, ConnectionKind::PeerMessages);
+        assert!(!obfuscated);
+    }
+}
+
+#[tokio::test]
+async fn shared_demux_rejects_oversized_peer_init_before_buffering_body() {
+    let (mut client, server) = duplex(64);
+    client
+        .write_u32_le(slskr_client::io::DEFAULT_MAX_FRAME_LEN as u32)
+        .await
+        .unwrap();
+    client.write_u8(InitCode::PeerInit.as_u8()).await.unwrap();
+    client.write_all(&[0, 0, 0]).await.unwrap();
+
+    let error = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+        .await
+        .expect("shared demux should reject the bounded header without waiting")
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::FrameTooLarge {
+            length,
+            max: MAX_PEER_INIT_FRAME_LEN,
+        } if length == slskr_client::io::DEFAULT_MAX_FRAME_LEN
+    ));
 }
 
 #[tokio::test]
@@ -228,7 +336,12 @@ async fn shared_mesh_listener_preserves_soulseek_demux() {
     let address = listener.local_addr().unwrap();
     let client_task = tokio::spawn(async move {
         let mut stream = TcpStream::connect(address).await.unwrap();
-        write_connection_kind(&mut stream, ConnectionKind::Distributed)
+        let init = InitMessage::PeerInit {
+            username: "peer".to_owned(),
+            connection_type: "P".to_owned(),
+            token: 0,
+        };
+        write_init_frame(&mut stream, &init.encode().unwrap())
             .await
             .unwrap();
     });
@@ -236,7 +349,11 @@ async fn shared_mesh_listener_preserves_soulseek_demux() {
     let (incoming, _) = listener.accept_shared_mesh().await.unwrap();
     assert!(matches!(
         incoming,
-        SharedIncomingConnection::Soulseek(IncomingConnection::Distributed(_))
+        SharedIncomingConnection::Soulseek(IncomingConnection::PeerInit {
+            kind: ConnectionKind::PeerMessages,
+            obfuscated: false,
+            ..
+        })
     ));
     client_task.await.unwrap();
 }
@@ -531,4 +648,11 @@ async fn obfuscated_listener_timeout_covers_waiting_for_a_connection() {
             operation: "obfuscated peer initialization handshake",
         })
     ));
+}
+
+async fn tcp_pair() -> (TcpStream, TcpStream) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+    (client.unwrap(), accepted.unwrap().0)
 }

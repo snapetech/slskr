@@ -41,6 +41,156 @@ fn server_code_inventory_is_complete_and_unique() {
 }
 
 #[test]
+fn server_code_directional_dispatch_inventory_is_explicit() {
+    // This is the current typed-payload boundary. Opaque known codes preserve
+    // their raw frame until a payload contract is established.
+    const BOTH: &[ServerCode] = &[
+        ServerCode::Login,
+        ServerCode::GetPeerAddress,
+        ServerCode::WatchUser,
+        ServerCode::UnwatchUser,
+        ServerCode::GetUserStatus,
+        ServerCode::IgnoreUser,
+        ServerCode::UnignoreUser,
+        ServerCode::SayChatroom,
+        ServerCode::JoinRoom,
+        ServerCode::LeaveRoom,
+        ServerCode::ConnectToPeer,
+        ServerCode::MessageUser,
+        ServerCode::FileSearch,
+        ServerCode::ServerPing,
+        ServerCode::GetUserStats,
+        ServerCode::Recommendations,
+        ServerCode::GlobalRecommendations,
+        ServerCode::UserInterests,
+        ServerCode::RoomList,
+        ServerCode::CheckPrivileges,
+        ServerCode::SimilarUsers,
+        ServerCode::ItemRecommendations,
+        ServerCode::ItemSimilarUsers,
+        ServerCode::UserPrivileged,
+        ServerCode::AddRoomMember,
+        ServerCode::RemoveRoomMember,
+        ServerCode::EnableRoomInvitations,
+        ServerCode::ChangePassword,
+        ServerCode::AddRoomOperator,
+        ServerCode::RemoveRoomOperator,
+        ServerCode::CantConnectToPeer,
+    ];
+    const CLIENT_ONLY: &[ServerCode] = &[
+        ServerCode::SetWaitPort,
+        ServerCode::MessageAcked,
+        ServerCode::SetStatus,
+        ServerCode::SharedFoldersFiles,
+        ServerCode::UserSearch,
+        ServerCode::AddThingILike,
+        ServerCode::RemoveThingILike,
+        ServerCode::HaveNoParent,
+        ServerCode::ParentIp,
+        ServerCode::AcceptChildren,
+        ServerCode::WishlistSearch,
+        ServerCode::SetRoomTicker,
+        ServerCode::AddThingIHate,
+        ServerCode::RemoveThingIHate,
+        ServerCode::RoomSearch,
+        ServerCode::SendUploadSpeed,
+        ServerCode::GivePrivileges,
+        ServerCode::AckNotifyPrivileges,
+        ServerCode::BranchLevel,
+        ServerCode::BranchRoot,
+        ServerCode::ChildDepth,
+        ServerCode::CancelRoomMembership,
+        ServerCode::CancelRoomOwnership,
+        ServerCode::MessageUsers,
+        ServerCode::JoinGlobalRoom,
+        ServerCode::LeaveGlobalRoom,
+    ];
+    const SERVER_ONLY: &[ServerCode] = &[
+        ServerCode::UserJoinedRoom,
+        ServerCode::UserLeftRoom,
+        ServerCode::Relogged,
+        ServerCode::AdminMessage,
+        ServerCode::PrivilegedUsers,
+        ServerCode::ParentMinSpeed,
+        ServerCode::ParentSpeedRatio,
+        ServerCode::ParentInactivityTimeout,
+        ServerCode::SearchInactivityTimeout,
+        ServerCode::MinParentsInCache,
+        ServerCode::DistribPingInterval,
+        ServerCode::AddToPrivileged,
+        ServerCode::EmbeddedMessage,
+        ServerCode::PossibleParents,
+        ServerCode::WishlistInterval,
+        ServerCode::RoomTickers,
+        ServerCode::RoomTickerAdded,
+        ServerCode::RoomTickerRemoved,
+        ServerCode::NotifyPrivileges,
+        ServerCode::ResetDistributed,
+        ServerCode::RoomMembers,
+        ServerCode::RoomMembershipGranted,
+        ServerCode::RoomMembershipRevoked,
+        ServerCode::RoomOperatorshipGranted,
+        ServerCode::RoomOperatorshipRevoked,
+        ServerCode::RoomOperators,
+        ServerCode::GlobalRoomMessage,
+        ServerCode::ExcludedSearchPhrases,
+        ServerCode::CantCreateRoom,
+        ServerCode::CantJoinRoom,
+    ];
+    const OPAQUE: &[ServerCode] = &[
+        ServerCode::FileSearchRoom,
+        ServerCode::SendConnectToken,
+        ServerCode::SendDownloadSpeed,
+        ServerCode::UploadSlotsFull,
+        ServerCode::SimilarRecommendations,
+        ServerCode::MyRecommendations,
+        ServerCode::AdminCommand,
+        ServerCode::PlaceInLineRequest,
+        ServerCode::PlaceInLineResponse,
+        ServerCode::RoomAdded,
+        ServerCode::RoomRemoved,
+        ServerCode::ExactFileSearch,
+        ServerCode::GlobalUserList,
+        ServerCode::TunneledMessage,
+        ServerCode::RoomSomething,
+        ServerCode::RelatedSearch,
+    ];
+
+    let mut classified = HashSet::new();
+    for (codes, client, server) in [
+        (BOTH, true, true),
+        (CLIENT_ONLY, true, false),
+        (SERVER_ONLY, false, true),
+        (OPAQUE, false, false),
+    ] {
+        for &code in codes {
+            assert!(
+                classified.insert(code.as_u32()),
+                "duplicate direction classification for {}",
+                code.name()
+            );
+            for (direction, expected_typed) in [
+                (Direction::ClientToServer, client),
+                (Direction::ServerToClient, server),
+            ] {
+                let decoded =
+                    ServerMessage::decode(MessageFrame::new(code.as_u32(), Vec::new()), direction);
+                let typed = !matches!(decoded, Ok(ServerMessage::Unknown { .. }));
+                assert_eq!(typed, expected_typed, "{} in {direction:?}", code.name());
+            }
+        }
+    }
+    assert_eq!(classified.len(), ServerCode::ALL.len());
+    for code in ServerCode::ALL {
+        assert!(
+            classified.contains(&code.as_u32()),
+            "unclassified code {}",
+            code.name()
+        );
+    }
+}
+
+#[test]
 fn login_request_matches_protocol_example() {
     let message = ServerMessage::LoginRequest(LoginRequest {
         username: "username".to_owned(),

@@ -4,12 +4,14 @@ use crate::{connection::ConnectionKind, ClientError};
 use slskr_protocol::{
     decode_rotated, encode_rotated,
     frame::{InitFrame, MessageFrame},
+    init::{InitCode, MAX_INIT_FIELD_BYTES, MAX_PEER_INIT_FRAME_LEN},
     RawFrame,
 };
 
 pub const DEFAULT_MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 /// Absolute upper bound for one protocol frame, regardless of caller input.
 pub const MAX_FRAME_LEN: usize = DEFAULT_MAX_FRAME_LEN;
+const MAX_PIERCE_FIREWALL_FRAME_LEN: usize = 1 + 4;
 
 fn bounded_frame_len(value: usize) -> usize {
     value.min(MAX_FRAME_LEN)
@@ -178,8 +180,9 @@ where
     R: AsyncRead + Unpin,
 {
     let max_len = bounded_frame_len(max_len);
-    let encoded = read_len_prefixed_frame(reader, max_len).await?;
-    Ok(InitFrame::decode(&encoded)?)
+    let mut length_bytes = [0_u8; 4];
+    reader.read_exact(&mut length_bytes).await?;
+    read_init_frame_after_length(reader, length_bytes, max_len).await
 }
 
 pub async fn read_init_frame_with_first_len_byte<R>(
@@ -203,20 +206,7 @@ where
     let max_len = bounded_frame_len(max_len);
     let mut length_bytes = [first_len_byte, 0, 0, 0];
     reader.read_exact(&mut length_bytes[1..]).await?;
-    let length = u32::from_le_bytes(length_bytes) as usize;
-    if length > max_len {
-        return Err(ClientError::FrameTooLarge {
-            length,
-            max: max_len,
-        });
-    }
-    let encoded_len = prefixed_frame_len(length, 4, max_len)?;
-
-    let mut encoded = Vec::with_capacity(encoded_len);
-    encoded.extend_from_slice(&length_bytes);
-    encoded.resize(encoded_len, 0);
-    reader.read_exact(&mut encoded[4..]).await?;
-    Ok(InitFrame::decode(&encoded)?)
+    read_init_frame_after_length(reader, length_bytes, max_len).await
 }
 
 pub async fn write_init_frame<W>(writer: &mut W, frame: &InitFrame) -> Result<(), ClientError>
@@ -245,8 +235,7 @@ pub async fn read_obfuscated_init_frame<R>(reader: &mut R) -> Result<InitFrame, 
 where
     R: AsyncRead + Unpin,
 {
-    let encoded = read_obfuscated_len_prefixed_frame(reader, DEFAULT_MAX_FRAME_LEN).await?;
-    Ok(InitFrame::decode(&encoded)?)
+    read_obfuscated_init_frame_with_max(reader, DEFAULT_MAX_FRAME_LEN).await
 }
 
 pub async fn write_obfuscated_init_frame<W>(
@@ -356,6 +345,270 @@ fn prefixed_frame_len(
             length,
             max: configured_max.min(usize::MAX - prefix_len),
         })
+}
+
+async fn read_init_frame_after_length<R>(
+    reader: &mut R,
+    length_bytes: [u8; 4],
+    max_len: usize,
+) -> Result<InitFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    let length = u32::from_le_bytes(length_bytes) as usize;
+    if length > max_len {
+        return Err(ClientError::FrameTooLarge {
+            length,
+            max: max_len,
+        });
+    }
+    if length == 0 {
+        return Ok(InitFrame::decode(&length_bytes)?);
+    }
+
+    let code = reader.read_u8().await?;
+    let mut prefix = Vec::with_capacity(5);
+    prefix.extend_from_slice(&length_bytes);
+    prefix.push(code);
+
+    match InitCode::try_from(code) {
+        Ok(InitCode::PeerInit) => read_peer_init_frame(reader, prefix, length, max_len).await,
+        Ok(InitCode::PierceFirewall) if length > MAX_PIERCE_FIREWALL_FRAME_LEN => {
+            Err(ClientError::FrameTooLarge {
+                length,
+                max: MAX_PIERCE_FIREWALL_FRAME_LEN,
+            })
+        }
+        _ => read_init_frame_from_prefix(reader, prefix, length, max_len).await,
+    }
+}
+
+async fn read_peer_init_frame<R>(
+    reader: &mut R,
+    mut prefix: Vec<u8>,
+    length: usize,
+    max_len: usize,
+) -> Result<InitFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    // The maximum is derived from both bounded string fields and the fixed
+    // code/prefix/token bytes. Reject it before allocating a frame-sized Vec.
+    if length > MAX_PEER_INIT_FRAME_LEN {
+        return Err(ClientError::FrameTooLarge {
+            length,
+            max: MAX_PEER_INIT_FRAME_LEN,
+        });
+    }
+    if length < 1 + 4 {
+        return read_init_frame_from_prefix(reader, prefix, length, max_len).await;
+    }
+
+    let mut field_length = [0_u8; 4];
+    reader.read_exact(&mut field_length).await?;
+    prefix.extend_from_slice(&field_length);
+    let username_length = u32::from_le_bytes(field_length) as usize;
+    if username_length > MAX_INIT_FIELD_BYTES {
+        return Err(ClientError::PeerUsernameTooLong {
+            length: username_length,
+            max: MAX_INIT_FIELD_BYTES,
+        });
+    }
+
+    // If the username or the next length prefix is truncated, retain the
+    // existing decoder error after reading only this already bounded frame.
+    let connection_length_offset = 1 + 4 + username_length + 4;
+    if length < connection_length_offset {
+        return read_init_frame_from_prefix(reader, prefix, length, max_len).await;
+    }
+
+    let username_start = prefix.len();
+    prefix.resize(username_start + username_length, 0);
+    reader.read_exact(&mut prefix[username_start..]).await?;
+
+    let connection_length_start = prefix.len();
+    prefix.resize(connection_length_start + 4, 0);
+    reader
+        .read_exact(&mut prefix[connection_length_start..])
+        .await?;
+    let connection_length = u32::from_le_bytes(
+        prefix[connection_length_start..connection_length_start + 4]
+            .try_into()
+            .expect("connection type length is four bytes"),
+    ) as usize;
+    if connection_length > MAX_INIT_FIELD_BYTES {
+        return Err(ClientError::FrameTooLarge {
+            length: connection_length,
+            max: MAX_INIT_FIELD_BYTES,
+        });
+    }
+
+    let expected_length = connection_length_offset
+        .checked_add(connection_length)
+        .and_then(|length| length.checked_add(4))
+        .expect("bounded init field lengths fit in usize");
+    if length < expected_length {
+        return read_init_frame_from_prefix(reader, prefix, length, max_len).await;
+    }
+
+    read_init_frame_from_prefix(reader, prefix, length, max_len).await
+}
+
+async fn read_init_frame_from_prefix<R>(
+    reader: &mut R,
+    mut prefix: Vec<u8>,
+    length: usize,
+    max_len: usize,
+) -> Result<InitFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    let encoded_len = prefixed_frame_len(length, 4, max_len)?;
+    let start = prefix.len();
+    prefix.resize(encoded_len, 0);
+    reader.read_exact(&mut prefix[start..]).await?;
+    Ok(InitFrame::decode(&prefix)?)
+}
+
+async fn read_obfuscated_init_frame_with_max<R>(
+    reader: &mut R,
+    max_len: usize,
+) -> Result<InitFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    let max_len = bounded_frame_len(max_len);
+    let mut first_block = [0_u8; 8];
+    reader.read_exact(&mut first_block).await?;
+    let decoded_first_block = decode_rotated(&first_block)?;
+    let length = u32::from_le_bytes(
+        decoded_first_block[..4]
+            .try_into()
+            .expect("obfuscated init length is four bytes"),
+    ) as usize;
+    if length > max_len {
+        return Err(ClientError::FrameTooLarge {
+            length,
+            max: max_len,
+        });
+    }
+    if length == 0 {
+        return read_obfuscated_init_frame_from_prefix(
+            reader,
+            first_block.to_vec(),
+            length,
+            max_len,
+        )
+        .await;
+    }
+
+    let mut prefix = first_block.to_vec();
+    prefix.resize(9, 0);
+    reader.read_exact(&mut prefix[8..]).await?;
+    let decoded_prefix = decode_rotated(&prefix)?;
+    let code = decoded_prefix[4];
+
+    match InitCode::try_from(code) {
+        Ok(InitCode::PeerInit) => {
+            read_obfuscated_peer_init_frame(reader, prefix, length, max_len).await
+        }
+        Ok(InitCode::PierceFirewall) if length > MAX_PIERCE_FIREWALL_FRAME_LEN => {
+            Err(ClientError::FrameTooLarge {
+                length,
+                max: MAX_PIERCE_FIREWALL_FRAME_LEN,
+            })
+        }
+        _ => read_obfuscated_init_frame_from_prefix(reader, prefix, length, max_len).await,
+    }
+}
+
+async fn read_obfuscated_peer_init_frame<R>(
+    reader: &mut R,
+    mut prefix: Vec<u8>,
+    length: usize,
+    max_len: usize,
+) -> Result<InitFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    if length > MAX_PEER_INIT_FRAME_LEN {
+        return Err(ClientError::FrameTooLarge {
+            length,
+            max: MAX_PEER_INIT_FRAME_LEN,
+        });
+    }
+    if length < 1 + 4 {
+        return read_obfuscated_init_frame_from_prefix(reader, prefix, length, max_len).await;
+    }
+
+    prefix.resize(13, 0);
+    reader.read_exact(&mut prefix[9..]).await?;
+    let decoded_prefix = decode_rotated(&prefix)?;
+    let username_length = u32::from_le_bytes(
+        decoded_prefix[5..9]
+            .try_into()
+            .expect("username length is four bytes"),
+    ) as usize;
+    if username_length > MAX_INIT_FIELD_BYTES {
+        return Err(ClientError::PeerUsernameTooLong {
+            length: username_length,
+            max: MAX_INIT_FIELD_BYTES,
+        });
+    }
+
+    let connection_length_offset = 1 + 4 + username_length + 4;
+    if length < connection_length_offset {
+        return read_obfuscated_init_frame_from_prefix(reader, prefix, length, max_len).await;
+    }
+
+    let username_start = prefix.len();
+    prefix.resize(username_start + username_length, 0);
+    reader.read_exact(&mut prefix[username_start..]).await?;
+
+    let connection_length_start = prefix.len();
+    prefix.resize(connection_length_start + 4, 0);
+    reader
+        .read_exact(&mut prefix[connection_length_start..])
+        .await?;
+    let decoded_prefix = decode_rotated(&prefix)?;
+    let connection_length = u32::from_le_bytes(
+        decoded_prefix[9 + username_length..13 + username_length]
+            .try_into()
+            .expect("connection type length is four bytes"),
+    ) as usize;
+    if connection_length > MAX_INIT_FIELD_BYTES {
+        return Err(ClientError::FrameTooLarge {
+            length: connection_length,
+            max: MAX_INIT_FIELD_BYTES,
+        });
+    }
+
+    let expected_length = connection_length_offset
+        .checked_add(connection_length)
+        .and_then(|length| length.checked_add(4))
+        .expect("bounded init field lengths fit in usize");
+    if length < expected_length {
+        return read_obfuscated_init_frame_from_prefix(reader, prefix, length, max_len).await;
+    }
+
+    read_obfuscated_init_frame_from_prefix(reader, prefix, length, max_len).await
+}
+
+async fn read_obfuscated_init_frame_from_prefix<R>(
+    reader: &mut R,
+    mut prefix: Vec<u8>,
+    length: usize,
+    max_len: usize,
+) -> Result<InitFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    let encoded_len = prefixed_frame_len(length, 8, max_len)?;
+    let start = prefix.len();
+    prefix.resize(encoded_len, 0);
+    reader.read_exact(&mut prefix[start..]).await?;
+    let decoded = decode_rotated(&prefix)?;
+    Ok(InitFrame::decode(&decoded)?)
 }
 
 async fn read_len_prefixed_frame<R>(reader: &mut R, max_len: usize) -> Result<Vec<u8>, ClientError>

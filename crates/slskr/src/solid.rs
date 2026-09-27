@@ -1,4 +1,6 @@
-//! Solid profile parsing shared by the HTTP compatibility route.
+//! Solid profile parsing and HTTP response policy for the Solid routes.
+
+use super::*;
 
 use oxixml_io::{RdfFormat, RdfParser};
 use oxixml_model::{NamedOrBlankNode, Term};
@@ -191,5 +193,99 @@ mod tests {
         )
         .expect_err("malformed RDF must fail closed");
         assert!(error.contains("invalid Solid RDF profile"), "{error}");
+    }
+}
+
+fn solid_problem_response(status: u16, title: &str, detail: &str) -> HttpResponse {
+    let status_text = match status {
+        400 => "400 Bad Request",
+        500 => "500 Internal Server Error",
+        _ => "500 Internal Server Error",
+    };
+    HttpResponse {
+        status: status_text,
+        content_type: "application/problem+json",
+        body: serde_json::json!({
+            "type": "about:blank",
+            "title": title,
+            "status": status,
+            "detail": detail,
+        })
+        .to_string(),
+    }
+}
+
+pub(super) fn solid_resolution_error(
+    is_versioned: bool,
+    status: u16,
+    title: &str,
+    detail: &str,
+    legacy_detail: &str,
+) -> HttpResponse {
+    if is_versioned {
+        solid_problem_response(status, title, detail)
+    } else if status == 400 {
+        routing::bad_request_response(legacy_detail)
+    } else {
+        routing::internal_server_error_response(legacy_detail)
+    }
+}
+
+pub(super) async fn solid_client_id_document_response(state: &AppState) -> HttpResponse {
+    let media = state.media_services.read().await;
+    if state.config.controller_profile != ControllerProfile::Native || !media.features.solid {
+        return routing::not_found_response();
+    }
+    let Some(client_id_url) = media.solid.client_id_url.clone() else {
+        return routing::not_found_response();
+    };
+    let Ok(mut client_id) = reqwest::Url::parse(&client_id_url) else {
+        return routing::internal_server_error_response("invalid Solid client ID URL");
+    };
+    if client_id.host_str().is_none() {
+        return routing::internal_server_error_response("invalid Solid client ID URL");
+    }
+    client_id.set_path(&media.solid.redirect_path);
+    client_id.set_query(None);
+    client_id.set_fragment(None);
+    let document = serde_json::json!({
+        "@context": "https://www.w3.org/ns/solid/oidc-context.jsonld",
+        "client_id": client_id_url,
+        "client_name": "slskdn",
+        "application_type": "web",
+        "redirect_uris": [client_id.to_string()],
+        "scope": "openid webid",
+    });
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/ld+json",
+        body: document.to_string(),
+    }
+}
+
+pub(super) fn solid_private_or_reserved(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let octets = ip.octets();
+            octets[0] == 0
+                || octets[0] == 10
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 127)
+                || (octets[0] == 169 && octets[1] == 254)
+                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 168)
+                || octets[0] >= 224
+        }
+        IpAddr::V6(ip) => {
+            if let Some(ip) = ip.to_ipv4() {
+                return solid_private_or_reserved(IpAddr::V4(ip));
+            }
+            let octets = ip.octets();
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                || (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
+                || (octets[0] & 0xfe) == 0xfc
+        }
     }
 }

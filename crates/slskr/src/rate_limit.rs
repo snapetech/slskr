@@ -4,7 +4,9 @@ use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, time};
+
+use super::{AppConfig, AppState, ControllerProfile};
 
 /// Rate limiter configuration
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +51,95 @@ const MAX_USER_WINDOWS: usize = 16_384;
 const MAX_IP_WINDOWS: usize = 16_384;
 const MAX_USER_KEY_BYTES: usize = 256;
 const MAX_PARTITION_BYTES: usize = 128;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ControllerRateLimitPolicy {
+    pub(super) partition: String,
+    pub(super) max_requests: u32,
+    pub(super) window_seconds: u64,
+}
+
+pub(super) fn controller_rate_limit_policy(
+    config: &AppConfig,
+    method: &str,
+    path: &str,
+    authenticated_caller: Option<&str>,
+    remote_addr: Option<SocketAddr>,
+) -> Option<ControllerRateLimitPolicy> {
+    if config.controller_profile != ControllerProfile::Native
+        || !config.controller_web_rate_limiting.enabled
+    {
+        return None;
+    }
+
+    let settings = config.controller_web_rate_limiting;
+    let path = path.to_ascii_lowercase();
+    let method_is_post = method.eq_ignore_ascii_case("POST");
+    let policy = if path.starts_with("/mesh/") {
+        ControllerRateLimitPolicy {
+            partition: "mesh".to_owned(),
+            max_requests: controller_rate_permit(settings.mesh_gateway_permit_limit),
+            window_seconds: nonzero_controller_rate_window(settings.mesh_gateway_window_seconds),
+        }
+    } else if method_is_post && path.contains("/inbox") {
+        ControllerRateLimitPolicy {
+            partition: "fed".to_owned(),
+            max_requests: controller_rate_permit(settings.federation_permit_limit),
+            window_seconds: nonzero_controller_rate_window(settings.federation_window_seconds),
+        }
+    } else if method_is_post && path.starts_with("/api/") && path.contains("/events/") {
+        ControllerRateLimitPolicy {
+            partition: "event-injection".to_owned(),
+            max_requests: controller_rate_permit(settings.api_permit_limit.min(10)),
+            window_seconds: 60,
+        }
+    } else if method_is_post && path.starts_with("/api/") && path.contains("/warm-cache/hints") {
+        let fallback_caller = remote_addr
+            .map(|address| address.ip().to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        ControllerRateLimitPolicy {
+            partition: format!(
+                "warm-cache:{}",
+                authenticated_caller.unwrap_or(&fallback_caller)
+            ),
+            max_requests: controller_rate_permit(settings.api_permit_limit.min(10)),
+            window_seconds: 60,
+        }
+    } else if authenticated_caller.is_some() || !path.starts_with("/api/") {
+        return None;
+    } else {
+        ControllerRateLimitPolicy {
+            partition: "api".to_owned(),
+            max_requests: controller_rate_permit(settings.api_permit_limit),
+            window_seconds: nonzero_controller_rate_window(settings.api_window_seconds),
+        }
+    };
+    Some(policy)
+}
+
+fn controller_rate_permit(permit_limit: i32) -> u32 {
+    u32::try_from(permit_limit).unwrap_or(0)
+}
+
+fn nonzero_controller_rate_window(window_seconds: i32) -> u64 {
+    if window_seconds <= 0 {
+        60
+    } else {
+        u64::try_from(window_seconds).unwrap_or(60)
+    }
+}
+
+pub(super) fn spawn_rate_limit_cleanup(state: Arc<AppState>) {
+    let task_state = Arc::clone(&state);
+    state.spawn_managed_task(async move {
+        let state = task_state;
+        let mut interval = time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            state.rate_limiter.cleanup().await;
+        }
+    });
+}
 
 impl RateLimiter {
     /// Create new rate limiter

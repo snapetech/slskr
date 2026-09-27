@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     fs,
     sync::{Arc, RwLock as StdRwLock},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use base64::Engine;
@@ -10,6 +10,47 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::config::{ConfigEnv, FileConfig};
 use slskr_client::protocol::peer::FileEntry;
+
+#[tokio::test]
+async fn http_listener_connection_tasks_share_capacity_and_join_with_managed_shutdown() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct DropMarker(Arc<AtomicBool>);
+
+    impl Drop for DropMarker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    let connections = Arc::new(super::Semaphore::new(1));
+    let registry = super::ManagedTaskRegistry::default();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let marker = DropMarker(Arc::clone(&dropped));
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+
+    assert!(registry.spawn_bounded_http(&connections, async move {
+        let _marker = marker;
+        let _ = started_tx.send(());
+        std::future::pending::<()>().await;
+    },));
+    started_rx.await.expect("HTTPS task should start");
+
+    assert!(
+        !registry.spawn_bounded_http(&connections, async {}),
+        "the Unix listener must share the HTTPS connection limit"
+    );
+    assert_eq!(connections.available_permits(), 0);
+
+    registry.shutdown().await;
+    assert!(dropped.load(Ordering::Acquire));
+    assert_eq!(connections.available_permits(), 1);
+
+    assert!(
+        !registry.spawn_bounded_http(&connections, async {}),
+        "connection handlers must not be accepted after managed shutdown"
+    );
+}
 
 #[derive(Clone, Default)]
 struct MapEnv {
@@ -31,6 +72,20 @@ impl ConfigEnv for MapEnv {
 
 fn test_state_with_env(
     extra_env: MapEnv,
+) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
+    test_state_with_env_and_db(extra_env, None)
+}
+
+fn test_state_with_db(
+    extra_env: MapEnv,
+    db: super::persistence::DatabaseManager,
+) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
+    test_state_with_env_and_db(extra_env, Some(db))
+}
+
+fn test_state_with_env_and_db(
+    extra_env: MapEnv,
+    db: Option<super::persistence::DatabaseManager>,
 ) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -65,6 +120,14 @@ fn test_state_with_env(
         window_seconds: 60,
         enabled: true,
     });
+    let distributed_runtime = super::DistributedRuntime::new(config.username.as_deref());
+    let (distributed_persistence_snapshots, distributed_persistence_receiver) =
+        tokio::sync::watch::channel(distributed_runtime.persistence_snapshot());
+    let (distributed_persistence_status_sender, distributed_persistence_status) =
+        tokio::sync::watch::channel(super::DistributedPersistenceStatus {
+            revision: 0,
+            result: Ok(()),
+        });
 
     let state = Arc::new(super::AppState {
         controller_version: StdRwLock::new(super::ControllerVersionState::initial()),
@@ -79,12 +142,14 @@ fn test_state_with_env(
         server_address: StdRwLock::new(config.server_address.clone()),
         connected_server_address: StdRwLock::new(None),
         listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
-        distributed_network: RwLock::new(super::DistributedRuntime::new(
-            config.username.as_deref(),
-        )),
+        distributed_network: RwLock::new(distributed_runtime),
+        distributed_persistence_snapshots,
+        distributed_persistence_status,
         soulseek_distributed_settings: RwLock::new(config.soulseek_distributed),
         shares: RwLock::new(share_index),
         share_settings: RwLock::new(config.share_settings.clone()),
+        share_index_persistence_lock: tokio::sync::Mutex::new(()),
+        share_settings_generation: std::sync::atomic::AtomicU64::new(0),
         core_workflow_settings: RwLock::new(config.core_workflow.clone()),
         advanced_networking: RwLock::new(config.advanced_networking.clone()),
         media_services: RwLock::new(config.media_services.clone()),
@@ -107,13 +172,17 @@ fn test_state_with_env(
         obfuscated_advertised_port: StdRwLock::new(config.obfuscated_advertised_port),
         searches: RwLock::new(super::SearchStore::new()),
         users: RwLock::new(super::UserStore::new()),
+        user_persistence_lock: tokio::sync::Mutex::new(()),
+        event_persistence_lock: tokio::sync::Mutex::new(()),
         mesh: RwLock::new(super::MeshState::new()),
         capability_signing_key: super::new_capability_signing_key().expect("capability key"),
         content_discovery: RwLock::new(super::content_discovery::ContentDiscoveryStore::in_memory()),
         realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),
         browse: RwLock::new(super::BrowseStore::new()),
+        browse_persistence_lock: tokio::sync::Mutex::new(()),
         remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
         messages: RwLock::new(super::MessageStore::new()),
+        message_persistence_lock: tokio::sync::Mutex::new(()),
         managed_blacklist: RwLock::new(super::ManagedBlacklistRuntime::new(
             config.managed_blacklist.clone(),
             config.controller_profile,
@@ -129,6 +198,7 @@ fn test_state_with_env(
         ),
         integration_settings: RwLock::new(config.integrations.clone()),
         source_feed_import_history: RwLock::new(super::SourceFeedImportHistoryStore::default()),
+        source_feed_import_history_persistence_lock: tokio::sync::Mutex::new(()),
         lidarr_sync_state: RwLock::new(super::LidarrSyncRuntimeState::new(
             &config.integrations.lidarr,
         )),
@@ -146,7 +216,8 @@ fn test_state_with_env(
             super::PrivateMessageAutoResponseTracker::default(),
         ),
         rooms: RwLock::new(super::RoomStore::new()),
-        pod_join_replays: RwLock::new(BTreeMap::new()),
+        room_persistence_lock: tokio::sync::Mutex::new(()),
+        pod_join_replays: RwLock::new(super::PodJoinReplayStore::default()),
         pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
         pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
             &config.state_dir,
@@ -161,6 +232,7 @@ fn test_state_with_env(
         webhooks: Arc::new(RwLock::new(super::webhooks::WebhookManager::new())),
         webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
         share_scans: Arc::new(super::Semaphore::new(super::MAX_SHARE_SCAN_TASKS)),
+        share_scan_cancellation: Arc::new(std::sync::Mutex::new(None)),
         incoming_connections: Arc::new(super::Semaphore::new(super::MAX_INCOMING_CONNECTION_TASKS)),
         incoming_connection_ips: std::sync::Mutex::new(BTreeMap::new()),
         incoming_searches: Arc::new(super::Semaphore::new(
@@ -178,43 +250,61 @@ fn test_state_with_env(
         )),
         songid_jobs: None,
         collections: RwLock::new(super::CollectionStore::new()),
+        wishlist_search_persistence_lock: tokio::sync::Mutex::new(()),
+        search_persistence_lock: tokio::sync::Mutex::new(()),
         wishlist: RwLock::new(super::WishlistStore::new()),
+        contact_persistence_lock: tokio::sync::Mutex::new(()),
         contacts: RwLock::new(super::ContactStore::new()),
         sharegroups: RwLock::new(super::ShareGroupStore::new()),
+        user_note_persistence_lock: tokio::sync::Mutex::new(()),
         user_notes: RwLock::new(super::UserNoteStore::new()),
+        interest_persistence_lock: tokio::sync::Mutex::new(()),
         interests: RwLock::new(super::InterestStore::new()),
+        now_playing_persistence_lock: tokio::sync::Mutex::new(()),
         now_playing: RwLock::new(super::NowPlayingStore::new()),
+        webhook_persistence_lock: Arc::new(tokio::sync::Mutex::new(())),
         relay: RwLock::new(super::RelayState::new()),
         runtime: RwLock::new(super::RuntimeCompatState::new()),
+        runtime_persistence_lock: tokio::sync::Mutex::new(()),
         options_overlay: RwLock::new(super::ControllerOptionsOverlayState::default()),
         diagnostics_allow_memory_dump: RwLock::new(config.controller_diagnostics_allow_memory_dump),
         diagnostics_allow_remote_dump: RwLock::new(config.controller_diagnostics_allow_remote_dump),
         backfill: RwLock::new(super::BackfillState::default()),
         backfill_connections: Arc::new(super::Semaphore::new(2)),
         pending_backfill_transfers: RwLock::new(BTreeMap::new()),
+        security_ban_persistence_lock: tokio::sync::Mutex::new(()),
         security: RwLock::new(super::SecurityState::new()),
         share_grants: RwLock::new(super::ShareGrantStore::new()),
         share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
         incoming_shares: RwLock::new(super::IncomingShareStore::default()),
         library: RwLock::new(super::LibraryStore::new()),
+        library_persistence_lock: tokio::sync::Mutex::new(()),
         virtual_soulfind_v2: Arc::new(RwLock::new(super::virtual_soulfind_v2::State::default())),
         source_discovery: RwLock::new(super::SourceDiscoveryState::default()),
         destinations: RwLock::new(super::DestinationStore::new()),
-        db: None,
+        collection_grant_persistence_lock: tokio::sync::Mutex::new(()),
+        share_group_persistence_lock: tokio::sync::Mutex::new(()),
+        db: db.clone(),
         config,
         session_commands: sender.clone(),
         pending_user_interests: RwLock::new(BTreeMap::new()),
         lifecycle_commands: None,
+        managed_background_tasks: super::ManagedTaskRegistry::default(),
         rate_limiter,
         soulseek_safety: super::rate_limit::SoulseekSafetyLimiter::new(
             super::rate_limit::SoulseekSafetyConfig::default(),
         ),
         oauth_states: RwLock::new(super::OAuthStateStore::default()),
+        oauth_persistence_lock: tokio::sync::Mutex::new(()),
         spotify_connection: RwLock::new(super::SpotifyConnectionStore::default()),
+        spotify_connection_persistence_lock: tokio::sync::Mutex::new(()),
+        spotify_connection_generation: std::sync::atomic::AtomicU64::new(0),
         spotify_token_gate: tokio::sync::Semaphore::new(1),
         stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
         multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
-        controller_features: RwLock::new(super::ControllerFeatureState::in_memory()),
+        controller_features: super::ControllerFeatureStore::new(
+            super::ControllerFeatureState::in_memory(),
+        ),
         peer_endpoints: RwLock::new(BTreeMap::new()),
         preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
         listening_party_stream_limits: RwLock::new(super::ListeningPartyStreamLimits::default()),
@@ -227,6 +317,16 @@ fn test_state_with_env(
         pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
         podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
     });
+    if tokio::runtime::Handle::try_current().is_ok() {
+        state.spawn_managed_task(super::run_distributed_persistence_worker(
+            None,
+            distributed_persistence_receiver,
+            distributed_persistence_status_sender,
+        ));
+    } else {
+        drop(distributed_persistence_receiver);
+        drop(distributed_persistence_status_sender);
+    }
     (state, receiver)
 }
 
@@ -953,6 +1053,10 @@ fn folder_request_replaces_previous_browse_entries() {
 #[tokio::test]
 async fn batch_operations_reuse_router_statuses_timeouts_and_nested_guard() {
     let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let missing = super::route_http_request("GET", "/api/not-a-route", None, "", &state)
+        .await
+        .expect("direct missing-route response");
+    assert_eq!(missing.status, "404 Not Found");
     let body = serde_json::json!({
         "operations": [
             {"id": "health", "method": "GET", "path": "/api/health"},
@@ -1023,6 +1127,44 @@ async fn unversioned_empty_search_put_persists_cancellation() {
     assert!(json["endedAt"]
         .as_str()
         .is_some_and(|value| !value.is_empty()));
+}
+
+#[tokio::test]
+async fn wishlist_completion_releases_guard_when_item_is_missing() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let item_id = {
+        let mut wishlist = state.wishlist.write().await;
+        wishlist
+            .add_item("Artist".to_owned(), "Track".to_owned(), "Audio".to_owned())
+            .expect("wishlist item")
+            .id
+    };
+    let token = {
+        let mut searches = state.searches.write().await;
+        searches
+            .create_scheduled_wishlist_for_item("one two".to_owned(), Some(item_id.clone()), 300)
+            .expect("wishlist search")
+            .record
+            .token
+    };
+    assert!(state.wishlist.write().await.remove_item(&item_id).is_some());
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(1),
+        super::route_http_request(
+            "POST",
+            &format!("/api/searches/{token}/complete"),
+            None,
+            "",
+            &state,
+        ),
+    )
+    .await
+    .expect("wishlist completion must not wait on its own write guard")
+    .expect("wishlist completion response");
+
+    assert_eq!(response.status, "200 OK");
+    assert!(response.body.contains("\"status\":\"completed\""));
 }
 
 #[tokio::test]
@@ -1360,6 +1502,116 @@ async fn watched_obfuscation_changes_mark_reconnect_once_while_connected() {
 }
 
 #[tokio::test]
+async fn watched_share_reload_cancels_and_rejects_stale_index_publication() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create watched-share database");
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let stale_snapshot = state.shares.read().await.clone();
+    let stale_generation = state
+        .share_settings_generation
+        .load(std::sync::atomic::Ordering::Acquire);
+    let cancellation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *state
+        .share_scan_cancellation
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::clone(&cancellation));
+
+    let new_root = state.config.state_dir.join("watched-share");
+    fs::create_dir_all(&new_root).expect("create reloaded share root");
+    fs::write(new_root.join("new.flac"), b"new share").expect("write reloaded share fixture");
+    let yaml = format!(
+        "shares:\n  directories:\n    - '[Reloaded]{}'\n",
+        new_root.display()
+    );
+    fs::write(state.config.state_dir.join("slskd.yml"), &yaml)
+        .expect("write watched share configuration");
+    let mut cli_environment = state.controller_cli_environment.clone();
+    cli_environment.remove("SLSKR_SHARE_FIXTURE");
+
+    super::apply_watched_controller_configuration(&state, Some(&yaml), &cli_environment).await;
+
+    assert!(cancellation.load(std::sync::atomic::Ordering::Acquire));
+    let generation_after_directory_reload = state
+        .share_settings_generation
+        .load(std::sync::atomic::Ordering::Acquire);
+
+    let hidden_cancellation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *state
+        .share_scan_cancellation
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(Arc::clone(&hidden_cancellation));
+    let mut hidden_environment = cli_environment.clone();
+    hidden_environment.insert("SLSKR_SHARE_INCLUDE_HIDDEN".to_owned(), "true".to_owned());
+    super::apply_watched_controller_configuration(&state, Some(&yaml), &hidden_environment).await;
+    assert!(hidden_cancellation.load(std::sync::atomic::Ordering::Acquire));
+    assert!(state.share_settings.read().await.include_hidden);
+    assert!(
+        state
+            .share_settings_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+            > generation_after_directory_reload
+    );
+    let generation_after_hidden_reload = state
+        .share_settings_generation
+        .load(std::sync::atomic::Ordering::Acquire);
+
+    let regex_cancellation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *state
+        .share_scan_cancellation
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::clone(&regex_cancellation));
+    let mut regex_environment = hidden_environment.clone();
+    regex_environment.insert("SLSKD_CASE_SENSITIVE_REGEX".to_owned(), "true".to_owned());
+    super::apply_watched_controller_configuration(&state, Some(&yaml), &regex_environment).await;
+    assert!(regex_cancellation.load(std::sync::atomic::Ordering::Acquire));
+    assert!(*state
+        .controller_case_sensitive_regex
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner));
+    assert!(
+        state
+            .share_settings_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+            > generation_after_hidden_reload
+    );
+    assert!(
+        state
+            .share_settings_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+            > stale_generation
+    );
+    assert!(state.share_lifecycle.read().await.scan_pending);
+
+    assert_eq!(
+        super::commit_share_index_snapshot_checked(&state, &stale_snapshot, stale_generation)
+            .await
+            .expect_err("old scan generation must be rejected"),
+        super::SHARE_SCAN_CANCELLED_ERROR
+    );
+    assert!(db
+        .list_share_files(100, 0)
+        .await
+        .expect("read persisted shares")
+        .is_empty());
+    let shares = state.shares.read().await;
+    assert_eq!(shares.roots[0].label, "Reloaded");
+    drop(shares);
+    let lifecycle = state.share_lifecycle.read().await;
+    assert!(!lifecycle.scanning);
+    assert!(lifecycle.cancelled);
+    assert!(lifecycle.scan_pending);
+    drop(lifecycle);
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn controller_debug_view_projects_frozen_default_authentication_values() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"));
@@ -1650,6 +1902,704 @@ async fn merge_routes_reject_oversized_arrays_before_store_deserialization() {
 }
 
 #[tokio::test]
+async fn shadow_merge_rolls_back_records_when_realm_index_persistence_fails() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
+    *state.content_discovery.write().await =
+        super::content_discovery::ContentDiscoveryStore::load(&state.config.state_dir)
+            .expect("load file-backed content-discovery store");
+    *state.realm_subject_indexes.write().await =
+        super::realm_subject_index::Store::load_with_identity(
+            &state.config.state_dir,
+            super::realm_subject_index::DEFAULT_REALM_ID,
+            [super::realm_subject_index::DEFAULT_GOVERNANCE_ROOT],
+        )
+        .expect("load file-backed realm-index store");
+    fs::create_dir(state.config.state_dir.join("realm-subject-indexes.json"))
+        .expect("make realm-index persistence fail");
+
+    let mut index = serde_json::json!({
+        "id": "index-persistence-failure",
+        "realmId": super::realm_subject_index::DEFAULT_REALM_ID,
+        "subjectNamespace": "music",
+        "revision": 1,
+        "publishedAt": "2026-08-01T00:00:00Z",
+        "entries": [{
+            "subjectId": "subject-persistence-failure",
+            "workRef": {
+                "domain": "music",
+                "title": "Persistence Failure",
+                "creator": "Artist",
+            },
+            "externalIds": {
+                "musicbrainz:recording": "recording-persistence-failure",
+                "discogs": "discogs-persistence-failure",
+            },
+            "aliases": ["persistence-failure-alias"],
+        }],
+        "signature": {
+            "signer": super::realm_subject_index::DEFAULT_GOVERNANCE_ROOT,
+            "algorithm": "realm-governance-sha256",
+            "payloadHash": "",
+            "value": "signature",
+        },
+    });
+    index["signature"]["payloadHash"] =
+        serde_json::json!(super::realm_subject_index::compute_payload_hash(&index));
+
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+        None,
+        &serde_json::json!({
+            "records": [{"recordingId":"recording-persistence-failure","peerIds":["peer-a"]}],
+            "realmIndexes": [index],
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("failed shadow/realm-index merge response");
+
+    assert_eq!(response.status, "503 Service Unavailable");
+    assert!(response
+        .body
+        .contains("realm subject-index storage is unavailable"));
+    assert!(state
+        .content_discovery
+        .read()
+        .await
+        .shadow_records()
+        .is_empty());
+    assert!(state
+        .realm_subject_indexes
+        .read()
+        .await
+        .indexes_for_realm(super::realm_subject_index::DEFAULT_REALM_ID)
+        .is_empty());
+    let persisted = super::content_discovery::ContentDiscoveryStore::load(&state.config.state_dir)
+        .expect("reload rolled-back shadow records");
+    assert!(persisted.shadow_records().is_empty());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn hash_db_writers_wait_before_mutating_and_commit_in_memory_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create HashDb ordering database");
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "slskdn")
+            .with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+
+    let persistence_turn = super::hash_db_persistence_turn().await;
+    let store_state = Arc::clone(&state);
+    let mut store = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/hash",
+            None,
+            r#"{"filename":"Ordered/Stored.flac","size":4096,"byteHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampleRate":44100,"channels":2,"bitDepth":16}"#,
+            &store_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut store)
+        .await
+        .is_err());
+
+    let merge_state = Arc::clone(&state);
+    let merge_body = serde_json::json!({
+        "entries": [{
+            "flacKey": "ordered-merge-key",
+            "byteHash": "b".repeat(64),
+            "size": 4097,
+        }]
+    })
+    .to_string();
+    let mut merge = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/sync/merge",
+            None,
+            &merge_body,
+            &merge_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut merge)
+        .await
+        .is_err());
+
+    assert!(state
+        .content_discovery
+        .read()
+        .await
+        .hash_entries()
+        .is_empty());
+    let readable =
+        super::route_http_request("GET", "/api/v0/hashdb/hash/by-size/4096", None, "", &state)
+            .await
+            .expect("HashDb reads stay responsive while mutations wait");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["count"],
+        0
+    );
+    assert!(db
+        .list_hash_db_entries()
+        .await
+        .expect("read empty HashDb before release")
+        .is_empty());
+
+    drop(persistence_turn);
+    assert_eq!(
+        store
+            .await
+            .expect("HashDb store completes")
+            .expect("store HashDb entry")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        merge
+            .await
+            .expect("HashDb merge completes")
+            .expect("merge HashDb entry")
+            .status,
+        "200 OK"
+    );
+
+    let memory = state.content_discovery.read().await;
+    assert_eq!(memory.hash_entries().len(), 2);
+    let latest_seq = memory.latest_seq();
+    drop(memory);
+    let persisted = db
+        .list_hash_db_entries()
+        .await
+        .expect("read final HashDb rows");
+    assert_eq!(persisted.len(), 2);
+    let persisted_latest_seq = db
+        .get_hash_db_state("latest_seq")
+        .await
+        .expect("read final HashDb sequence")
+        .expect("persisted HashDb sequence")
+        .value
+        .expect("sequence value")
+        .parse::<u64>()
+        .expect("numeric sequence");
+    assert_eq!(persisted_latest_seq, latest_seq);
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn hash_db_history_backfill_waits_before_advancing_persisted_progress() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create HashDb history backfill database");
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "slskdn")
+            .with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    {
+        let mut searches = state.searches.write().await;
+        for index in 1..=11_u64 {
+            searches.records.push(super::SearchRecord {
+                id: format!("history-{index}"),
+                token: u32::try_from(index).unwrap(),
+                query: format!("history {index}"),
+                target: "global",
+                target_name: None,
+                status: "completed",
+                results: Vec::new(),
+                raw_response_count: 1,
+                filtered_out_count: 0,
+                ignored_result_count: 0,
+                hidden_locked_count: 0,
+                fallback_attempts: 0,
+                ttl_seconds: super::DEFAULT_SEARCH_TTL_SECONDS,
+                expires_at: 0,
+                created_at: index,
+                updated_at: index,
+            });
+        }
+    }
+
+    let persistence_turn = super::hash_db_persistence_turn().await;
+    let route_state = Arc::clone(&state);
+    let mut first_backfill = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?batchSize=10",
+            None,
+            "",
+            &route_state,
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut first_backfill)
+            .await
+            .is_err()
+    );
+    let route_state = Arc::clone(&state);
+    let mut second_backfill = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?batchSize=10",
+            None,
+            "",
+            &route_state,
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut second_backfill)
+            .await
+            .is_err()
+    );
+
+    assert!(state
+        .controller_features
+        .read()
+        .await
+        .get("hashdb/backfill/progress")
+        .is_none());
+    assert!(db
+        .get_hash_db_state("hashdb/backfill/progress")
+        .await
+        .expect("read queued backfill cursor")
+        .is_none());
+    let readable = super::route_http_request(
+        "GET",
+        "/api/v0/hashdb/backfill/candidates?limit=10",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("HashDb reads stay responsive during queued backfill");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["count"],
+        0
+    );
+
+    drop(persistence_turn);
+    let first_response = first_backfill
+        .await
+        .expect("first history backfill completes")
+        .expect("first history backfill request");
+    assert_eq!(first_response.status, "200 OK");
+    let first_json = serde_json::from_str::<serde_json::Value>(&first_response.body).unwrap();
+    assert_eq!(first_json["searchesProcessed"], 10);
+    assert_eq!(first_json["remainingSearches"], 1);
+
+    let second_response = second_backfill
+        .await
+        .expect("second history backfill completes")
+        .expect("second history backfill request");
+    assert_eq!(second_response.status, "200 OK");
+    let second_json = serde_json::from_str::<serde_json::Value>(&second_response.body).unwrap();
+    assert_eq!(second_json["searchesProcessed"], 1);
+    assert_eq!(second_json["remainingSearches"], 0);
+    assert_eq!(second_json["complete"], true);
+    let persisted = db
+        .get_hash_db_state("hashdb/backfill/progress")
+        .await
+        .expect("read persisted backfill cursor")
+        .expect("backfill cursor was stored");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            persisted.value.as_deref().expect("backfill cursor value")
+        )
+        .unwrap()["lastProcessedAt"],
+        1
+    );
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+async fn seed_old_message_for_database_cleanup(
+    state: &Arc<super::AppState>,
+    db: &super::persistence::DatabaseManager,
+) -> super::MessageRecord {
+    let record = {
+        let mut messages = state.messages.write().await;
+        let mut record = messages.add(
+            "cleanup-peer".to_owned(),
+            "inbound",
+            "old message".to_owned(),
+        );
+        record.created_at = 1;
+        record.created_at_ms = 1_000;
+        record.updated_at = 1;
+        *messages
+            .records
+            .iter_mut()
+            .find(|stored| stored.id == record.id)
+            .expect("message remains in cleanup projection") = record.clone();
+        record
+    };
+    db.insert_message(&super::message_store::persisted_message_record(&record))
+        .await
+        .expect("persist old message before database cleanup");
+    record
+}
+
+#[tokio::test]
+async fn database_cleanup_deletes_terminal_transfers_and_persists_tombstones() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create database cleanup persistence database");
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let transfer = {
+        let mut transfers = state.transfers.write().await;
+        let entry = transfers.create(
+            0,
+            Some("cleanup-peer".to_owned()),
+            "Remote/Complete.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        transfers
+            .update_status(entry.id, "completed", Some(10), None)
+            .expect("mark cleanup transfer completed")
+    };
+    super::persist_transfer_record(&state, &transfer)
+        .await
+        .expect("persist terminal transfer before cleanup");
+
+    let cleanup = super::database_cleanup_value(&state, "{\"days\":0}").await;
+    assert_eq!(cleanup["status"], "ok");
+    assert_eq!(cleanup["pruned_transfers"], 1);
+    assert_eq!(cleanup["transferCleanup"]["healthy"], true);
+    assert!(state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .all(|entry| entry.id != transfer.id));
+    assert!(db
+        .list_transfers(None, 10, 0)
+        .await
+        .expect("read transfers after cleanup")
+        .is_empty());
+    assert_eq!(
+        db.max_transfer_id()
+            .await
+            .expect("read transfer id retained by tombstone"),
+        transfer.id
+    );
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn database_cleanup_restores_terminal_transfers_when_sqlite_delete_fails() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create database cleanup rollback database");
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let old_message = seed_old_message_for_database_cleanup(&state, &db).await;
+    let transfer = {
+        let mut transfers = state.transfers.write().await;
+        let entry = transfers.create(
+            0,
+            Some("cleanup-peer".to_owned()),
+            "Remote/Failed.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        transfers
+            .update_status(entry.id, "failed", Some(1), Some("offline".to_owned()))
+            .expect("mark cleanup transfer failed")
+    };
+    super::persist_transfer_record(&state, &transfer)
+        .await
+        .expect("persist terminal transfer before failed cleanup");
+    db.close_for_test().await;
+
+    let cleanup = super::database_cleanup_value(&state, "{\"days\":0}").await;
+    assert_eq!(cleanup["status"], "error");
+    assert_eq!(cleanup["transferCleanup"]["healthy"], false);
+    assert_eq!(
+        cleanup["transferCleanup"]["error"],
+        "transfer cleanup unavailable"
+    );
+    assert!(state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .any(|entry| entry.id == transfer.id));
+    assert_eq!(cleanup["pruned_messages"], 0);
+    assert!(state
+        .messages
+        .read()
+        .await
+        .records
+        .iter()
+        .any(|record| record.id == old_message.id));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn transfer_mutation_rollback_preserves_newer_rows() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let original = {
+        let mut transfers = state.transfers.write().await;
+        transfers.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Original.flac".to_owned(),
+            None,
+            Some(10),
+        )
+    };
+    let (previous, mutated, failed_creation_id) = {
+        let mut transfers = state.transfers.write().await;
+        let previous = transfers.mutation_snapshot();
+        transfers
+            .update_status(
+                original.id,
+                "cancelled",
+                None,
+                Some("failed cancellation".to_owned()),
+            )
+            .expect("mutate original transfer");
+        let failed_creation = transfers.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Failed-Creation.flac".to_owned(),
+            None,
+            Some(11),
+        );
+        let mutated = transfers.mutation_snapshot();
+        (previous, mutated, failed_creation.id)
+    };
+    let concurrent = {
+        let mut transfers = state.transfers.write().await;
+        transfers
+            .update_status(original.id, "in_progress", Some(4), None)
+            .expect("apply newer transfer update");
+        transfers.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Concurrent.flac".to_owned(),
+            None,
+            Some(12),
+        )
+    };
+
+    assert!(super::rollback_transfer_mutation_if_unchanged(&state, previous, mutated).await);
+    {
+        let transfers = state.transfers.read().await;
+        let original_after = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == original.id)
+            .expect("newer original transfer remains");
+        assert_eq!(original_after.status, "in_progress");
+        assert_eq!(original_after.bytes_transferred, 4);
+        assert!(transfers
+            .entries
+            .iter()
+            .all(|entry| entry.id != failed_creation_id));
+        assert!(transfers
+            .entries
+            .iter()
+            .any(|entry| entry.id == concurrent.id));
+        assert!(transfers.next_id > concurrent.id);
+    }
+
+    let (previous, mutated) = {
+        let mut transfers = state.transfers.write().await;
+        let previous = transfers.mutation_snapshot();
+        transfers
+            .update_status(
+                concurrent.id,
+                "cancelled",
+                None,
+                Some("failed cancellation".to_owned()),
+            )
+            .expect("mutate concurrent transfer");
+        (previous, transfers.mutation_snapshot())
+    };
+    assert!(super::rollback_transfer_mutation_if_unchanged(&state, previous, mutated).await);
+    let restored = state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .find(|entry| entry.id == concurrent.id)
+        .cloned()
+        .expect("restored transfer remains");
+    assert_eq!(restored.status, "queued");
+
+    let deleted = {
+        state.transfers.write().await.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Failed-Deletion.flac".to_owned(),
+            None,
+            Some(13),
+        )
+    };
+    let (previous, mutated) = {
+        let mut transfers = state.transfers.write().await;
+        let previous = transfers.mutation_snapshot();
+        assert_eq!(transfers.remove_entries(&[deleted.id]).len(), 1);
+        (previous, transfers.mutation_snapshot())
+    };
+    let concurrent_after_delete = {
+        state.transfers.write().await.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Concurrent-After-Deletion.flac".to_owned(),
+            None,
+            Some(14),
+        )
+    };
+    assert!(super::rollback_transfer_mutation_if_unchanged(&state, previous, mutated).await);
+    {
+        let transfers = state.transfers.read().await;
+        assert!(transfers.entries.iter().any(|entry| entry == &deleted));
+        assert!(transfers
+            .entries
+            .iter()
+            .any(|entry| entry.id == concurrent_after_delete.id));
+    }
+
+    let stale_expected = {
+        let mut transfers = state.transfers.write().await;
+        let entry = transfers.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Changed-Before-Removal.flac".to_owned(),
+            None,
+            Some(15),
+        );
+        transfers
+            .update_status(entry.id, "in_progress", Some(5), None)
+            .expect("update staged transfer before rollback");
+        entry
+    };
+    assert!(
+        super::remove_transfer_entries_if_unchanged(&state, &[stale_expected.clone()])
+            .await
+            .is_empty()
+    );
+    assert!(state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .any(|entry| entry.id == stale_expected.id && entry.status == "in_progress"));
+
+    let removable = {
+        state.transfers.write().await.create(
+            0,
+            Some("rollback-peer".to_owned()),
+            "Remote/Unchanged-Staged-Transfer.flac".to_owned(),
+            None,
+            Some(16),
+        )
+    };
+    assert_eq!(
+        super::remove_transfer_entries_if_unchanged(&state, std::slice::from_ref(&removable)).await,
+        vec![removable.clone()]
+    );
+    assert!(state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .all(|entry| entry.id != removable.id));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn database_cleanup_orders_message_projection_with_sqlite_deletion() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create message cleanup database");
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let old_message = seed_old_message_for_database_cleanup(&state, &db).await;
+    let persistence_turn = state.message_persistence_lock.lock().await;
+    let cleanup_state = Arc::clone(&state);
+    let mut cleanup_task =
+        tokio::spawn(
+            async move { super::database_cleanup_value(&cleanup_state, "{\"days\":0}").await },
+        );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut cleanup_task)
+            .await
+            .is_err()
+    );
+
+    let readable = super::route_http_request("GET", "/api/messages", None, "", &state)
+        .await
+        .expect("message reads stay responsive while cleanup waits");
+    assert_eq!(readable.status, "200 OK");
+    let readable_json = serde_json::from_str::<serde_json::Value>(&readable.body).unwrap();
+    assert_eq!(readable_json["count"], 1);
+    assert_eq!(readable_json["entries"][0]["id"], old_message.id);
+    assert_eq!(
+        db.list_messages(10, 0)
+            .await
+            .expect("message rows remain while cleanup waits")
+            .len(),
+        1
+    );
+
+    drop(persistence_turn);
+    let cleanup = cleanup_task.await.expect("message cleanup task completes");
+    assert_eq!(cleanup["status"], "ok");
+    assert_eq!(cleanup["cleaned"], 1);
+    assert_eq!(cleanup["pruned_messages"], 1);
+    assert_eq!(
+        state.messages.read().await.records.len(),
+        0,
+        "message projection is pruned with SQLite"
+    );
+    assert!(db
+        .list_messages(10, 0)
+        .await
+        .expect("read messages after cleanup")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn browse_response_rejects_oversized_wire_batches_before_store_mutation() {
     let (state, _receiver) = test_state_with_env(MapEnv::default());
     let oversized_entries = (0..=super::MAX_BROWSE_WIRE_FILES_PER_RESPONSE)
@@ -1877,6 +2827,265 @@ async fn musicbrainz_rejects_oversized_json_batches_before_state_mutation() {
         .contains("suggestions must contain at most"));
     assert!(state.wishlist.read().await.records.is_empty());
 
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn failed_library_runtime_transaction_rolls_back_unchanged_store_independently() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let previous_library = state.library.read().await.clone();
+    let previous_runtime = state.runtime.read().await.clone();
+
+    let (mutated_library, mutated_runtime, failed_library_item) = {
+        let mut library = state.library.write().await;
+        let mut runtime = state.runtime.write().await;
+        let record = library
+            .create(
+                "Artist".to_owned(),
+                "Failed import".to_owned(),
+                "Audio".to_owned(),
+            )
+            .expect("failed import candidate should fit");
+        runtime.record_lidarr_manual_import(1, false, "/music/failed".to_owned(), Vec::new());
+        (library.clone(), runtime.clone(), record)
+    };
+
+    // Model a runtime-only write that succeeds after the cross-store SQL
+    // transaction fails but before its error path reacquires the state locks.
+    let concurrent_runtime = {
+        let mut runtime = state.runtime.write().await;
+        runtime.record_gc();
+        runtime.clone()
+    };
+    super::route_dispatch::rollback_library_runtime_if_unchanged(
+        &state,
+        previous_library.clone(),
+        mutated_library,
+        previous_runtime.clone(),
+        mutated_runtime,
+        failed_library_item.clone(),
+    )
+    .await;
+    assert_eq!(*state.library.read().await, previous_library);
+    let mut expected_runtime = concurrent_runtime;
+    expected_runtime.lidarr_manual_imports = previous_runtime.lidarr_manual_imports;
+    assert_eq!(*state.runtime.read().await, expected_runtime);
+
+    // A concurrent library-only write likewise must survive while the failed
+    // transaction's otherwise unchanged runtime candidate is rolled back.
+    let (mutated_library, mutated_runtime, failed_library_item) = {
+        let mut library = state.library.write().await;
+        let mut runtime = state.runtime.write().await;
+        let record = library
+            .create(
+                "Artist".to_owned(),
+                "Second failed import".to_owned(),
+                "Audio".to_owned(),
+            )
+            .expect("second failed import candidate should fit");
+        runtime.record_lidarr_manual_import(
+            1,
+            false,
+            "/music/second-failed".to_owned(),
+            Vec::new(),
+        );
+        (library.clone(), runtime.clone(), record)
+    };
+    let previous_runtime = state.runtime.read().await.clone();
+    let concurrent_library = {
+        let mut library = state.library.write().await;
+        library
+            .create(
+                "Artist".to_owned(),
+                "Concurrent library write".to_owned(),
+                "Audio".to_owned(),
+            )
+            .expect("concurrent library candidate should fit");
+        library.clone()
+    };
+    let mut expected_library = concurrent_library.clone();
+    expected_library
+        .records
+        .retain(|record| record.id != failed_library_item.id);
+    super::route_dispatch::rollback_library_runtime_if_unchanged(
+        &state,
+        previous_library.clone(),
+        mutated_library,
+        previous_runtime.clone(),
+        mutated_runtime,
+        failed_library_item,
+    )
+    .await;
+    assert_eq!(*state.library.read().await, expected_library);
+    assert_eq!(*state.runtime.read().await, previous_runtime);
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn runtime_compatibility_mutation_waits_for_persistence_turn_without_blocking_reads() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let persistence_turn = state.runtime_persistence_lock.lock().await;
+    let task_state = Arc::clone(&state);
+    let mut mutation = tokio::spawn(async move {
+        super::mutate_runtime_compat_state(&task_state, |runtime, _| runtime.record_gc()).await
+    });
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut mutation)
+            .await
+            .is_err()
+    );
+    assert_eq!(state.runtime.read().await.gc_runs, 0);
+
+    drop(persistence_turn);
+    mutation
+        .await
+        .expect("runtime mutation task should join")
+        .expect("runtime mutation should persist");
+    assert_eq!(state.runtime.read().await.gc_runs, 1);
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn runtime_compatibility_mutation_releases_store_guards_during_sqlite_io() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let db_path = std::env::temp_dir().join(format!(
+        "slskr-runtime-compat-lock-test-{}-{unique}.db",
+        std::process::id()
+    ));
+    let db = super::persistence::DatabaseManager::new(
+        db_path.to_str().expect("database path should be UTF-8"),
+    )
+    .await
+    .expect("create runtime compatibility database");
+    db.execute_raw_for_test(
+        "CREATE TRIGGER fail_runtime_compat_insert BEFORE INSERT ON runtime_compat_state \
+         BEGIN SELECT RAISE(ABORT, 'forced runtime compatibility failure'); END",
+    )
+    .await
+    .expect("install persistence failure trigger");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+
+    let blocker_pool = sqlx_sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            sqlx_sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .busy_timeout(Duration::from_secs(30)),
+        )
+        .await
+        .expect("open SQLite lock connection");
+    let mut blocker = blocker_pool
+        .acquire()
+        .await
+        .expect("acquire SQLite lock connection");
+    sqlx_core::query::query("BEGIN IMMEDIATE")
+        .execute(&mut *blocker)
+        .await
+        .expect("hold SQLite write lock");
+
+    let task_state = Arc::clone(&state);
+    let mutation = tokio::spawn(async move {
+        super::mutate_runtime_compat_state(&task_state, |runtime, _| runtime.record_gc()).await
+    });
+    let read_saw_mutation = tokio::time::timeout(Duration::from_millis(500), async {
+        loop {
+            if let Ok(runtime) = state.runtime.try_read() {
+                if runtime.gc_runs == 1 {
+                    break true;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .is_ok();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let mutation_waited_for_sqlite = !mutation.is_finished();
+    let unrelated_update_survived = tokio::time::timeout(Duration::from_millis(200), async {
+        state.runtime.write().await.application_reconnect_pending = true;
+    })
+    .await
+    .is_ok();
+
+    sqlx_core::query::query("COMMIT")
+        .execute(&mut *blocker)
+        .await
+        .expect("release SQLite write lock");
+    drop(blocker);
+    let mutation_result = tokio::time::timeout(Duration::from_secs(2), mutation)
+        .await
+        .expect("runtime mutation should finish after releasing SQLite")
+        .expect("runtime mutation task should join");
+    assert!(
+        mutation_result.is_err(),
+        "trigger should fail the persistence write"
+    );
+    assert!(
+        read_saw_mutation,
+        "runtime reads should proceed during SQLite I/O"
+    );
+    assert!(
+        mutation_waited_for_sqlite,
+        "the write should wait on SQLite"
+    );
+    assert!(
+        unrelated_update_survived,
+        "unrelated runtime updates should proceed during SQLite I/O"
+    );
+    let runtime = state.runtime.read().await;
+    assert_eq!(
+        runtime.gc_runs, 0,
+        "failed persistent mutation should roll back"
+    );
+    assert!(runtime.application_reconnect_pending);
+    drop(runtime);
+
+    blocker_pool.close().await;
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+    let _ = fs::remove_file(&db_path);
+}
+
+#[tokio::test]
+async fn runtime_compatibility_transient_latches_stay_process_local() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create runtime compatibility database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+
+    super::mutate_runtime_compat_state_in_memory(&state, |runtime| {
+        runtime.set_restart_requested(true);
+        runtime.bridge_running = true;
+    })
+    .await;
+    super::mutate_runtime_compat_state(&state, |runtime, _| runtime.record_gc())
+        .await
+        .expect("persist durable runtime counter");
+
+    let live = state.runtime.read().await;
+    assert!(live.application_restart_requested);
+    assert!(live.bridge_running);
+    drop(live);
+
+    let persisted = db
+        .get_runtime_compat_state()
+        .await
+        .expect("read runtime compatibility state")
+        .expect("durable runtime state was persisted");
+    assert_eq!(persisted.gc_runs, 1);
+    assert!(!persisted.application_restart_requested);
+    assert!(!persisted.bridge_running);
+
+    let rehydrated = super::RuntimeCompatState::try_from_persisted(&persisted)
+        .expect("rehydrate durable runtime state");
+    assert!(!rehydrated.application_restart_requested);
+    assert!(!rehydrated.bridge_running);
+
+    db.close_for_test().await;
     let _ = fs::remove_dir_all(&state.config.state_dir);
 }
 
@@ -2528,4 +3737,3338 @@ fn relay_share_database_storage_uses_restart_stable_suffix() {
         .join(format!("share-{}.sqlite", token.simple()))
         .exists());
     let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[test]
+fn cancelled_share_scan_stops_before_indexing() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-cancelled-share-scan-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).expect("create cancelled scan root");
+    fs::write(root.join("not-indexed.flac"), b"fixture").expect("write cancelled scan file");
+    let directories = crate::config::parse_share_directories(root.to_str().unwrap())
+        .expect("parse cancelled scan directory");
+    let cancellation = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let scan = super::scan_share_dirs_with_cancellation(super::ShareScanRequest {
+        directories: &directories,
+        follow_symlinks: false,
+        include_hidden: false,
+        max_files: 100,
+        probe_media_attributes: false,
+        workers: 1,
+        filters: &[],
+        cancellation,
+    });
+
+    assert!(scan.cancelled);
+    assert!(scan.entries.is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn graceful_shutdown_cancels_registered_share_rebuild_before_publish() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create share-index persistence database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+    let before = state.shares.read().await.clone();
+
+    // Keep the production rebuild between cancellation registration and worker
+    // startup, so shutdown necessarily overlaps the active rebuild operation.
+    let lifecycle_guard = state.share_lifecycle.write().await;
+    let scan_state = Arc::clone(&state);
+    let mut rebuild = tokio::spawn(async move { super::rebuild_share_index(&scan_state).await });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let registered = state
+                .share_scan_cancellation
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_some();
+            if registered {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("rebuild registers its shutdown cancellation token");
+
+    super::initiate_graceful_shutdown(&state).await;
+    assert!(state
+        .share_scan_cancellation
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .is_some_and(|cancellation| cancellation.load(std::sync::atomic::Ordering::Acquire)));
+    drop(lifecycle_guard);
+
+    let rebuild_result = tokio::time::timeout(Duration::from_secs(2), &mut rebuild)
+        .await
+        .expect("cancelled rebuild returns")
+        .expect("join rebuild task");
+    assert_eq!(
+        rebuild_result.expect_err("shutdown must cancel the rebuild"),
+        super::SHARE_SCAN_CANCELLED_ERROR
+    );
+    assert_eq!(state.shares.read().await.entries, before.entries);
+    let lifecycle = state.share_lifecycle.read().await;
+    assert!(!lifecycle.scanning);
+    assert!(lifecycle.cancelled);
+    drop(lifecycle);
+    assert!(db.list_share_files(100, 0).await.unwrap().is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn transfer_durability_snapshots_after_lock_and_rehydrates_in_event_order() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let events_path = super::transfer_events_path(&state.config.state_dir);
+    let state_path = super::transfer_state_path(&state.config.state_dir);
+    let events_before = fs::read_to_string(&events_path).expect("transfer event header");
+    let state_before = fs::read_to_string(&state_path).ok();
+
+    {
+        let mut transfers = state.transfers.write().await;
+        let entry = transfers.create(
+            0,
+            Some("restart-peer".to_owned()),
+            "Remote/Restart.flac".to_owned(),
+            None,
+            Some(100),
+        );
+        transfers.update_status(entry.id, "in_progress", Some(25), None);
+
+        // Queue mutations only snapshot under the lock; no event append or
+        // state rewrite is allowed until the guard has been released.
+        assert_eq!(
+            fs::read_to_string(&events_path).expect("events while locked"),
+            events_before
+        );
+        assert_eq!(fs::read_to_string(&state_path).ok(), state_before);
+    }
+
+    super::persist_transfer_durability(&state).await;
+    let events_after = fs::read_to_string(&events_path).expect("persisted transfer events");
+    assert!(events_after.contains("\tqueued\t"));
+    assert!(events_after.contains("\t25\tin_progress\t"));
+    assert_eq!(
+        events_after.lines().count(),
+        events_before.lines().count() + 2
+    );
+    let persisted = serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(&state_path).expect("persisted transfer state"),
+    )
+    .expect("transfer state JSON");
+    assert_eq!(persisted["entries"][0]["status"], "in_progress");
+
+    let restarted = super::TransferQueue::new(&state.config);
+    assert_eq!(restarted.entries.len(), 1);
+    assert_eq!(restarted.entries[0].status, "queued");
+    assert_eq!(
+        restarted.entries[0].reason.as_deref(),
+        Some("resumed after restart")
+    );
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn transfer_request_name_update_advances_existing_database_revision() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create transfer request-name database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let entry = {
+        let mut transfers = state.transfers.write().await;
+        let entry = transfers.create(
+            0,
+            Some("revision-peer".to_owned()),
+            "Remote/Revision.flac".to_owned(),
+            None,
+            Some(100),
+        );
+        let mut entry = entry;
+        entry.updated_at_ms = entry.updated_at_ms.saturating_add(30_000);
+        let current = transfers
+            .entries
+            .iter_mut()
+            .find(|current| current.id == entry.id)
+            .expect("created transfer remains in queue");
+        current.updated_at_ms = entry.updated_at_ms;
+        entry
+    };
+    let initial_revision = entry.updated_at_ms;
+    db.insert_transfer_records_with_events(&[(
+        super::persisted_transfer_record(&entry),
+        super::persisted_transfer_event_record(&entry),
+    )])
+    .await
+    .expect("seed durable transfer snapshot");
+
+    let request_id = entry.request_id.as_deref().expect("download request id");
+    let headers = super::RequestSecurityHeaders {
+        remote_addr: Some("127.0.0.1:1".parse().expect("loopback test address")),
+        ..super::RequestSecurityHeaders::default()
+    };
+    let response = super::route_dispatch::route_http_request_with_headers(
+        "PATCH",
+        &format!("/api/v0/downloads/requests/{request_id}/name"),
+        None,
+        r#"{"name":"renamed request"}"#,
+        &state,
+        &headers,
+    )
+    .await
+    .expect("rename download request");
+    assert_eq!(response.status, "200 OK");
+
+    let updated = db
+        .get_transfer(&entry.id.to_string())
+        .await
+        .expect("read renamed transfer")
+        .expect("renamed transfer remains persisted");
+    assert_eq!(updated.request_name.as_deref(), Some("renamed request"));
+    assert!(
+        updated.updated_at_ms > i64::try_from(initial_revision).unwrap(),
+        "the persisted transfer revision must advance past its prior value"
+    );
+    let live = state.transfers.read().await;
+    let current = live
+        .entries
+        .iter()
+        .find(|current| current.id == entry.id)
+        .expect("renamed transfer remains in memory");
+    assert_eq!(current.request_name.as_deref(), Some("renamed request"));
+    assert_eq!(
+        i64::try_from(current.updated_at_ms).unwrap(),
+        updated.updated_at_ms
+    );
+    drop(live);
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn distributed_persistence_worker_commits_the_latest_snapshot() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("in-memory distributed database");
+    let initial = super::DistributedRuntime::new(Some("local-user")).persistence_snapshot();
+    let (snapshot_sender, snapshot_receiver) = tokio::sync::watch::channel(initial);
+    let (status_sender, mut status_receiver) =
+        tokio::sync::watch::channel(super::DistributedPersistenceStatus {
+            revision: 0,
+            result: Ok(()),
+        });
+    let worker = tokio::spawn(super::run_distributed_persistence_worker(
+        Some(db.clone()),
+        snapshot_receiver,
+        status_sender,
+    ));
+
+    snapshot_sender.send_replace(super::DistributedPersistenceSnapshot {
+        revision: 1,
+        branch_level: 2,
+        branch_root: "intermediate-root".to_owned(),
+        parent_username: Some("intermediate-parent".to_owned()),
+        children: vec![("intermediate-child".to_owned(), 1)],
+    });
+    snapshot_sender.send_replace(super::DistributedPersistenceSnapshot {
+        revision: 2,
+        branch_level: 5,
+        branch_root: "latest-root".to_owned(),
+        parent_username: Some("latest-parent".to_owned()),
+        children: vec![("latest-child".to_owned(), 4)],
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let status = status_receiver.borrow_and_update().clone();
+            if status.revision >= 2 {
+                assert!(status.result.is_ok(), "latest snapshot should be durable");
+                break;
+            }
+            status_receiver
+                .changed()
+                .await
+                .expect("persistence worker remains available");
+        }
+    })
+    .await
+    .expect("latest distributed snapshot was persisted");
+
+    let (tree_state, children) = db
+        .load_distributed_state()
+        .await
+        .expect("load distributed snapshot");
+    assert_eq!(
+        tree_state,
+        Some((
+            5,
+            "latest-root".to_owned(),
+            Some("latest-parent".to_owned())
+        ))
+    );
+    assert_eq!(children, vec![("latest-child".to_owned(), 4)]);
+
+    drop(snapshot_sender);
+    worker.await.expect("persistence worker exits");
+    db.close_for_test().await;
+}
+
+#[tokio::test]
+async fn distributed_runtime_rehydrates_one_persisted_snapshot_after_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-distributed-runtime-restart-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("create distributed restart directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create distributed restart database");
+    let children = vec![("child-a".to_owned(), 2), ("child-b".to_owned(), 4)];
+    db.save_distributed_state(6, "branch-root", Some("parent-user"), &children)
+        .await
+        .expect("persist distributed runtime state");
+    db.close_for_test().await;
+
+    let reopened = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("reopen distributed restart database");
+    let runtime = RwLock::new(super::DistributedRuntime::new(Some("local-user")));
+    super::hydrate_distributed_runtime(&runtime, &reopened)
+        .await
+        .expect("hydrate distributed runtime");
+    let runtime = runtime.read().await;
+    assert_eq!(runtime.branch_level, 6);
+    assert_eq!(runtime.branch_root, "branch-root");
+    assert_eq!(runtime.parent.as_deref(), Some("parent-user"));
+    assert_eq!(
+        runtime.child_depths,
+        children.into_iter().collect::<BTreeMap<_, _>>()
+    );
+    drop(runtime);
+    reopened.close_for_test().await;
+    fs::remove_dir_all(root).expect("remove distributed restart directory");
+}
+
+#[tokio::test]
+async fn transfer_durability_wait_does_not_block_queue_mutations() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    {
+        let mut transfers = state.transfers.write().await;
+        transfers.create(
+            0,
+            Some("slow-disk-peer".to_owned()),
+            "Remote/SlowDisk.flac".to_owned(),
+            None,
+            Some(100),
+        );
+    }
+
+    let coordinator = state
+        .transfers
+        .read()
+        .await
+        .durability_snapshot()
+        .expect("created transfer has a pending durability snapshot")
+        .coordinator;
+    // Hold the serialization gate to model a slow durability write. The
+    // queue lock must be available while that persistence work is delayed.
+    let coordinator_guard = coordinator.state.lock().await;
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let persistence_state = Arc::clone(&state);
+    let persistence = tokio::spawn(async move {
+        let _ = started_tx.send(());
+        super::persist_transfer_durability(&persistence_state).await;
+    });
+    started_rx.await.expect("persistence task started");
+    assert!(
+        !persistence.is_finished(),
+        "persistence is waiting on the gate"
+    );
+
+    let transfers = tokio::time::timeout(Duration::from_secs(1), state.transfers.write())
+        .await
+        .expect("durability work must not retain the transfer queue lock");
+    assert_eq!(transfers.entries.len(), 1);
+    drop(transfers);
+
+    drop(coordinator_guard);
+    persistence
+        .await
+        .expect("transfer durability task must finish");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn wishlist_startup_loader_rehydrates_ignored_rules_after_database_reopen() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "slskr-wishlist-startup-reload-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create wishlist restart directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create wishlist restart database");
+    db.upsert_wishlist_item(&super::persistence::WishlistItemRecord {
+        id: "wish-17".to_owned(),
+        artist: "Artist".to_owned(),
+        title: "Rehydrated Album".to_owned(),
+        kind: "Audio".to_owned(),
+        filter: "flac".to_owned(),
+        enabled: true,
+        auto_download: false,
+        max_results: 10,
+        max_downloads: None,
+        last_viewed_at: None,
+        last_searched_at: None,
+        last_match_count: 0,
+        last_visible_hit_count: 0,
+        last_hidden_locked_hit_count: 0,
+        last_filtered_out_hit_count: 0,
+        last_ignored_result_hit_count: 0,
+        last_response_count: 0,
+        total_search_count: 0,
+        total_download_count: 0,
+        last_search_id: None,
+        lidarr_album_id: None,
+        lidarr_track_id: None,
+        lidarr_track_count: None,
+        lidarr_duration_seconds: None,
+        lidarr_release_disambiguation: None,
+        added_at: 1,
+    })
+    .await
+    .expect("persist wishlist item");
+    db.upsert_wishlist_ignored_result_and_searches(
+        &super::persistence::WishlistIgnoredResultRecord {
+            id: "ignored-17".to_owned(),
+            wishlist_item_id: "wish-17".to_owned(),
+            username: "PeerOne".to_owned(),
+            directory: "Remote/Album".to_owned(),
+            created_at: 2,
+        },
+        &[],
+    )
+    .await
+    .expect("persist ignored-result rule");
+    db.close_for_test().await;
+
+    let reopened = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("reopen wishlist restart database");
+    let wishlist = super::load_wishlist_store(Some(&reopened))
+        .await
+        .expect("load wishlist state through the application startup path");
+    reopened.close_for_test().await;
+
+    let (state, mut session_commands) = test_state_with_env(MapEnv::default());
+    *state.wishlist.write().await = wishlist;
+    let ignored = super::route_http_request(
+        "GET",
+        "/api/wishlist/wish-17/ignored-results",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("read rehydrated ignored-result rule");
+    assert_eq!(ignored.status, "200 OK");
+    let ignored_json = serde_json::from_str::<serde_json::Value>(&ignored.body).unwrap();
+    assert_eq!(ignored_json[0]["id"], "ignored-17");
+    assert_eq!(ignored_json[0]["directory"], "Remote/Album");
+
+    let started =
+        super::route_http_request("POST", "/api/wishlist/wish-17/search", None, "", &state)
+            .await
+            .expect("start search for rehydrated wishlist item");
+    assert_eq!(started.status, "202 Accepted");
+    let token = serde_json::from_str::<serde_json::Value>(&started.body).unwrap()["token"]
+        .as_u64()
+        .expect("search token");
+    assert!(matches!(
+        session_commands.try_recv().expect("wishlist search command"),
+        super::SessionCommand::Search {
+            token: command_token,
+            target: super::SearchDispatchTarget::Wishlist,
+            ..
+        } if u64::from(command_token) == token
+    ));
+
+    for filename in ["Remote/Album/Blocked.flac", "Remote/Other/Allowed.flac"] {
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            &format!(
+                r#"{{"token":{token},"username":"peerone","filename":"{filename}","size":1}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("ingest result after wishlist startup hydration");
+    }
+    let search = state.searches.read().await.records[0].clone();
+    assert_eq!(search.results.len(), 1);
+    assert_eq!(search.results[0].filename, "Remote/Other/Allowed.flac");
+
+    fs::remove_dir_all(root).expect("remove wishlist restart directory");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn lidarr_rejection_waits_for_search_turn_before_mutating_wishlist() {
+    let (state, _session_commands) = test_state_with_env(
+        MapEnv::default().with("SLSKR_LIDARR_BLACKLIST_REJECTED_DOWNLOADS", "true"),
+    );
+    let item = state
+        .wishlist
+        .write()
+        .await
+        .add_item("Artist".to_owned(), "Album".to_owned(), "Audio".to_owned())
+        .expect("wishlist item");
+    let transfer = {
+        let mut transfers = state.transfers.write().await;
+        transfers.create_with_details(
+            0,
+            Some("peer".to_owned()),
+            "Remote/Album/track.flac".to_owned(),
+            None,
+            Some(8),
+            None,
+            super::TransferRequestDetails {
+                wishlist_item_id: Some(item.id.clone()),
+                ..Default::default()
+            },
+        )
+    };
+    let result = serde_json::json!({
+        "rejectedCandidateCount": 1,
+        "rejectedFilenames": []
+    });
+
+    let search_turn = state.search_persistence_lock.lock().await;
+    let policy_state = Arc::clone(&state);
+    let mut policy = tokio::spawn(async move {
+        super::transfer_completion::apply_lidarr_rejection_policy(
+            &policy_state,
+            &transfer,
+            "",
+            &result,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut policy)
+        .await
+        .is_err());
+    assert!(state
+        .wishlist
+        .read()
+        .await
+        .list_ignored_results(&item.id)
+        .expect("wishlist item remains available")
+        .is_empty());
+
+    drop(search_turn);
+    policy
+        .await
+        .expect("Lidarr policy task completes")
+        .expect("apply Lidarr rejection policy");
+    assert_eq!(
+        state
+            .wishlist
+            .read()
+            .await
+            .list_ignored_results(&item.id)
+            .expect("wishlist item remains available")
+            .len(),
+        1
+    );
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn wishlist_ignore_and_search_response_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create wishlist ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/wishlist",
+        None,
+        r#"{"artist":"Artist","title":"Album","filter":"flac","enabled":true,"autoDownload":false,"maxResults":25}"#,
+        &state,
+    )
+    .await
+    .expect("create wishlist item");
+    assert_eq!(created.status, "201 Created");
+    let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("wishlist item id")
+        .to_owned();
+    let started = super::route_http_request(
+        "POST",
+        &format!("/api/wishlist/{item_id}/search"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("start wishlist search");
+    assert_eq!(started.status, "202 Accepted");
+    let started_json = serde_json::from_str::<serde_json::Value>(&started.body).unwrap();
+    let token = started_json["token"].as_u64().expect("search token");
+    let search_id = started_json["search_id"]
+        .as_str()
+        .expect("search id")
+        .to_owned();
+
+    // Queue a matching result before the ignore request. The shared turn must
+    // let the response persist first, then commit the rule and the suppressed
+    // search snapshot together.
+    let persistence_turn = state.wishlist_search_persistence_lock.lock().await;
+    let response_state = Arc::clone(&state);
+    let mut response = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            &format!(
+                r#"{{"token":{token},"username":"PeerOne","filename":"Remote/Album/Blocked.flac","size":1}}"#
+            ),
+            &response_state,
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut response)
+            .await
+            .is_err()
+    );
+
+    let ignore_state = Arc::clone(&state);
+    let ignore_path = format!("/api/wishlist/{item_id}/ignored-results");
+    let mut ignore = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            &ignore_path,
+            None,
+            r#"{"username":"PeerOne","directory":"Remote/Album"}"#,
+            &ignore_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut ignore)
+        .await
+        .is_err());
+
+    drop(persistence_turn);
+    let response = response
+        .await
+        .expect("search response task completes")
+        .expect("ingest matching search response");
+    assert_eq!(response.status, "200 OK");
+    let ignored = ignore
+        .await
+        .expect("ignored-result task completes")
+        .expect("create ignored-result rule");
+    assert_eq!(ignored.status, "201 Created");
+    assert!(state.searches.read().await.records[0].results.is_empty());
+    assert!(db
+        .list_search_results(Some(&search_id), 10, 0)
+        .await
+        .expect("read ordered persisted search results")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn wishlist_ignore_prevents_a_queued_search_snapshot_from_restoring_results() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create wishlist snapshot-order database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/wishlist",
+        None,
+        r#"{"artist":"Artist","title":"Album","filter":"flac","enabled":true,"autoDownload":false,"maxResults":25}"#,
+        &state,
+    )
+    .await
+    .expect("create wishlist item");
+    let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("wishlist item id")
+        .to_owned();
+    let started = super::route_http_request(
+        "POST",
+        &format!("/api/wishlist/{item_id}/search"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("start wishlist search");
+    let token = serde_json::from_str::<serde_json::Value>(&started.body).unwrap()["token"]
+        .as_u64()
+        .expect("search token") as u32;
+    let search_id = serde_json::from_str::<serde_json::Value>(&started.body).unwrap()["search_id"]
+        .as_str()
+        .expect("search id")
+        .to_owned();
+    super::route_http_request(
+        "POST",
+        "/api/v0/search-responses",
+        None,
+        &format!(
+            r#"{{"token":{token},"username":"PeerOne","filename":"Remote/Album/Blocked.flac","size":1}}"#
+        ),
+        &state,
+    )
+    .await
+    .expect("persist matching search result");
+
+    // Let ignore creation queue first for SQLite. A later status snapshot must
+    // re-read the committed in-memory record after the ignore transaction.
+    let persistence_turn = state.search_persistence_lock.lock().await;
+    let ignore_state = Arc::clone(&state);
+    let ignore_path = format!("/api/wishlist/{item_id}/ignored-results");
+    let mut ignore = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            &ignore_path,
+            None,
+            r#"{"username":"PeerOne","directory":"Remote/Album"}"#,
+            &ignore_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut ignore)
+        .await
+        .is_err());
+
+    let stale_snapshot = {
+        let mut searches = state.searches.write().await;
+        let (record, transitioned) = searches.complete(token).expect("complete wishlist search");
+        assert!(transitioned);
+        record
+    };
+    let snapshot_state = Arc::clone(&state);
+    let mut snapshot_write = tokio::spawn(async move {
+        super::persist_search_record(&snapshot_state, &stale_snapshot).await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut snapshot_write)
+            .await
+            .is_err()
+    );
+
+    drop(persistence_turn);
+    let ignored = ignore
+        .await
+        .expect("ignored-result task completes")
+        .expect("create ignored-result rule");
+    assert_eq!(ignored.status, "201 Created");
+    snapshot_write
+        .await
+        .expect("queued snapshot task completes")
+        .expect("persist latest search snapshot");
+
+    let current = state
+        .searches
+        .read()
+        .await
+        .get(token)
+        .expect("search remains");
+    assert_eq!(current.status, "completed");
+    assert!(current.results.is_empty());
+    assert!(db
+        .list_search_results(Some(&search_id), 10, 0)
+        .await
+        .expect("read suppressed persisted results")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn wishlist_item_update_and_delete_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create wishlist item ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/wishlist",
+        None,
+        r#"{"artist":"Artist","title":"Original","filter":"flac","enabled":true,"autoDownload":false,"maxResults":25}"#,
+        &state,
+    )
+    .await
+    .expect("create wishlist item");
+    assert_eq!(created.status, "201 Created");
+    let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("wishlist item id")
+        .to_owned();
+
+    let persistence_turn = state.wishlist_search_persistence_lock.lock().await;
+    let update_state = Arc::clone(&state);
+    let update_path = format!("/api/wishlist/{item_id}");
+    let mut update = tokio::spawn(async move {
+        super::route_http_request(
+            "PUT",
+            &update_path,
+            None,
+            r#"{"artist":"Artist","title":"Updated","filter":"flac"}"#,
+            &update_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut update)
+        .await
+        .is_err());
+
+    let delete_state = Arc::clone(&state);
+    let delete_path = format!("/api/wishlist/{item_id}");
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request("DELETE", &delete_path, None, "", &delete_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let readable =
+        super::route_http_request("GET", &format!("/api/wishlist/{item_id}"), None, "", &state)
+            .await
+            .expect("wishlist read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["title"],
+        "Original"
+    );
+
+    drop(persistence_turn);
+    let updated = update
+        .await
+        .expect("wishlist update completes")
+        .expect("update wishlist item");
+    assert_eq!(updated.status, "200 OK");
+    let deleted = delete
+        .await
+        .expect("wishlist delete completes")
+        .expect("delete wishlist item");
+    assert_eq!(deleted.status, "200 OK");
+    assert!(state.wishlist.read().await.get_item(&item_id).is_none());
+    assert!(!db
+        .list_wishlist_items(10, 0)
+        .await
+        .expect("read final wishlist rows")
+        .iter()
+        .any(|item| item.id == item_id));
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn library_snapshot_update_and_delete_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create library item ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/v0/library/items",
+        None,
+        r#"{"artist":"Artist","title":"Album","kind":""}"#,
+        &state,
+    )
+    .await
+    .expect("create library item with a fixable kind");
+    assert_eq!(created.status, "201 Created");
+    let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("library item id")
+        .to_owned();
+
+    let persistence_turn = state.library_persistence_lock.lock().await;
+    let fix_state = Arc::clone(&state);
+    let mut fix = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/library/health/issues/fix",
+            None,
+            "{}",
+            &fix_state,
+        )
+        .await
+    });
+    if let Ok(result) = tokio::time::timeout(Duration::from_millis(10), &mut fix).await {
+        let response = result
+            .expect("library remediation request does not panic")
+            .expect("library remediation route handles the request");
+        panic!(
+            "library remediation bypassed its persistence turn: {} {}",
+            response.status, response.body
+        );
+    }
+
+    let delete_state = Arc::clone(&state);
+    let delete_path = format!("/api/v0/library/items/{item_id}");
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request("DELETE", &delete_path, None, "", &delete_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request(
+        "GET",
+        &format!("/api/v0/library/items/{item_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("library read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["kind"],
+        ""
+    );
+
+    drop(persistence_turn);
+    let fixed = fix
+        .await
+        .expect("library remediation completes")
+        .expect("fix library item");
+    assert_eq!(fixed.status, "200 OK");
+    let deleted = delete
+        .await
+        .expect("library delete completes")
+        .expect("delete library item");
+    assert_eq!(deleted.status, "200 OK");
+    assert!(state.library.read().await.get(&item_id).is_none());
+    assert!(!db
+        .list_library_items(10, 0)
+        .await
+        .expect("read final library rows")
+        .iter()
+        .any(|item| item.id == item_id));
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn contact_update_and_delete_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create contact ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/contacts",
+        None,
+        r#"{"username":"friend"}"#,
+        &state,
+    )
+    .await
+    .expect("create contact");
+    assert_eq!(created.status, "201 Created");
+    let contact_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("contact id")
+        .to_owned();
+
+    let persistence_turn = state.contact_persistence_lock.lock().await;
+    let update_state = Arc::clone(&state);
+    let update_path = format!("/api/contacts/{contact_id}");
+    let mut update = tokio::spawn(async move {
+        super::route_http_request(
+            "PUT",
+            &update_path,
+            None,
+            r#"{"username":"updated","online":true}"#,
+            &update_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut update)
+        .await
+        .is_err());
+
+    let delete_state = Arc::clone(&state);
+    let delete_path = format!("/api/contacts/{contact_id}");
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request("DELETE", &delete_path, None, "", &delete_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request(
+        "GET",
+        &format!("/api/contacts/{contact_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("contact read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["username"],
+        "friend"
+    );
+
+    drop(persistence_turn);
+    let updated = update
+        .await
+        .expect("contact update completes")
+        .expect("update contact");
+    assert_eq!(updated.status, "200 OK");
+    let deleted = delete
+        .await
+        .expect("contact delete completes")
+        .expect("delete contact");
+    assert_eq!(deleted.status, "200 OK");
+    assert!(state.contacts.read().await.get(&contact_id).is_none());
+    assert!(!db
+        .list_contacts(10, 0)
+        .await
+        .expect("read final contact rows")
+        .iter()
+        .any(|contact| contact.id == contact_id));
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn user_note_update_and_delete_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create user-note ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/users/notes",
+        None,
+        r#"{"username":"friend","note":"Original"}"#,
+        &state,
+    )
+    .await
+    .expect("create user note");
+    assert_eq!(created.status, "201 Created");
+    let note_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("user-note id")
+        .to_owned();
+
+    let persistence_turn = state.user_note_persistence_lock.lock().await;
+    let update_state = Arc::clone(&state);
+    let update_path = format!("/api/users/notes/{note_id}");
+    let mut update = tokio::spawn(async move {
+        super::route_http_request(
+            "PUT",
+            &update_path,
+            None,
+            r#"{"note":"Updated"}"#,
+            &update_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut update)
+        .await
+        .is_err());
+
+    let delete_state = Arc::clone(&state);
+    let delete_path = format!("/api/users/notes/{note_id}");
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request("DELETE", &delete_path, None, "", &delete_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request(
+        "GET",
+        &format!("/api/users/notes/{note_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("user-note read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["note"],
+        "Original"
+    );
+
+    drop(persistence_turn);
+    let updated = update
+        .await
+        .expect("user-note update completes")
+        .expect("update user note");
+    assert_eq!(updated.status, "200 OK");
+    let deleted = delete
+        .await
+        .expect("user-note delete completes")
+        .expect("delete user note");
+    assert_eq!(deleted.status, "200 OK");
+    assert!(state.user_notes.read().await.get(&note_id).is_none());
+    assert!(!db
+        .list_user_notes(10, 0)
+        .await
+        .expect("read final user-note rows")
+        .iter()
+        .any(|note| note.id == note_id));
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn interest_mutations_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create interest ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+
+    let persistence_turn = state.interest_persistence_lock.lock().await;
+    let add_state = Arc::clone(&state);
+    let mut add = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/soulseek/interests",
+            None,
+            r#"{"name":"Jazz"}"#,
+            &add_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut add)
+        .await
+        .is_err());
+
+    let delete_state = Arc::clone(&state);
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request(
+            "DELETE",
+            "/api/soulseek/interests/Jazz",
+            None,
+            "",
+            &delete_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let hate_state = Arc::clone(&state);
+    let mut hate = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/soulseek/hated-interests",
+            None,
+            r#"{"name":"Noise"}"#,
+            &hate_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut hate)
+        .await
+        .is_err());
+
+    let liked_read = super::route_http_request("GET", "/api/soulseek/interests", None, "", &state)
+        .await
+        .expect("liked-interest read remains available while writes wait");
+    assert_eq!(liked_read.status, "200 OK");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&liked_read.body).unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let hated_read =
+        super::route_http_request("GET", "/api/soulseek/hated-interests", None, "", &state)
+            .await
+            .expect("hated-interest read remains available while writes wait");
+    assert_eq!(hated_read.status, "200 OK");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&hated_read.body).unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    drop(persistence_turn);
+    assert_eq!(
+        add.await
+            .expect("interest creation completes")
+            .expect("create liked interest")
+            .status,
+        "201 Created"
+    );
+    assert_eq!(
+        delete
+            .await
+            .expect("interest deletion completes")
+            .expect("delete liked interest")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        hate.await
+            .expect("hated-interest creation completes")
+            .expect("create hated interest")
+            .status,
+        "201 Created"
+    );
+
+    let interests = state.interests.read().await;
+    assert!(interests.liked.is_empty());
+    assert_eq!(interests.hated.len(), 1);
+    assert_eq!(interests.hated[0].name, "Noise");
+    drop(interests);
+    let persisted = db
+        .list_interests(10, 0)
+        .await
+        .expect("read final interest rows");
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].kind, "hated");
+    assert_eq!(persisted[0].name, "Noise");
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn mesh_interest_mutations_roll_back_when_persistence_fails() {
+    let post_db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create mesh-interest creation database");
+    let (post_state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        post_db.clone(),
+    );
+    post_db.close_for_test().await;
+    let headers = super::RequestSecurityHeaders::default();
+    let created = super::extended_controller_mutation_response(
+        "POST",
+        "/api/soulseek/mesh-rendezvous/interest",
+        None,
+        "",
+        &post_state,
+        true,
+        &headers,
+    )
+    .await;
+    assert_eq!(created.status, "503 Service Unavailable");
+    assert!(post_state.interests.read().await.liked.is_empty());
+
+    let delete_db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create mesh-interest deletion database");
+    let (delete_state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        delete_db.clone(),
+    );
+    delete_state
+        .interests
+        .write()
+        .await
+        .add_liked(super::MESH_RENDEZVOUS_INTEREST_TAG.to_owned())
+        .expect("seed mesh interest");
+    delete_db.close_for_test().await;
+    let deleted = super::extended_controller_mutation_response(
+        "DELETE",
+        "/api/soulseek/mesh-rendezvous/interest",
+        None,
+        "",
+        &delete_state,
+        true,
+        &headers,
+    )
+    .await;
+    assert_eq!(deleted.status, "503 Service Unavailable");
+    let interests = delete_state.interests.read().await;
+    assert_eq!(interests.liked.len(), 1);
+    assert_eq!(interests.liked[0].name, super::MESH_RENDEZVOUS_INTEREST_TAG);
+}
+
+#[tokio::test]
+async fn now_playing_update_and_clear_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create now-playing ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/nowplaying",
+        None,
+        r#"{"username":"friend","artist":"Artist","title":"Original"}"#,
+        &state,
+    )
+    .await
+    .expect("create now-playing record");
+    assert_eq!(created.status, "200 OK");
+
+    let persistence_turn = state.now_playing_persistence_lock.lock().await;
+    let update_state = Arc::clone(&state);
+    let mut update = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/nowplaying",
+            None,
+            r#"{"username":"friend","artist":"Artist","title":"Updated"}"#,
+            &update_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut update)
+        .await
+        .is_err());
+
+    let clear_state = Arc::clone(&state);
+    let mut clear = tokio::spawn(async move {
+        super::route_http_request("DELETE", "/api/nowplaying", None, "", &clear_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut clear)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", "/api/nowplaying", None, "", &state)
+        .await
+        .expect("now-playing read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    let readable_json = serde_json::from_str::<serde_json::Value>(&readable.body).unwrap();
+    let records = readable_json["now_playing"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["title"], "Original");
+
+    drop(persistence_turn);
+    assert_eq!(
+        update
+            .await
+            .expect("now-playing update completes")
+            .expect("update now-playing record")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        clear
+            .await
+            .expect("now-playing clear completes")
+            .expect("clear now-playing records")
+            .status,
+        "200 OK"
+    );
+    assert!(state.now_playing.read().await.records.is_empty());
+    assert!(db
+        .list_now_playing(10, 0)
+        .await
+        .expect("read final now-playing rows")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn webhook_update_and_delete_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create webhook ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let created = super::route_http_request(
+        "POST",
+        "/api/webhooks",
+        None,
+        r#"{"url":"https://example.com/persistence-order","events":"search.created"}"#,
+        &state,
+    )
+    .await
+    .expect("create webhook");
+    assert_eq!(created.status, "201 Created");
+    let webhook_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("webhook id")
+        .to_owned();
+
+    let persistence_turn = state.webhook_persistence_lock.lock().await;
+    let patch_state = Arc::clone(&state);
+    let patch_path = format!("/api/webhooks/{webhook_id}");
+    let mut patch = tokio::spawn(async move {
+        super::route_http_request(
+            "PATCH",
+            &patch_path,
+            None,
+            r#"{"active":false}"#,
+            &patch_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut patch)
+        .await
+        .is_err());
+
+    let delete_state = Arc::clone(&state);
+    let delete_path = format!("/api/webhooks/{webhook_id}");
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request("DELETE", &delete_path, None, "", &delete_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", "/api/webhooks", None, "", &state)
+        .await
+        .expect("webhook read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    let webhooks_json = serde_json::from_str::<serde_json::Value>(&readable.body).unwrap();
+    assert_eq!(webhooks_json["webhooks"][0]["active"], true);
+
+    drop(persistence_turn);
+    assert_eq!(
+        patch
+            .await
+            .expect("webhook update completes")
+            .expect("patch webhook")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        delete
+            .await
+            .expect("webhook deletion completes")
+            .expect("delete webhook")
+            .status,
+        "200 OK"
+    );
+    assert!(state.webhooks.read().await.get(&webhook_id).is_none());
+    assert!(db
+        .list_webhooks()
+        .await
+        .expect("read final webhook rows")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn security_ban_routes_share_one_persistence_order_across_dispatchers() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create security-ban ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+
+    let persistence_turn = state.security_ban_persistence_lock.lock().await;
+    let ban_state = Arc::clone(&state);
+    let mut ban = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/security/bans/username",
+            None,
+            r#"{"username":"persistence-order-peer"}"#,
+            &ban_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut ban)
+        .await
+        .is_err());
+
+    let unban_state = Arc::clone(&state);
+    let mut unban = tokio::spawn(async move {
+        super::route_http_request(
+            "DELETE",
+            "/api/overlay/blocklist/username/persistence-order-peer",
+            None,
+            "",
+            &unban_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut unban)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", "/api/security/bans", None, "", &state)
+        .await
+        .expect("security-ban read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["bans"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    drop(persistence_turn);
+    assert_eq!(
+        ban.await
+            .expect("security ban completes")
+            .expect("post security ban")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        unban
+            .await
+            .expect("security unban completes")
+            .expect("delete overlay blocklist entry")
+            .status,
+        "200 OK"
+    );
+    assert!(state.security.read().await.bans.is_empty());
+    assert!(db
+        .list_security_bans()
+        .await
+        .expect("read final security-ban rows")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn overlay_blocklist_mutations_roll_back_when_persistence_fails() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create overlay blocklist rollback database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    db.close_for_test().await;
+
+    let created = super::route_http_request(
+        "POST",
+        "/api/overlay/blocklist/username",
+        None,
+        r#"{"value":"must-not-persist"}"#,
+        &state,
+    )
+    .await
+    .expect("failed overlay blocklist ban response");
+    assert_eq!(created.status, "503 Service Unavailable");
+    assert!(state.security.read().await.bans.is_empty());
+
+    state
+        .security
+        .write()
+        .await
+        .ban("username", "must-remain".to_owned())
+        .expect("seed overlay blocklist ban");
+    let deleted = super::route_http_request(
+        "DELETE",
+        "/api/overlay/blocklist/username/must-remain",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("failed overlay blocklist unban response");
+    assert_eq!(deleted.status, "503 Service Unavailable");
+    let security = state.security.read().await;
+    assert_eq!(security.bans.len(), 1);
+    assert_eq!(security.bans[0].value, "must-remain");
+}
+
+#[tokio::test]
+async fn message_create_and_conversation_delete_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create message ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+
+    let persistence_turn = state.message_persistence_lock.lock().await;
+    let create_state = Arc::clone(&state);
+    let mut create = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/conversations/friend",
+            None,
+            r#"{"message":"queued message"}"#,
+            &create_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut create)
+        .await
+        .is_err());
+
+    let delete_state = Arc::clone(&state);
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request(
+            "DELETE",
+            "/api/conversations/friend",
+            None,
+            "",
+            &delete_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", "/api/conversations/friend", None, "", &state)
+        .await
+        .expect("conversation read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["messages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    drop(persistence_turn);
+    assert_eq!(
+        create
+            .await
+            .expect("conversation message creation completes")
+            .expect("create conversation message")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        delete
+            .await
+            .expect("conversation deletion completes")
+            .expect("delete conversation")
+            .status,
+        "200 OK"
+    );
+    assert!(state.messages.read().await.records.is_empty());
+    assert!(db
+        .list_messages(10, 0)
+        .await
+        .expect("read final message rows")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn room_subscription_join_and_leave_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create room subscription ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+
+    let persistence_turn = state.room_persistence_lock.lock().await;
+    let join_state = Arc::clone(&state);
+    let mut join = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/rooms/joined",
+            None,
+            r#"{"room":"music"}"#,
+            &join_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut join)
+        .await
+        .is_err());
+
+    let leave_state = Arc::clone(&state);
+    let mut leave = tokio::spawn(async move {
+        super::route_http_request("DELETE", "/api/rooms/joined/music", None, "", &leave_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut leave)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", "/api/rooms/joined", None, "", &state)
+        .await
+        .expect("room read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert!(!readable.body.contains("music"));
+
+    drop(persistence_turn);
+    assert_eq!(
+        join.await
+            .expect("room join completes")
+            .expect("join room")
+            .status,
+        "201 Created"
+    );
+    assert_eq!(
+        leave
+            .await
+            .expect("room leave completes")
+            .expect("leave room")
+            .status,
+        "200 OK"
+    );
+    assert!(!state
+        .rooms
+        .read()
+        .await
+        .records
+        .iter()
+        .any(|room| room.name == "music" && room.joined));
+    assert!(db
+        .list_subscribed_rooms()
+        .await
+        .expect("read final subscribed rooms")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn browse_request_and_cancel_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create browse ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    state.session.write().await.state = "connected";
+
+    let persistence_turn = state.browse_persistence_lock.lock().await;
+    let request_state = Arc::clone(&state);
+    let mut request = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/request",
+            None,
+            "",
+            &request_state,
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut request)
+            .await
+            .is_err()
+    );
+
+    let cancel_state = Arc::clone(&state);
+    let mut cancel = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/cancel",
+            None,
+            r#"{"reason":"cancelled"}"#,
+            &cancel_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut cancel)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", "/api/v0/browse", None, "", &state)
+        .await
+        .expect("browse read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&readable.body).unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    drop(persistence_turn);
+    assert_eq!(
+        request
+            .await
+            .expect("browse request completes")
+            .expect("request browse")
+            .status,
+        "202 Accepted"
+    );
+    assert_eq!(
+        cancel
+            .await
+            .expect("browse cancellation completes")
+            .expect("cancel browse")
+            .status,
+        "200 OK"
+    );
+
+    assert_eq!(
+        state.browse.read().await.get("friend").unwrap().status,
+        "cancelled"
+    );
+    let persisted = db
+        .list_browse_records(10, 0)
+        .await
+        .expect("read final browse rows");
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].status, "cancelled");
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn user_watch_and_unwatch_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create user projection ordering database");
+    let (state, mut session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let record = state
+        .users
+        .write()
+        .await
+        .watch("friend".to_owned())
+        .expect("seed watched user");
+    super::user_store::persist_user_projection(&state, &record)
+        .await
+        .expect("persist watched user");
+
+    let persistence_turn = state.user_persistence_lock.lock().await;
+    let watch_state = Arc::clone(&state);
+    let mut watch = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/users/watch",
+            None,
+            r#"{"username":"friend"}"#,
+            &watch_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut watch)
+        .await
+        .is_err());
+
+    let unwatch_state = Arc::clone(&state);
+    let mut unwatch = tokio::spawn(async move {
+        super::route_http_request(
+            "DELETE",
+            "/api/v0/users/friend/watch",
+            None,
+            "",
+            &unwatch_state,
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut unwatch)
+            .await
+            .is_err()
+    );
+
+    let readable = super::route_http_request("GET", "/api/v0/users", None, "", &state)
+        .await
+        .expect("user read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    assert!(readable.body.contains("\"watched\":true"));
+
+    drop(persistence_turn);
+    assert_eq!(
+        watch
+            .await
+            .expect("user watch completes")
+            .expect("watch user")
+            .status,
+        "201 Created"
+    );
+    assert_eq!(
+        unwatch
+            .await
+            .expect("user unwatch completes")
+            .expect("unwatch user")
+            .status,
+        "200 OK"
+    );
+    assert_eq!(
+        session_commands.try_recv().expect("watch session command"),
+        super::SessionCommand::WatchUser("friend".to_owned())
+    );
+    assert_eq!(
+        session_commands
+            .try_recv()
+            .expect("unwatch session command"),
+        super::SessionCommand::UnwatchUser("friend".to_owned())
+    );
+    assert!(!state.users.read().await.records[0].watched);
+    let persisted = db
+        .list_user_projections(10, 0)
+        .await
+        .expect("read final user projection");
+    assert_eq!(persisted.len(), 1);
+    assert!(!persisted[0].watched);
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn event_api_and_background_writes_share_one_persistence_order() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create event ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+
+    let persistence_turn = state.event_persistence_lock.lock().await;
+    let api_state = Arc::clone(&state);
+    let mut api_event = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            "/api/v0/events/Noop",
+            None,
+            r#""queued""#,
+            &api_state,
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut api_event)
+            .await
+            .is_err()
+    );
+
+    let background_state = Arc::clone(&state);
+    let mut background_event = tokio::spawn(async move {
+        super::record_event(&background_state, "background.event", "resource", None).await;
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut background_event)
+            .await
+            .is_err()
+    );
+
+    let readable = super::route_http_request("GET", "/api/v0/events/records", None, "", &state)
+        .await
+        .expect("event read remains available while writes wait");
+    assert_eq!(readable.status, "200 OK");
+    let readable_json = serde_json::from_str::<serde_json::Value>(&readable.body).unwrap();
+    assert_eq!(readable_json["count"], 0);
+    assert!(readable_json["entries"].as_array().unwrap().is_empty());
+
+    drop(persistence_turn);
+    assert_eq!(
+        api_event
+            .await
+            .expect("API event completes")
+            .expect("inject event")
+            .status,
+        "201 Created"
+    );
+    background_event
+        .await
+        .expect("background event persistence completes");
+
+    let memory = state.events.read().await;
+    assert_eq!(memory.records.len(), 2);
+    assert_eq!(memory.records[0].id, 1);
+    assert_eq!(memory.records[0].kind, "Noop");
+    assert_eq!(memory.records[1].id, 2);
+    assert_eq!(memory.records[1].kind, "background.event");
+    drop(memory);
+    let persisted = db.list_events(10, 0).await.expect("read final event rows");
+    assert_eq!(persisted.len(), 2);
+    assert_eq!(persisted[0].id, 1);
+    assert_eq!(persisted[0].kind, "Noop");
+    assert_eq!(persisted[1].id, 2);
+    assert_eq!(persisted[1].kind, "background.event");
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn oauth_state_consumption_is_ordered_and_keeps_reads_available() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create OAuth state ordering database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let token = "queued-oauth-state".to_owned();
+    let now = super::unix_timestamp();
+    let record = super::OAuthStateRecord {
+        provider: "spotify".to_owned(),
+        redirect_uri: "http://localhost/callback".to_owned(),
+        code_verifier: Some("test-verifier".to_owned()),
+        created_at: now,
+        expires_at: now.saturating_add(600),
+    };
+    state
+        .oauth_states
+        .write()
+        .await
+        .records
+        .insert(token.clone(), record.clone());
+    super::oauth_state::persist_oauth_state_checked(&state, &token, &record)
+        .await
+        .expect("persist OAuth state");
+
+    let persistence_turn = state.oauth_persistence_lock.lock().await;
+    let first_state = Arc::clone(&state);
+    let mut first = tokio::spawn(async move {
+        super::oauth_state::consume_oauth_state(&first_state, "spotify", &token).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut first)
+        .await
+        .is_err());
+
+    let second_state = Arc::clone(&state);
+    let token = "queued-oauth-state".to_owned();
+    let mut second = tokio::spawn(async move {
+        super::oauth_state::consume_oauth_state(&second_state, "spotify", &token).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut second)
+        .await
+        .is_err());
+
+    let readable = state.oauth_states.read().await;
+    assert!(readable.records.contains_key("queued-oauth-state"));
+    drop(readable);
+    drop(persistence_turn);
+
+    assert_eq!(
+        first
+            .await
+            .expect("first OAuth callback completes")
+            .expect("consume persisted OAuth state"),
+        Some(record)
+    );
+    assert!(second
+        .await
+        .expect("second OAuth callback completes")
+        .expect("inspect already consumed OAuth state")
+        .is_none());
+    assert!(!state
+        .oauth_states
+        .read()
+        .await
+        .records
+        .contains_key("queued-oauth-state"));
+    assert!(db
+        .list_oauth_states(i64::try_from(now).unwrap_or(i64::MAX), 10, 0)
+        .await
+        .expect("read final persisted OAuth state")
+        .is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn compatibility_message_ack_rolls_back_when_persistence_fails() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create compatibility message database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let record =
+        state
+            .messages
+            .write()
+            .await
+            .add("friend".to_owned(), "inbound", "hello".to_owned());
+    let path = format!("/api/conversations/friend/{}", record.id);
+    db.close_for_test().await;
+
+    let response = super::extended_controller_mutation_response(
+        "PUT",
+        &path,
+        None,
+        "",
+        &state,
+        true,
+        &super::RequestSecurityHeaders::default(),
+    )
+    .await;
+    assert_eq!(response.status, "503 Service Unavailable");
+    assert!(!state.messages.read().await.records[0].acknowledged);
+}
+
+#[tokio::test]
+async fn compatibility_message_ack_wrong_username_does_not_mutate_message() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create compatibility message database");
+    let (state, _session_commands) = test_state_with_db(
+        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        db.clone(),
+    );
+    let record =
+        state
+            .messages
+            .write()
+            .await
+            .add("friend".to_owned(), "inbound", "hello".to_owned());
+    let path = format!("/api/conversations/stranger/{}", record.id);
+
+    let response = super::extended_controller_mutation_response(
+        "PUT",
+        &path,
+        None,
+        "",
+        &state,
+        true,
+        &super::RequestSecurityHeaders::default(),
+    )
+    .await;
+
+    assert_eq!(response.status, "404 Not Found");
+    assert!(!state.messages.read().await.records[0].acknowledged);
+}
+
+#[tokio::test]
+async fn managed_shutdown_persists_final_distributed_snapshot_after_worker_stops() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "slskr-distributed-shutdown-flush-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create distributed shutdown directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create distributed shutdown database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+
+    let (worker_started_tx, worker_started_rx) = tokio::sync::oneshot::channel();
+    let (worker_stopped_tx, worker_stopped_rx) = tokio::sync::oneshot::channel::<()>();
+    state.spawn_managed_task(async move {
+        let mut worker_stopped_tx = Some(worker_stopped_tx);
+        worker_started_tx
+            .send(())
+            .expect("observe managed shutdown worker startup");
+        std::future::pending::<()>().await;
+        drop(worker_stopped_tx.take());
+    });
+    worker_started_rx
+        .await
+        .expect("managed shutdown worker starts before shutdown");
+
+    // Hold the runtime lock while shutdown aborts and joins managed workers.
+    // The final snapshot read must wait for this lock and include the latest
+    // revision published while shutdown is in progress.
+    let mut runtime = state.distributed_network.write().await;
+    let shutdown_state = Arc::clone(&state);
+    let shutdown = tokio::spawn(async move { shutdown_state.shutdown_managed_tasks().await });
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), worker_stopped_rx)
+            .await
+            .expect("shutdown drops the managed worker")
+            .is_err()
+    );
+    runtime.branch_level = 9;
+    runtime.branch_root = "shutdown-root".to_owned();
+    runtime.parent = Some("shutdown-parent".to_owned());
+    runtime.child_depths = [("shutdown-child".to_owned(), 7)].into_iter().collect();
+    runtime.persistence_revision = runtime.persistence_revision.saturating_add(1);
+    let snapshot = runtime.persistence_snapshot();
+    state
+        .distributed_persistence_snapshots
+        .send_replace(snapshot);
+    drop(runtime);
+
+    shutdown
+        .await
+        .expect("managed shutdown and final persistence join");
+    let (tree_state, children) = db
+        .load_distributed_state()
+        .await
+        .expect("load final distributed shutdown snapshot");
+    assert_eq!(
+        tree_state,
+        Some((
+            9,
+            "shutdown-root".to_owned(),
+            Some("shutdown-parent".to_owned())
+        ))
+    );
+    assert_eq!(children, vec![("shutdown-child".to_owned(), 7)]);
+
+    db.close_for_test().await;
+    fs::remove_dir_all(root).expect("remove distributed shutdown directory");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn pod_mutations_leave_pod_reads_available_while_waiting_for_channel_store() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    for pod_id in ["pod-lock-put", "pod-lock-delete"] {
+        let create = serde_json::json!({
+            "pod": {
+                "podId": pod_id,
+                "name": "Before",
+                "isPublic": true,
+                "channels": [{"channelId": "general", "kind": 0, "name": "General"}]
+            }
+        })
+        .to_string();
+        let response = super::route_http_request("POST", "/api/v0/pods", None, &create, &state)
+            .await
+            .expect("create pod for lock-order regression");
+        assert_eq!(response.status, "201 Created");
+    }
+
+    let update_path = "/api/v0/pods/pod-lock-put";
+    let update_body = serde_json::json!({
+        "pod": {
+            "podId": "pod-lock-put",
+            "name": "After",
+            "isPublic": true,
+            "channels": [{"channelId": "general", "kind": 0, "name": "General"}]
+        }
+    })
+    .to_string();
+    let channel_guard = state.pod_channels.write().await;
+    let update = super::route_http_request("PUT", update_path, None, &update_body, &state);
+    tokio::pin!(update);
+    tokio::select! {
+        biased;
+        _ = &mut update => panic!("pod update should wait for the held channel store"),
+        _ = tokio::task::yield_now() => {}
+    }
+    let readable = tokio::time::timeout(
+        Duration::from_secs(1),
+        super::route_http_request("GET", update_path, None, "", &state),
+    )
+    .await
+    .expect("pod read should not wait behind a channel-store waiter")
+    .expect("read pod during update wait");
+    assert_eq!(readable.status, "200 OK");
+    drop(channel_guard);
+    let updated = tokio::time::timeout(Duration::from_secs(1), &mut update)
+        .await
+        .expect("pod update should finish after the channel store is released")
+        .expect("update pod after channel store is released");
+    assert_eq!(updated.status, "200 OK");
+
+    let delete_path = "/api/v0/pods/pod-lock-delete";
+    let channel_guard = state.pod_channels.write().await;
+    let delete = super::route_http_request("DELETE", delete_path, None, "", &state);
+    tokio::pin!(delete);
+    tokio::select! {
+        biased;
+        _ = &mut delete => panic!("pod delete should wait for the held channel store"),
+        _ = tokio::task::yield_now() => {}
+    }
+    let readable = tokio::time::timeout(
+        Duration::from_secs(1),
+        super::route_http_request("GET", delete_path, None, "", &state),
+    )
+    .await
+    .expect("pod read should not wait behind a channel-store waiter")
+    .expect("read pod during delete wait");
+    assert_eq!(readable.status, "200 OK");
+    drop(channel_guard);
+    let deleted = tokio::time::timeout(Duration::from_secs(1), &mut delete)
+        .await
+        .expect("pod delete should finish after the channel store is released")
+        .expect("delete pod after channel store is released");
+    assert_eq!(deleted.status, "204 No Content");
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn pod_membership_acceptance_keeps_pending_reads_available_while_room_store_waits() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    state
+        .rooms
+        .write()
+        .await
+        .join("pod:workflow-lock".to_owned())
+        .expect("create room for membership workflow lock regression");
+    state.pod_membership_workflow.write().await.set_role(
+        "pod:workflow-lock",
+        "owner-peer",
+        "owner".to_owned(),
+    );
+
+    let join = super::route_http_request(
+        "POST",
+        "/api/v0/podcore/membership/join",
+        None,
+        r#"{"podId":"pod:workflow-lock","peerId":"applicant"}"#,
+        &state,
+    )
+    .await
+    .expect("create pending join request");
+    assert_eq!(join.status, "200 OK");
+
+    let room_guard = state.rooms.write().await;
+    let acceptance = super::route_http_request(
+        "POST",
+        "/api/v0/podcore/membership/join/accept",
+        None,
+        r#"{"podId":"pod:workflow-lock","peerId":"applicant","acceptedRole":"moderator","acceptorPeerId":"owner-peer"}"#,
+        &state,
+    );
+    tokio::pin!(acceptance);
+    tokio::select! {
+        biased;
+        _ = &mut acceptance => panic!("membership acceptance should wait for the held room store"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    let pending = tokio::time::timeout(
+        Duration::from_secs(1),
+        super::route_http_request(
+            "GET",
+            "/api/v0/podcore/membership/join/pending/pod%3Aworkflow-lock",
+            None,
+            "",
+            &state,
+        ),
+    )
+    .await
+    .expect("pending request read must remain available while acceptance waits")
+    .expect("read pending join request");
+    assert_eq!(pending.status, "200 OK");
+    assert!(pending.body.contains("applicant"));
+
+    drop(room_guard);
+    let accepted = tokio::time::timeout(Duration::from_secs(1), &mut acceptance)
+        .await
+        .expect("acceptance should finish once the room store is released")
+        .expect("accept pending join request");
+    assert_eq!(accepted.status, "200 OK");
+    assert!(state
+        .pod_membership_workflow
+        .read()
+        .await
+        .pending_joins("pod:workflow-lock")
+        .is_empty());
+    assert!(state
+        .rooms
+        .read()
+        .await
+        .records
+        .iter()
+        .find(|room| room.name == "pod:workflow-lock")
+        .is_some_and(|room| room.members.iter().any(|member| member == "applicant")));
+
+    let second_join = super::route_http_request(
+        "POST",
+        "/api/v0/podcore/membership/join",
+        None,
+        r#"{"podId":"pod:workflow-lock","peerId":"second-applicant"}"#,
+        &state,
+    )
+    .await
+    .expect("create second pending join request");
+    assert_eq!(second_join.status, "200 OK");
+    state.pod_membership_workflow.write().await.set_role(
+        "pod:workflow-lock",
+        "owner-peer",
+        "owner".to_owned(),
+    );
+
+    let room_guard = state.rooms.write().await;
+    let revoked_acceptance = super::route_http_request(
+        "POST",
+        "/api/v0/podcore/membership/join/accept",
+        None,
+        r#"{"podId":"pod:workflow-lock","peerId":"second-applicant","acceptedRole":"moderator","acceptorPeerId":"owner-peer"}"#,
+        &state,
+    );
+    tokio::pin!(revoked_acceptance);
+    tokio::select! {
+        biased;
+        _ = &mut revoked_acceptance => panic!("membership acceptance should wait for the held room store"),
+        _ = tokio::task::yield_now() => {}
+    }
+    state
+        .pod_membership_workflow
+        .write()
+        .await
+        .remove_role("pod:workflow-lock", "owner-peer");
+    drop(room_guard);
+    let rejected = tokio::time::timeout(Duration::from_secs(1), &mut revoked_acceptance)
+        .await
+        .expect("revoked acceptance should finish after the room store is released")
+        .expect("revoked acceptance response");
+    assert_eq!(rejected.status, "400 Bad Request");
+    assert_eq!(
+        state
+            .pod_membership_workflow
+            .read()
+            .await
+            .pending_joins("pod:workflow-lock")
+            .len(),
+        1
+    );
+    assert!(!state
+        .rooms
+        .read()
+        .await
+        .records
+        .iter()
+        .find(|room| room.name == "pod:workflow-lock")
+        .is_some_and(|room| room
+            .members
+            .iter()
+            .any(|member| member == "second-applicant")));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn pod_channel_append_queued_after_channel_removal_is_rejected() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let create = serde_json::json!({
+        "pod": {
+            "podId": "pod:append-race",
+            "name": "Before",
+            "isPublic": true,
+            "channels": [
+                {"channelId": "general", "kind": 0, "name": "General"},
+                {"channelId": "removed", "kind": 1, "name": "Removed"}
+            ]
+        }
+    })
+    .to_string();
+    let created = super::route_http_request("POST", "/api/v0/pods", None, &create, &state)
+        .await
+        .expect("create pod for queued append regression");
+    assert_eq!(created.status, "201 Created");
+
+    let channel_guard = state.pod_channels.write().await;
+    let update = serde_json::json!({
+        "pod": {
+            "podId": "pod:append-race",
+            "name": "After",
+            "isPublic": true,
+            "channels": [{"channelId": "general", "kind": 0, "name": "General"}]
+        }
+    })
+    .to_string();
+    let update =
+        super::route_http_request("PUT", "/api/v0/pods/pod:append-race", None, &update, &state);
+    tokio::pin!(update);
+    tokio::select! {
+        biased;
+        _ = &mut update => panic!("pod update should wait for the held channel store"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    let append_body = serde_json::json!({
+        "senderPeerId": "tester",
+        "body": "must not outlive the removed channel"
+    })
+    .to_string();
+    let append = super::route_http_request(
+        "POST",
+        "/api/v0/pods/pod:append-race/channels/removed/messages",
+        None,
+        &append_body,
+        &state,
+    );
+    tokio::pin!(append);
+    tokio::select! {
+        biased;
+        _ = &mut append => panic!("pod message append should queue behind the update"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    drop(channel_guard);
+    let updated = tokio::time::timeout(Duration::from_secs(1), &mut update)
+        .await
+        .expect("pod update should complete before queued append")
+        .expect("update pod after channel store is released");
+    assert_eq!(updated.status, "200 OK");
+    let appended = tokio::time::timeout(Duration::from_secs(1), &mut append)
+        .await
+        .expect("queued append should finish after the update")
+        .expect("append route should return a response");
+    assert_eq!(appended.status, "404 Not Found");
+    assert!(state
+        .pod_channels
+        .read()
+        .await
+        .list("pod:append-race", "removed", None)
+        .is_empty());
+    let reloaded = super::pod_channels::PodChannelStore::load(&state.config.state_dir)
+        .expect("reload channel state after queued append");
+    assert!(reloaded.list("pod:append-race", "removed", None).is_empty());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn pod_update_restores_parent_when_channel_cleanup_fails() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let create = serde_json::json!({
+        "pod": {
+            "podId": "pod:cleanup-failure",
+            "name": "Before",
+            "isPublic": true,
+            "channels": [
+                {"channelId": "general", "kind": 0, "name": "General"},
+                {"channelId": "removed", "kind": 1, "name": "Removed"}
+            ]
+        }
+    })
+    .to_string();
+    let created = super::route_http_request("POST", "/api/v0/pods", None, &create, &state)
+        .await
+        .expect("create pod for rollback regression");
+    assert_eq!(created.status, "201 Created");
+    state
+        .pod_channels
+        .write()
+        .await
+        .append(
+            "pod:cleanup-failure".to_owned(),
+            "removed".to_owned(),
+            "peer".to_owned(),
+            "message".to_owned(),
+            "signature".to_owned(),
+            1,
+        )
+        .expect("persist message in channel that will be removed");
+
+    let channel_path = state.config.state_dir.join("pod-channel-messages.json");
+    let preserved_channel_path = state
+        .config
+        .state_dir
+        .join("pod-channel-messages.json.saved");
+    fs::rename(&channel_path, &preserved_channel_path)
+        .expect("move channel file before forcing cleanup failure");
+    fs::create_dir(&channel_path).expect("make channel state path unwritable");
+    let update = serde_json::json!({
+        "pod": {
+            "podId": "pod:cleanup-failure",
+            "name": "After",
+            "isPublic": true,
+            "channels": [{"channelId": "general", "kind": 0, "name": "General"}]
+        }
+    })
+    .to_string();
+    let response = super::route_http_request(
+        "PUT",
+        "/api/v0/pods/pod:cleanup-failure",
+        None,
+        &update,
+        &state,
+    )
+    .await
+    .expect("failed channel cleanup response");
+    assert_eq!(response.status, "500 Internal Server Error");
+    fs::remove_dir(&channel_path).expect("remove directory that blocked channel persistence");
+    fs::rename(&preserved_channel_path, &channel_path)
+        .expect("restore channel file after rollback regression");
+
+    let pod = state
+        .pods
+        .read()
+        .await
+        .get("pod:cleanup-failure")
+        .expect("pod remains in memory after channel cleanup failure");
+    assert_eq!(pod.name, "Before");
+    assert_eq!(pod.channels.len(), 2);
+    assert_eq!(
+        state
+            .pod_channels
+            .read()
+            .await
+            .list("pod:cleanup-failure", "removed", None)
+            .len(),
+        1
+    );
+    let reloaded =
+        super::pods::PodStore::load(&state.config.state_dir).expect("reload restored parent state");
+    assert_eq!(
+        reloaded
+            .get("pod:cleanup-failure")
+            .expect("persisted pod remains after rollback")
+            .channels
+            .len(),
+        2
+    );
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[test]
+fn pod_startup_prunes_channel_messages_left_by_interrupted_parent_commit() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-pod-cross-file-recovery-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::create_dir_all(&root).expect("create pod recovery state directory");
+    let mut pods = super::pods::PodStore::empty(&root);
+    let mut channels = super::pod_channels::PodChannelStore::empty(&root);
+
+    let mut update_pod = serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+        "podId": "pod:recovery-update",
+        "name": "Before update",
+        "channels": [
+            {"channelId": "general", "kind": 0, "name": "General"},
+            {"channelId": "removed", "kind": 1, "name": "Removed"}
+        ]
+    }))
+    .expect("deserialize update recovery pod");
+    pods.create(update_pod.clone(), "owner".to_owned())
+        .expect("create update recovery pod");
+    channels
+        .append(
+            "pod:recovery-update".to_owned(),
+            "removed".to_owned(),
+            "peer".to_owned(),
+            "message".to_owned(),
+            "signature".to_owned(),
+            1,
+        )
+        .expect("persist channel message removed by update");
+    update_pod
+        .channels
+        .retain(|channel| channel.channel_id == "general");
+    pods.update("pod:recovery-update", update_pod)
+        .expect("persist parent update before channel cleanup");
+
+    let deleted_pod = serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+        "podId": "pod:recovery-delete",
+        "name": "Deleted pod",
+        "channels": [{"channelId": "general", "kind": 0, "name": "General"}]
+    }))
+    .expect("deserialize delete recovery pod");
+    pods.create(deleted_pod, "owner".to_owned())
+        .expect("create delete recovery pod");
+    channels
+        .append(
+            "pod:recovery-delete".to_owned(),
+            "general".to_owned(),
+            "peer".to_owned(),
+            "message".to_owned(),
+            "signature".to_owned(),
+            2,
+        )
+        .expect("persist channel message removed by pod deletion");
+    pods.delete("pod:recovery-delete")
+        .expect("persist parent deletion before channel cleanup");
+    drop(channels);
+    drop(pods);
+
+    let (channels, pods) = super::daemon_serve::load_pod_stores(&root, false)
+        .expect("recover pod/channel state during startup");
+    assert_eq!(
+        pods.get("pod:recovery-update")
+            .expect("updated pod survives recovery")
+            .channels
+            .len(),
+        1
+    );
+    assert!(pods.get("pod:recovery-delete").is_none());
+    assert!(channels
+        .list("pod:recovery-update", "removed", None)
+        .is_empty());
+    assert!(channels
+        .list("pod:recovery-delete", "general", None)
+        .is_empty());
+    drop(channels);
+    drop(pods);
+
+    let persisted_channels =
+        super::pod_channels::PodChannelStore::load(&root).expect("reload repaired channel store");
+    assert!(persisted_channels
+        .list("pod:recovery-update", "removed", None)
+        .is_empty());
+    assert!(persisted_channels
+        .list("pod:recovery-delete", "general", None)
+        .is_empty());
+    fs::remove_dir_all(root).expect("remove pod recovery state directory");
+}
+
+#[tokio::test]
+async fn share_grant_creation_rechecks_collection_after_waiting_for_grant_store() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "slskr-share-grant-parent-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create share grant parent directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create share grant parent database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+
+    let collection = super::route_http_request(
+        "POST",
+        "/api/v0/collections",
+        None,
+        r#"{"title":"Concurrent grant collection"}"#,
+        &state,
+    )
+    .await
+    .expect("create persisted collection");
+    assert_eq!(collection.status, "201 Created");
+    let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()["id"]
+        .as_str()
+        .expect("collection id")
+        .to_owned();
+
+    let grant_store = state.share_grants.write().await;
+    let delete_path = format!("/api/v0/collections/{collection_id}");
+    let delete = super::route_http_request("DELETE", &delete_path, None, "", &state);
+    tokio::pin!(delete);
+    tokio::select! {
+        biased;
+        _ = &mut delete => panic!("collection delete should wait for the held grant store"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    let grant_body = serde_json::json!({
+        "collection_id": collection_id,
+        "username": "recipient",
+        "permissions": "read"
+    })
+    .to_string();
+    let create_grant =
+        super::route_http_request("POST", "/api/v0/share-grants", None, &grant_body, &state);
+    tokio::pin!(create_grant);
+    tokio::select! {
+        biased;
+        _ = &mut create_grant => panic!("share grant creation should wait for the held grant store"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    drop(grant_store);
+    let (deleted, created) = tokio::join!(&mut delete, &mut create_grant);
+    let deleted = deleted.expect("delete collection after grant-store release");
+    let created = created.expect("finish grant creation after collection delete");
+    assert_eq!(deleted.status, "204 No Content");
+    assert_eq!(created.status, "404 Not Found");
+    assert!(state.share_grants.read().await.records.is_empty());
+    assert!(db
+        .list_collections(100, 0)
+        .await
+        .expect("list persisted collections")
+        .is_empty());
+    assert!(db
+        .list_share_grants(100, 0)
+        .await
+        .expect("list persisted grants")
+        .is_empty());
+
+    let orphan = super::persistence::ShareGrantRecord {
+        id: "orphan-grant".to_owned(),
+        collection_id,
+        username: "recipient".to_owned(),
+        shared_at: 1,
+        permissions: "read".to_owned(),
+    };
+    assert!(db.upsert_share_grant(&orphan).await.is_err());
+    assert!(db
+        .list_share_grants(100, 0)
+        .await
+        .expect("confirm rejected orphan grant")
+        .is_empty());
+
+    db.close_for_test().await;
+    fs::remove_dir_all(root).expect("remove share grant parent directory");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn stale_collection_snapshot_cannot_resurrect_deleted_parent() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "slskr-collection-parent-consistency-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create collection parent directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create collection parent database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+
+    let created = super::route_http_request(
+        "POST",
+        "/api/v0/collections",
+        None,
+        r#"{"title":"Persisted collection"}"#,
+        &state,
+    )
+    .await
+    .expect("create collection through production route");
+    assert_eq!(created.status, "201 Created");
+    let collection_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("collection id")
+        .to_owned();
+    let stale_record = state
+        .collections
+        .read()
+        .await
+        .get(&collection_id)
+        .expect("created collection snapshot");
+
+    let deleted = super::route_http_request(
+        "DELETE",
+        &format!("/api/v0/collections/{collection_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("delete collection through production route");
+    assert_eq!(deleted.status, "204 No Content");
+    assert!(db
+        .list_collections(100, 0)
+        .await
+        .expect("confirm collection deletion")
+        .is_empty());
+
+    assert!(
+        super::collection_store::persist_collection_checked(&state, &stale_record)
+            .await
+            .is_err()
+    );
+    assert!(db
+        .list_collections(100, 0)
+        .await
+        .expect("confirm stale snapshot did not recreate collection")
+        .is_empty());
+
+    db.close_for_test().await;
+    fs::remove_dir_all(root).expect("remove collection parent directory");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn collection_delete_waits_for_persistence_turn_without_blocking_reads() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "slskr-collection-persistence-order-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create collection persistence directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create collection persistence database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+    let created = super::route_http_request(
+        "POST",
+        "/api/v0/collections",
+        None,
+        r#"{"title":"Persistence order"}"#,
+        &state,
+    )
+    .await
+    .expect("create collection");
+    assert_eq!(created.status, "201 Created");
+    let collection_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("collection id")
+        .to_owned();
+
+    let persistence_turn = state.collection_grant_persistence_lock.lock().await;
+    let delete_path = format!("/api/v0/collections/{collection_id}");
+    let delete = super::route_http_request("DELETE", &delete_path, None, "", &state);
+    tokio::pin!(delete);
+    tokio::select! {
+        biased;
+        _ = &mut delete => panic!("collection delete must wait for its persistence turn"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    let readable = super::route_http_request("GET", &delete_path, None, "", &state)
+        .await
+        .expect("read collection while delete waits for persistence turn");
+    assert_eq!(readable.status, "200 OK");
+    assert_eq!(db.list_collections(100, 0).await.unwrap().len(), 1);
+
+    drop(persistence_turn);
+    let deleted = tokio::time::timeout(Duration::from_secs(1), &mut delete)
+        .await
+        .expect("delete completes after persistence turn is released")
+        .expect("delete collection");
+    assert_eq!(deleted.status, "204 No Content");
+    assert!(db.list_collections(100, 0).await.unwrap().is_empty());
+
+    db.close_for_test().await;
+    fs::remove_dir_all(root).expect("remove collection persistence directory");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn share_group_delete_precedes_queued_member_add_without_blocking_reads() {
+    let db = super::persistence::DatabaseManager::in_memory()
+        .await
+        .expect("create share-group persistence database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+    let created = super::route_http_request(
+        "POST",
+        "/api/sharegroups",
+        None,
+        r#"{"name":"Trusted peers"}"#,
+        &state,
+    )
+    .await
+    .expect("create share group");
+    assert_eq!(created.status, "201 Created");
+    let group_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+        .as_str()
+        .expect("share-group id")
+        .to_owned();
+    let member_path = format!("/api/sharegroups/{group_id}/members");
+    let member = super::route_http_request(
+        "POST",
+        &member_path,
+        None,
+        r#"{"username":"friend"}"#,
+        &state,
+    )
+    .await
+    .expect("add initial share-group member");
+    assert_eq!(member.status, "201 Created");
+
+    let persistence_turn = state.share_group_persistence_lock.lock().await;
+    let delete_state = Arc::clone(&state);
+    let delete_path = format!("/api/sharegroups/{group_id}");
+    let delete_task_path = delete_path.clone();
+    let mut delete = tokio::spawn(async move {
+        super::route_http_request("DELETE", &delete_task_path, None, "", &delete_state).await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut delete)
+        .await
+        .is_err());
+
+    let add_state = Arc::clone(&state);
+    let add_path = member_path.clone();
+    let mut add = tokio::spawn(async move {
+        super::route_http_request(
+            "POST",
+            &add_path,
+            None,
+            r#"{"username":"late"}"#,
+            &add_state,
+        )
+        .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(10), &mut add)
+        .await
+        .is_err());
+
+    let readable = super::route_http_request("GET", &delete_path, None, "", &state)
+        .await
+        .expect("read share group while mutations wait for persistence turn");
+    assert_eq!(readable.status, "200 OK");
+    let readable_members = super::route_http_request("GET", &member_path, None, "", &state)
+        .await
+        .expect("read share-group members while mutations wait");
+    assert_eq!(readable_members.status, "200 OK");
+    assert!(readable_members.body.contains("friend"));
+    assert_eq!(db.list_share_groups(10, 0).await.unwrap().len(), 1);
+
+    drop(persistence_turn);
+    let deleted = tokio::time::timeout(Duration::from_secs(1), &mut delete)
+        .await
+        .expect("delete completes after persistence turn is released")
+        .expect("join delete route")
+        .expect("delete response");
+    assert_eq!(deleted.status, "200 OK");
+    let added = tokio::time::timeout(Duration::from_secs(1), &mut add)
+        .await
+        .expect("queued member request completes after delete")
+        .expect("join member route")
+        .expect("member response");
+    assert_eq!(added.status, "404 Not Found");
+    assert!(db.list_share_groups(10, 0).await.unwrap().is_empty());
+    assert!(db.list_share_group_members(10, 0).await.unwrap().is_empty());
+
+    db.close_for_test().await;
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn collection_delete_precedes_queued_share_token_creation() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "slskr-collection-token-order-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create collection token-order directory");
+    let db_path = root.join("slskr.db");
+    let db_path_string = db_path.to_str().expect("UTF-8 database path");
+    let db = super::persistence::DatabaseManager::new(db_path_string)
+        .await
+        .expect("create collection token-order database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+
+    let collection = super::route_http_request(
+        "POST",
+        "/api/v0/collections",
+        None,
+        r#"{"title":"Token order"}"#,
+        &state,
+    )
+    .await
+    .expect("create collection for token-order regression");
+    assert_eq!(collection.status, "201 Created");
+    let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()["id"]
+        .as_str()
+        .expect("collection id")
+        .to_owned();
+    let grant = super::route_http_request(
+        "POST",
+        "/api/v0/share-grants",
+        None,
+        &serde_json::json!({
+            "collection_id": collection_id,
+            "username": "recipient",
+            "permissions": "read,stream"
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("create grant for token-order regression");
+    assert_eq!(grant.status, "201 Created");
+    let grant_id = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap()["id"]
+        .as_str()
+        .expect("grant id")
+        .to_owned();
+
+    let persistence_turn = state.collection_grant_persistence_lock.lock().await;
+    let delete_path = format!("/api/v0/collections/{collection_id}");
+    let delete = super::route_http_request("DELETE", &delete_path, None, "", &state);
+    tokio::pin!(delete);
+    tokio::select! {
+        biased;
+        _ = &mut delete => panic!("collection delete must wait for persistence turn"),
+        _ = tokio::task::yield_now() => {}
+    }
+    let token_path = format!("/api/v0/share-grants/{grant_id}/token");
+    let create_token = super::route_http_request("POST", &token_path, None, "", &state);
+    tokio::pin!(create_token);
+    tokio::select! {
+        biased;
+        _ = &mut create_token => panic!("share-token creation must wait behind collection delete"),
+        _ = tokio::task::yield_now() => {}
+    }
+
+    drop(persistence_turn);
+    let (deleted, token) = tokio::join!(&mut delete, &mut create_token);
+    let deleted = deleted.expect("delete collection before queued token request");
+    let token = token.expect("finish queued token request");
+    assert_eq!(deleted.status, "204 No Content");
+    assert_eq!(token.status, "404 Not Found");
+    assert!(state.share_access_tokens.read().await.records.is_empty());
+    assert!(db
+        .list_share_access_tokens(0, 100, 0)
+        .await
+        .expect("list persisted tokens after collection delete")
+        .is_empty());
+
+    db.close_for_test().await;
+    fs::remove_dir_all(root).expect("remove collection token-order directory");
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn spotify_disconnect_rejects_an_in_flight_connection_commit() {
+    use std::sync::atomic::Ordering;
+
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let stale_generation = state.spotify_connection_generation.load(Ordering::Acquire);
+    let stale_connection = super::SpotifyConnectionStore {
+        access_token: "stale-access-token".to_owned(),
+        refresh_token: "stale-refresh-token".to_owned(),
+        scope: "user-library-read".to_owned(),
+        expires_at: i64::try_from(super::unix_timestamp())
+            .unwrap_or(i64::MAX)
+            .saturating_add(3_600),
+        display_name: "Stale account".to_owned(),
+        spotify_user_id: "stale-user".to_owned(),
+    };
+
+    super::disconnect_spotify_connection(&state)
+        .await
+        .expect("disconnect Spotify connection");
+    assert!(!super::persist_spotify_connection_if_current(
+        &state,
+        stale_generation,
+        &stale_connection,
+    )
+    .await
+    .expect("reject stale Spotify connection commit"));
+
+    assert_eq!(
+        *state.spotify_connection.read().await,
+        super::SpotifyConnectionStore::default()
+    );
+    assert!(!super::spotify_connection_path(&state.config.state_dir).exists());
+    fs::remove_dir_all(&state.config.state_dir).expect("remove Spotify lifecycle test state");
+}
+
+#[tokio::test]
+async fn server_state_response_releases_session_lock_while_credentials_are_queued() {
+    use std::{future::Future, task::Poll};
+
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    for (method, session_state, expected_status) in [
+        ("GET", "connected", "200 OK"),
+        ("POST", "connected", "202 Accepted"),
+        ("POST", "disconnected", "202 Accepted"),
+        ("DELETE", "disconnected", "202 Accepted"),
+    ] {
+        state.session.write().await.state = session_state;
+        let held_credentials = state.runtime_credentials.write().await;
+        let mut request = Box::pin(super::route_http_request(
+            method,
+            "/api/server",
+            None,
+            "",
+            &state,
+        ));
+
+        let waiting_on_credentials = std::future::poll_fn(|context| {
+            Poll::Ready(request.as_mut().poll(context).is_pending())
+        })
+        .await;
+        assert!(
+            waiting_on_credentials,
+            "{method} should wait for credential configuration"
+        );
+        assert!(
+            state.session.try_write().is_ok(),
+            "{method} waiting for credentials must not retain the session lock"
+        );
+
+        drop(held_credentials);
+        let response = request.await.expect("server state response");
+        assert_eq!(response.status, expected_status);
+    }
+    fs::remove_dir_all(&state.config.state_dir).expect("remove session lock test state");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn transfer_batch_path_preparation_releases_transfer_lock() {
+    use std::{future::Future, task::Poll};
+
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let held_destinations = state.destinations.write().await;
+    let batch_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let mut preparation = Box::pin(super::prepare_download_batch_transfer(
+        &state,
+        0,
+        "peer",
+        "Music/A.flac",
+        42,
+        batch_id,
+        None,
+    ));
+    let waiting_on_destination = std::future::poll_fn(|context| {
+        Poll::Ready(preparation.as_mut().poll(context).is_pending())
+    })
+    .await;
+    assert!(
+        waiting_on_destination,
+        "path resolution should wait for destinations"
+    );
+    assert!(
+        state.transfers.try_write().is_ok(),
+        "batch path preparation must not retain the transfer lock"
+    );
+
+    drop(held_destinations);
+    let prepared = preparation.await.expect("focused batch path preparation");
+    assert_eq!(prepared.filename, "Music/A.flac");
+    assert_eq!(prepared.size, 42);
+    assert!(prepared.local_path.is_some());
+    {
+        let mut transfers = state.transfers.write().await;
+        transfers.create_with_details(
+            0,
+            Some("peer".to_owned()),
+            "Music/A.flac".to_owned(),
+            None,
+            None,
+            None,
+            super::TransferRequestDetails::default(),
+        );
+    }
+    let (staged, failures) =
+        super::commit_prepared_download_batch_transfers(&state, "peer", batch_id, vec![prepared])
+            .await;
+    assert!(staged.is_empty());
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].1["filename"], "Music/A.flac");
+    assert_eq!(state.transfers.read().await.entries.len(), 1);
+    fs::remove_dir_all(&state.config.state_dir).expect("remove transfer batch lock test state");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn legacy_transfer_array_path_resolution_releases_transfer_lock() {
+    use std::{future::Future, task::Poll};
+
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let held_destinations = state.destinations.write().await;
+    let body = r#"{"username":"peer","files":[{"filename":"Music/A.flac","size":42}]}"#;
+    let mut request = Box::pin(super::route_http_request(
+        "POST",
+        "/api/transfers",
+        None,
+        body,
+        &state,
+    ));
+    let waiting_on_destination =
+        std::future::poll_fn(|context| Poll::Ready(request.as_mut().poll(context).is_pending()))
+            .await;
+    assert!(
+        waiting_on_destination,
+        "legacy array enqueue should wait for destination resolution"
+    );
+    assert!(
+        state.transfers.try_write().is_ok(),
+        "legacy path resolution must not retain the transfer lock"
+    );
+
+    drop(held_destinations);
+    let response = request.await.expect("legacy array enqueue response");
+    assert_eq!(response.status, "200 OK");
+    let response: serde_json::Value =
+        serde_json::from_str(&response.body).expect("legacy enqueue response JSON");
+    assert_eq!(response["queued"], 1);
+    assert_eq!(response["transfers"].as_array().unwrap().len(), 1);
+    assert_eq!(state.transfers.read().await.entries.len(), 1);
+    fs::remove_dir_all(&state.config.state_dir).expect("remove legacy transfer lock test state");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn legacy_per_user_transfer_path_resolution_releases_transfer_lock() {
+    use std::{future::Future, task::Poll};
+
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let held_destinations = state.destinations.write().await;
+    let body = r#"{"files":[{"filename":"Music/A.flac","size":42}]}"#;
+    let mut request = Box::pin(super::route_http_request(
+        "POST",
+        "/api/v0/transfers/downloads/peer",
+        None,
+        body,
+        &state,
+    ));
+    let waiting_on_destination =
+        std::future::poll_fn(|context| Poll::Ready(request.as_mut().poll(context).is_pending()))
+            .await;
+    assert!(
+        waiting_on_destination,
+        "per-user enqueue should wait for destination resolution"
+    );
+    assert!(
+        state.transfers.try_write().is_ok(),
+        "per-user path resolution must not retain the transfer lock"
+    );
+
+    drop(held_destinations);
+    let response = request.await.expect("per-user enqueue response");
+    assert_eq!(response.status, "200 OK");
+    let response: serde_json::Value =
+        serde_json::from_str(&response.body).expect("per-user enqueue response JSON");
+    assert_eq!(response["queued"], 1);
+    assert_eq!(response["transfers"].as_array().unwrap().len(), 1);
+    assert_eq!(state.transfers.read().await.entries.len(), 1);
+    fs::remove_dir_all(&state.config.state_dir).expect("remove per-user transfer lock test state");
 }

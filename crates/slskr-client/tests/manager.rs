@@ -2,6 +2,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use slskr_client::{
     connection::ConnectionKind,
@@ -13,9 +17,39 @@ use slskr_client::{
     stream::{PeerMessageConnection, ServerConnection},
 };
 use slskr_protocol::server::Direction;
-use tokio::io::{duplex, DuplexStream};
+use tokio::io::{duplex, AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
 use tokio::sync::Barrier;
 use tokio::time::Duration;
+
+struct PendingWriteStream;
+
+impl AsyncRead for PendingWriteStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Poll::Pending
+    }
+}
+
+impl AsyncWrite for PendingWriteStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Poll::Pending
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Pending
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
 
 #[test]
 fn token_generator_wraps() {
@@ -326,6 +360,41 @@ async fn indirect_requests_never_issue_the_direct_connection_token() {
             .unwrap(),
         request.server_message()
     );
+}
+
+#[tokio::test]
+async fn indirect_request_timeout_releases_server_lock() {
+    let manager = ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(PendingWriteStream)),
+        PeerConnectionCache::new(),
+        connector(|_| {
+            let (stream, _) = duplex(64);
+            PeerMessageConnection::new(stream)
+        }),
+    );
+
+    assert!(matches!(
+        manager
+            .request_indirect_with_timeout(
+                "peer",
+                ConnectionKind::PeerMessages,
+                Duration::from_millis(25),
+            )
+            .await,
+        Err(slskr_client::ClientError::TimedOut {
+            operation: "managed indirect request"
+        })
+    ));
+    assert!(matches!(
+        manager
+            .request_indirect_with_timeout(
+                "peer",
+                ConnectionKind::PeerMessages,
+                Duration::from_millis(25),
+            )
+            .await,
+        Err(slskr_client::ClientError::ConnectionClosed)
+    ));
 }
 
 #[tokio::test]

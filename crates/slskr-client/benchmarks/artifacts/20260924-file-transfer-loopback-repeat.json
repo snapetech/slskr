@@ -1,0 +1,68 @@
+{
+  "architecture": "x86_64",
+  "benchmark": "slskr-file-transfer-payload-loopback",
+  "chunkBytes": 81920,
+  "evidenceMode": "local-loopback",
+  "measuredTrialsPerVariant": 5,
+  "medianDeltaPercent": {
+    "obfuscated": 0.05825343322500842,
+    "plain": -0.11993015493395598
+  },
+  "os": "linux",
+  "payloadBytesPerTrial": 67108864,
+  "schemaVersion": 1,
+  "tcpNodeDelay": true,
+  "timestampUnixMs": 1790260387845,
+  "tokioTcpFlushIsNoOp": true,
+  "variants": {
+    "obfuscated-after": {
+      "maxMiBPerSecond": 548.2401755917341,
+      "medianMiBPerSecond": 544.6632178818653,
+      "minMiBPerSecond": 538.8224841159551,
+      "samplesMiBPerSecond": [
+        546.7921902184089,
+        548.2401755917341,
+        538.8224841159551,
+        540.6723705292636,
+        544.6632178818653
+      ]
+    },
+    "obfuscated-before": {
+      "maxMiBPerSecond": 546.9019198316813,
+      "medianMiBPerSecond": 544.346117579748,
+      "minMiBPerSecond": 544.0363832491844,
+      "samplesMiBPerSecond": [
+        544.0476398036033,
+        544.0363832491844,
+        546.9019198316813,
+        544.346117579748,
+        544.7696832947398
+      ]
+    },
+    "plain-after": {
+      "maxMiBPerSecond": 3470.824251343209,
+      "medianMiBPerSecond": 3444.5675697946085,
+      "minMiBPerSecond": 3323.9671901586057,
+      "samplesMiBPerSecond": [
+        3323.9671901586057,
+        3426.4861058397655,
+        3444.5675697946085,
+        3470.824251343209,
+        3466.437491817989
+      ]
+    },
+    "plain-before": {
+      "maxMiBPerSecond": 3496.852532210246,
+      "medianMiBPerSecond": 3448.703605371744,
+      "minMiBPerSecond": 3291.8681392838785,
+      "samplesMiBPerSecond": [
+        3455.759555161671,
+        3496.852532210246,
+        3444.4263073871693,
+        3291.8681392838785,
+        3448.703605371744
+      ]
+    }
+  },
+  "warmupTrialsPerVariant": 1
+}

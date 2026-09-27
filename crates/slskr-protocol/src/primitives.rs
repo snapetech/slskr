@@ -101,14 +101,32 @@ impl<'a> Reader<'a> {
         self.read_string_with_encoding().map(|(value, _)| value)
     }
 
+    pub fn read_string_with_max(&mut self, max: usize) -> Result<String, DecodeError> {
+        self.read_string_with_encoding_with_max(max)
+            .map(|(value, _)| value)
+    }
+
     pub fn read_string_with_encoding(
         &mut self,
+    ) -> Result<(String, ProtocolTextEncoding), DecodeError> {
+        self.read_string_with_encoding_with_max(usize::MAX)
+    }
+
+    pub fn read_string_with_encoding_with_max(
+        &mut self,
+        max: usize,
     ) -> Result<(String, ProtocolTextEncoding), DecodeError> {
         let length = self.read_u32_le()? as usize;
         if length > self.remaining() {
             return Err(DecodeError::InvalidStringLength {
                 length,
                 remaining: self.remaining(),
+            });
+        }
+        if length > max {
+            return Err(DecodeError::InvalidStringLength {
+                length,
+                remaining: max,
             });
         }
 

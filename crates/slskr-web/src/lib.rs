@@ -2022,9 +2022,7 @@ pub fn concrete_action_path_with_target_and_id(
         let collection_id = target
             .filter(|value| safe_route_segment(value))
             .unwrap_or("1");
-        let item_id = id
-            .filter(|value| safe_route_segment(value))
-            .unwrap_or("1");
+        let item_id = id.filter(|value| safe_route_segment(value)).unwrap_or("1");
         return endpoint_url(action.path)
             .replace(":collectionId", collection_id)
             .replace(":itemId", item_id);
@@ -2092,9 +2090,10 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
             &["Preview Playlist"]
         }
         (RouteKind::PlaylistIntake, "queue plans") => &["Queue Discography Job"],
-        (RouteKind::Wishlist, "add wanted search" | "add search" | "add your first search" | "import list") => {
-            &["Add Wishlist Item"]
-        }
+        (
+            RouteKind::Wishlist,
+            "add wanted search" | "add search" | "add your first search" | "import list",
+        ) => &["Add Wishlist Item"],
         (RouteKind::Wishlist, "run selected" | "run enabled" | "run") => &["Run Wishlist Search"],
         (RouteKind::Downloads, "download" | "queue download" | "retry" | "retry all") => {
             &["Queue Download"]
@@ -2109,9 +2108,7 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
             &["Send Message"]
         }
         (RouteKind::Messages | RouteKind::Rooms, "acknowledge") => &["Acknowledge Conversation"],
-        (RouteKind::Messages | RouteKind::Rooms, "join" | "join room") => {
-            &["Join Room"]
-        }
+        (RouteKind::Messages | RouteKind::Rooms, "join" | "join room") => &["Join Room"],
         (RouteKind::Messages | RouteKind::Rooms, "open batch private-message dialog") => {
             &["Send Message"]
         }
@@ -2126,9 +2123,10 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::Contacts, "message") => &["Send Message"],
         (RouteKind::Contacts, "browse") => &["Request Directory"],
         (RouteKind::Contacts, "remove") => &["Remove Contact"],
-        (RouteKind::Solid, "resolve webid" | "connect identity" | "sync storage" | "refresh session") => {
-            &["Resolve WebID"]
-        }
+        (
+            RouteKind::Solid,
+            "resolve webid" | "connect identity" | "sync storage" | "refresh session",
+        ) => &["Resolve WebID"],
         (RouteKind::Collections, "create collection") => &["Create Collection"],
         (RouteKind::Collections, "update collection") => &["Update Collection"],
         (RouteKind::Collections, "delete collection") => &["Delete Collection"],
@@ -2164,12 +2162,11 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::System, "refresh songid") => &["Refresh SongID"],
         (RouteKind::System, "track musicbrainz target") => &["Track MusicBrainz Target"],
         (RouteKind::System, "start songid run") => &["Start SongID Run"],
-        (RouteKind::System, "start library health scan" | "scan library" | "scan library health") => {
-            &["Start Library Health Scan"]
-        }
-        (RouteKind::System, "fix library issues" | "fix health issues") => {
-            &["Fix Library Issues"]
-        }
+        (
+            RouteKind::System,
+            "start library health scan" | "scan library" | "scan library health",
+        ) => &["Start Library Health Scan"],
+        (RouteKind::System, "fix library issues" | "fix health issues") => &["Fix Library Issues"],
         (RouteKind::System, "setup health") => &["Setup Health"],
         _ => &[],
     };
@@ -2247,14 +2244,12 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             r#"{{"collection_id":"","username":"{}"}}"#,
             escape_json_string(value)
         )),
-        ActionBody::ShareGroupMember => Some(format!(
-            r#"{{"userId":"{}"}}"#,
-            escape_json_string(value)
-        )),
-        ActionBody::SongIdSource => Some(format!(
-            r#"{{"source":"{}"}}"#,
-            escape_json_string(value)
-        )),
+        ActionBody::ShareGroupMember => {
+            Some(format!(r#"{{"userId":"{}"}}"#, escape_json_string(value)))
+        }
+        ActionBody::SongIdSource => {
+            Some(format!(r#"{{"source":"{}"}}"#, escape_json_string(value)))
+        }
         ActionBody::Username => Some(format!(
             r#"{{"username":"{}","note":"Created from the Rust web UI"}}"#,
             escape_json_string(value)
@@ -3296,8 +3291,9 @@ fn response_online_count(responses: Option<&[EndpointBody]>, endpoint: &str) -> 
         .iter()
         .filter(|item| {
             value_bool(item, &["online", "connected", "isOnline"]).unwrap_or_else(|| {
-                value_text(item, &["status", "state"])
-                    .is_some_and(|state| matches!(state.to_ascii_lowercase().as_str(), "online" | "connected"))
+                value_text(item, &["status", "state"]).is_some_and(|state| {
+                    matches!(state.to_ascii_lowercase().as_str(), "online" | "connected")
+                })
             })
         })
         .count()
@@ -3823,66 +3819,64 @@ fn route_dynamic_rows(
             // IDs made an empty inbound page render executable-looking rows
             // that could only produce 400/404 responses.
             endpoint_array(responses, "/share-grants")
-            .iter()
-            .take(50)
-            .map(|item| {
-                let title = value_text(item, &["collection.title", "title", "name"])
-                    .unwrap_or_else(|| "Shared collection".to_string());
-                let owner = value_text(
-                    item,
-                    &[
-                        "owner.username",
-                        "owner",
-                        "sharedBy.username",
-                        "sharedBy",
-                        "grant.owner",
-                        "username",
-                    ],
-                )
-                .unwrap_or_else(|| "unknown owner".to_string());
-                let permissions = value_text(
-                    item,
-                    &["permissions", "access", "grant.permissions", "grant.access"],
-                )
-                .unwrap_or_else(|| "read".to_string());
-                let id = value_text(item, &["id", "grant.id", "grantId", "shareGrantId"]);
-                (
-                    title,
-                    owner,
-                    row_meta_with_id(permissions, id.as_deref()),
-                    "Open".to_string(),
-                )
-            })
-            .collect::<Vec<_>>()
-        }
-        RouteKind::Browse => {
-            browse_response_entries(responses)
                 .iter()
                 .take(50)
                 .map(|item| {
-                    let name = value_text(
+                    let title = value_text(item, &["collection.title", "title", "name"])
+                        .unwrap_or_else(|| "Shared collection".to_string());
+                    let owner = value_text(
                         item,
                         &[
-                            "name",
-                            "filename",
-                            "path",
-                            "directory",
-                            "folder",
-                            "remotePath",
+                            "owner.username",
+                            "owner",
+                            "sharedBy.username",
+                            "sharedBy",
+                            "grant.owner",
+                            "username",
                         ],
                     )
-                    .unwrap_or_else(|| "Browse entry".to_string());
-                    let kind = if value_bool(item, &["isDirectory", "directory"]).unwrap_or(false) {
-                        "folder".to_string()
-                    } else {
-                        value_text(item, &["type", "kind"]).unwrap_or_else(|| "file".to_string())
-                    };
-                    let size = value_text(item, &["size", "bytes", "fileSize"])
-                        .unwrap_or_else(|| "0".to_string());
-                    (name, kind, size, "Download".to_string())
+                    .unwrap_or_else(|| "unknown owner".to_string());
+                    let permissions = value_text(
+                        item,
+                        &["permissions", "access", "grant.permissions", "grant.access"],
+                    )
+                    .unwrap_or_else(|| "read".to_string());
+                    let id = value_text(item, &["id", "grant.id", "grantId", "shareGrantId"]);
+                    (
+                        title,
+                        owner,
+                        row_meta_with_id(permissions, id.as_deref()),
+                        "Open".to_string(),
+                    )
                 })
                 .collect::<Vec<_>>()
         }
+        RouteKind::Browse => browse_response_entries(responses)
+            .iter()
+            .take(50)
+            .map(|item| {
+                let name = value_text(
+                    item,
+                    &[
+                        "name",
+                        "filename",
+                        "path",
+                        "directory",
+                        "folder",
+                        "remotePath",
+                    ],
+                )
+                .unwrap_or_else(|| "Browse entry".to_string());
+                let kind = if value_bool(item, &["isDirectory", "directory"]).unwrap_or(false) {
+                    "folder".to_string()
+                } else {
+                    value_text(item, &["type", "kind"]).unwrap_or_else(|| "file".to_string())
+                };
+                let size = value_text(item, &["size", "bytes", "fileSize"])
+                    .unwrap_or_else(|| "0".to_string());
+                (name, kind, size, "Download".to_string())
+            })
+            .collect::<Vec<_>>(),
         RouteKind::System => {
             let mut rows = Vec::new();
             if let Some(server) = json_endpoint_value(responses, "/server") {
@@ -4720,12 +4714,7 @@ fn native_row_action_labels(kind: RouteKind, primary_action: &str) -> Vec<&str> 
             "Update Share Grant",
             primary_action,
         ],
-        RouteKind::SharedWithMe => vec![
-            primary_action,
-            "Stream",
-            "Backfill",
-            "Copy token",
-        ],
+        RouteKind::SharedWithMe => vec![primary_action, "Stream", "Backfill", "Copy token"],
         RouteKind::Browse => vec![primary_action, "Download Selected", "Open a New Browse Tab"],
         RouteKind::System => vec![
             primary_action,
@@ -5642,9 +5631,11 @@ fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] 
         (RouteKind::Browse, "Tabs") => &["Open a New Browse Tab", "New Tab"],
         (RouteKind::Browse, "Tree") => &["Browse", "Refresh Folder"],
         (RouteKind::Browse, "Selected" | "Queue") => &["Download Selected"],
-        (RouteKind::Collections, "Collections") => {
-            &["Create Collection", "Update Collection", "Delete Collection"]
-        }
+        (RouteKind::Collections, "Collections") => &[
+            "Create Collection",
+            "Update Collection",
+            "Delete Collection",
+        ],
         (RouteKind::Collections, "Items" | "Picker") => &["Add Item"],
         (RouteKind::Collections, "Sharing") => &["Share"],
         (RouteKind::ShareGroups, "Groups") => &["Create Group"],
@@ -5658,22 +5649,22 @@ fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] 
         (RouteKind::System, "Shares") => &["Rescan Shares"],
         (RouteKind::System, "Data") => &["Vacuum Database"],
         (RouteKind::System, "Info") => &["Check for Updates", "Diagnostic Bundle"],
-        (RouteKind::System, "Integrations") => {
-            &[
-                "Check Lidarr",
-                "Refresh Lidarr Sync",
-                "Track MusicBrainz Target",
-                "Refresh MusicBrainz",
-                "Start SongID Run",
-                "Refresh SongID",
-            ]
-        }
+        (RouteKind::System, "Integrations") => &[
+            "Check Lidarr",
+            "Refresh Lidarr Sync",
+            "Track MusicBrainz Target",
+            "Refresh MusicBrainz",
+            "Start SongID Run",
+            "Refresh SongID",
+        ],
         (RouteKind::System, "Logs" | "Events") => &["Refresh", "Clear Filter"],
         (RouteKind::System, "Options" | "Experience") => &[],
         (RouteKind::System, "Jobs" | "Automations") => &["Refresh"],
-        (RouteKind::System, "Library Health") => {
-            &["Scan Library Health", "Fix Library Issues", "Copy Action Plan"]
-        }
+        (RouteKind::System, "Library Health") => &[
+            "Scan Library Health",
+            "Fix Library Issues",
+            "Copy Action Plan",
+        ],
         (RouteKind::System, "Quarantine Jury") => &["Refresh", "Copy Packet"],
         (RouteKind::Search, "Results" | "Download Preview") => &["Download", "Queue Selected"],
         (RouteKind::Search, "Searches") => &["Search", "Stop", "Clear"],
@@ -5724,12 +5715,10 @@ fn native_tab_fields(kind: RouteKind, label: &str) -> &'static [(&'static str, &
         (RouteKind::System, "Logs" | "Events") => &[("Filter", "Filter text")],
         (RouteKind::System, "Library Health") => &[("Library Path", "Optional library path")],
         (RouteKind::System, "Options") => &[("Option key", "Configuration key")],
-        (RouteKind::System, "Integrations") => {
-            &[
-                ("Release ID", "MusicBrainz release identifier"),
-                ("SongID source", "local path, Spotify URL, or query"),
-            ]
-        }
+        (RouteKind::System, "Integrations") => &[
+            ("Release ID", "MusicBrainz release identifier"),
+            ("SongID source", "local path, Spotify URL, or query"),
+        ],
         _ => &[],
     }
 }
@@ -5997,10 +5986,7 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
     )
 }
 
-fn native_browse_workspace_html(
-    route_table: &str,
-    responses: Option<&[EndpointBody]>,
-) -> String {
+fn native_browse_workspace_html(route_table: &str, responses: Option<&[EndpointBody]>) -> String {
     let entries = browse_response_entries(responses);
     let folders = entries
         .iter()
@@ -6037,7 +6023,10 @@ fn native_browse_workspace_html(
         "No browse entries returned. Select a peer and request a directory to populate this preview."
             .to_string()
     } else {
-        format!("{} live browse entries; select files to calculate queue impact.", entries.len())
+        format!(
+            "{} live browse entries; select files to calculate queue impact.",
+            entries.len()
+        )
     };
     let preview = native_selection_preview_html(
         "No files selected",
@@ -6216,7 +6205,8 @@ fn native_message_pods_html(responses: Option<&[EndpointBody]>) -> String {
         .take(20)
         .filter_map(|pod| {
             let name = value_text(pod, &["name", "id", "podId"])?;
-            let state = value_text(pod, &["state", "status"]).unwrap_or_else(|| "available".to_string());
+            let state =
+                value_text(pod, &["state", "status"]).unwrap_or_else(|| "available".to_string());
             Some(format!(
                 "<span>{} / {}</span>",
                 escape_html(&name),
@@ -6488,11 +6478,7 @@ fn native_final_parity_panel_html(kind: RouteKind) -> String {
         RouteKind::SharedWithMe => (
             "Inbound Manifest",
             "data-slskr-shared-final-parity",
-            &[
-                "Open Item",
-                "Stream Item",
-                "Copy Exact Token",
-            ],
+            &["Open Item", "Stream Item", "Copy Exact Token"],
             &[
                 "Manifest rows",
                 "Owner contact",
@@ -7126,7 +7112,12 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
             ("Jobs", response_count(responses, "/jobs"), "automation"),
             (
                 "Review",
-                if responses.is_some() { "available" } else { "loading" }.to_string(),
+                if responses.is_some() {
+                    "available"
+                } else {
+                    "loading"
+                }
+                .to_string(),
                 "queue",
             ),
         ],
@@ -7167,7 +7158,11 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_value(responses, "/transfers/speeds", "upload"),
                 "up",
             ),
-            ("Policy", response_value(responses, "/config", "uploadPolicy"), "mode"),
+            (
+                "Policy",
+                response_value(responses, "/config", "uploadPolicy"),
+                "mode",
+            ),
         ],
         RouteKind::Messages => vec![
             (
@@ -7205,7 +7200,11 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
         ],
         RouteKind::Users => vec![
             ("Watched", response_count(responses, "/users"), "users"),
-            ("Online", response_online_count(responses, "/users"), "presence"),
+            (
+                "Online",
+                response_online_count(responses, "/users"),
+                "presence",
+            ),
             ("Notes", response_count(responses, "/users/notes"), "saved"),
         ],
         RouteKind::Contacts => vec![
@@ -7237,10 +7236,18 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_count(responses, "/share-grants"),
                 "active",
             ),
-            ("Tokens", response_numeric_sum(responses, "/share-grants", &["tokenCount", "tokens"]), "issued"),
+            (
+                "Tokens",
+                response_numeric_sum(responses, "/share-grants", &["tokenCount", "tokens"]),
+                "issued",
+            ),
         ],
         RouteKind::SharedWithMe => vec![
-            ("Shared", response_count(responses, "/share-grants"), "inbound"),
+            (
+                "Shared",
+                response_count(responses, "/share-grants"),
+                "inbound",
+            ),
             (
                 "Grants",
                 response_count(responses, "/share-grants"),
@@ -9515,7 +9522,11 @@ fn native_copy_context(
 ) {
     let text = native_selected_context(document, button, route_path);
     if text == format!("{route_path}\nNo selected row") {
-        native_set_action_status(document, label, "Select a live row before copying its report.");
+        native_set_action_status(
+            document,
+            label,
+            "Select a live row before copying its report.",
+        );
         return;
     }
     copy_reference_text(window, document, text);
@@ -9558,7 +9569,12 @@ fn native_shared_token(window: &web_sys::Window, grant_id: &str) -> Option<Strin
         .session_storage()
         .ok()
         .flatten()
-        .and_then(|storage| storage.get_item(&native_shared_token_storage_key(grant_id)).ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(&native_shared_token_storage_key(grant_id))
+                .ok()
+                .flatten()
+        })
         .filter(|token| !token.trim().is_empty())
 }
 
@@ -9575,16 +9591,13 @@ async fn native_issue_shared_access_token(
     grant_id: &str,
 ) -> Result<String, JsValue> {
     let path = endpoint_url(&format!("/share-grants/{grant_id}/token"));
-    let response = fetch_text_with_method(
-        window,
-        &path,
-        "POST",
-        Some(r#"{"expiresInSeconds":600}"#),
-    )
-    .await?;
+    let response =
+        fetch_text_with_method(window, &path, "POST", Some(r#"{"expiresInSeconds":600}"#)).await?;
     serde_json::from_str::<serde_json::Value>(&response)
         .ok()
-        .and_then(|value| native_json_string_by_key(&value, &["token", "shareToken", "share_token"]))
+        .and_then(|value| {
+            native_json_string_by_key(&value, &["token", "shareToken", "share_token"])
+        })
         .filter(|token| !token.trim().is_empty())
         .ok_or_else(|| JsValue::from_str("the token endpoint returned no token"))
 }
@@ -9627,7 +9640,11 @@ fn native_copy_shared_manifest(
     button: &web_sys::Element,
 ) {
     let Some(grant_id) = native_shared_grant_id(document, button) else {
-        native_set_action_status(document, "Copy manifest", "Select a live shared grant first.");
+        native_set_action_status(
+            document,
+            "Copy manifest",
+            "Select a live shared grant first.",
+        );
         return;
     };
     let window_for_request = window.clone();
@@ -9640,16 +9657,12 @@ fn native_copy_shared_manifest(
             .as_deref()
             .map(|token| [("X-Share-Token", token)])
             .unwrap_or_default();
-        match fetch_text_with_method_and_headers(
-            &window_for_request,
-            &path,
-            "GET",
-            None,
-            &headers,
-        )
-        .await
+        match fetch_text_with_method_and_headers(&window_for_request, &path, "GET", None, &headers)
+            .await
         {
-            Ok(response) => copy_reference_text(&window_for_request, &document_for_request, response),
+            Ok(response) => {
+                copy_reference_text(&window_for_request, &document_for_request, response)
+            }
             Err(error) => native_set_action_status(
                 &document_for_request,
                 "Copy manifest",
@@ -9719,15 +9732,19 @@ fn native_stream_shared_manifest(
                     return;
                 };
                 let token = stored_token
-                    .or_else(|| value.as_object().and_then(|object| {
-                        ["shareToken", "share_token", "token"]
-                            .iter()
-                            .find_map(|key| object.get(*key).map(json_scalar_preview))
-                    }))
+                    .or_else(|| {
+                        value.as_object().and_then(|object| {
+                            ["shareToken", "share_token", "token"]
+                                .iter()
+                                .find_map(|key| object.get(*key).map(json_scalar_preview))
+                        })
+                    })
                     .filter(|token| !token.trim().is_empty());
                 let token = match token {
                     Some(token) => token,
-                    None => match native_issue_shared_access_token(&window_for_request, &grant_id).await {
+                    None => match native_issue_shared_access_token(&window_for_request, &grant_id)
+                        .await
+                    {
                         Ok(token) => {
                             native_store_shared_token(&window_for_request, &grant_id, &token);
                             token
@@ -9745,9 +9762,8 @@ fn native_stream_shared_manifest(
                     },
                 };
                 let encoded_content_id = percent_encode_player_stream_component(&content_id);
-                let ticket_path = endpoint_url(&format!(
-                    "/streams/{encoded_content_id}/share-ticket"
-                ));
+                let ticket_path =
+                    endpoint_url(&format!("/streams/{encoded_content_id}/share-ticket"));
                 let ticket_headers = [("X-Share-Token", token.as_str())];
                 let ticket = match fetch_text_with_method_and_headers(
                     &window_for_request,
@@ -9770,9 +9786,9 @@ fn native_stream_shared_manifest(
                         native_set_action_status(
                             &document_for_request,
                             "Stream",
-                            &error
-                                .as_string()
-                                .unwrap_or_else(|| "share stream ticket request failed".to_string()),
+                            &error.as_string().unwrap_or_else(|| {
+                                "share stream ticket request failed".to_string()
+                            }),
                         );
                         None
                     }
@@ -9796,8 +9812,7 @@ fn native_stream_shared_manifest(
                     "/streams/{encoded_content_id}?ticket={}",
                     percent_encode_player_stream_component(&ticket)
                 ));
-                let url = if stream_url.starts_with("http://")
-                    || stream_url.starts_with("https://")
+                let url = if stream_url.starts_with("http://") || stream_url.starts_with("https://")
                 {
                     stream_url
                 } else {
@@ -9845,7 +9860,11 @@ fn native_stream_shared_manifest(
 #[cfg(target_arch = "wasm32")]
 fn native_fold_duplicate_rows(document: &web_sys::Document, button: &web_sys::Element) {
     let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() else {
-        native_set_action_status(document, "Fold Duplicates", "No result workspace is mounted.");
+        native_set_action_status(
+            document,
+            "Fold Duplicates",
+            "No result workspace is mounted.",
+        );
         return;
     };
     let folded = workspace.has_attribute("data-slskr-native-duplicates-folded");
@@ -9955,11 +9974,7 @@ fn native_import_wishlist_list(document: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn native_bulk_transfer_action(
-    document: &web_sys::Document,
-    action: &str,
-    selector: &str,
-) {
+fn native_bulk_transfer_action(document: &web_sys::Document, action: &str, selector: &str) {
     let Ok(buttons) = document.query_selector_all(selector) else {
         native_set_action_status(document, action, "Transfer table is not mounted.");
         return;
@@ -9977,7 +9992,11 @@ fn native_bulk_transfer_action(
         }
     }
     if dispatched == 0 {
-        native_set_action_status(document, action, "No live transfer requests match this action.");
+        native_set_action_status(
+            document,
+            action,
+            "No live transfer requests match this action.",
+        );
     } else {
         native_set_action_status(
             document,
@@ -9992,7 +10011,11 @@ fn native_open_search(document: &web_sys::Document, button: &web_sys::Element) -
     let Some(id) = native_selected_row_attribute(document, button, "data-slskr-native-search-id")
         .filter(|value| safe_route_segment(value))
     else {
-        native_set_action_status(document, "Open", "Select a saved search with a real ID first.");
+        native_set_action_status(
+            document,
+            "Open",
+            "Select a saved search with a real ID first.",
+        );
         return true;
     };
     let Some(window) = document.default_view() else {
@@ -10029,7 +10052,9 @@ fn handle_native_local_action(
         return true;
     }
     if normalized == "clear search" {
-        if let Ok(Some(input)) = document.query_selector(r#"input[aria-label="Search conversations"]"#) {
+        if let Ok(Some(input)) =
+            document.query_selector(r#"input[aria-label="Search conversations"]"#)
+        {
             if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
                 input.set_value("");
             }
@@ -10053,9 +10078,9 @@ fn handle_native_local_action(
     if kind == RouteKind::Search && normalized == "preview" {
         let _ = native_action_row(document, button);
         if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
-            if let Ok(Some(panel)) = workspace.query_selector(
-                r#"[data-slskr-native-panel-label="Download Preview"]"#,
-            ) {
+            if let Ok(Some(panel)) =
+                workspace.query_selector(r#"[data-slskr-native-panel-label="Download Preview"]"#)
+            {
                 if let Some(index) = panel.get_attribute("data-slskr-native-panel") {
                     if let Ok(Some(tab)) = workspace.query_selector(&format!(
                         r#"[data-slskr-native-tab="{}"]"#,
@@ -10121,7 +10146,10 @@ fn handle_native_local_action(
         }
         return true;
     }
-    if matches!(normalized.as_str(), "copy review" | "copy action plan" | "copy packet") {
+    if matches!(
+        normalized.as_str(),
+        "copy review" | "copy action plan" | "copy packet"
+    ) {
         if let Some(window) = document.default_view() {
             native_copy_context(&window, document, button, route_path, action);
         }
@@ -10567,7 +10595,10 @@ fn native_action_target(
             .or_else(|| selected_native_row_target(&workspace))?;
         return route_target_segment(&room);
     }
-    if matches!(action.body, ActionBody::BrowseDirectory | ActionBody::DownloadFiles) {
+    if matches!(
+        action.body,
+        ActionBody::BrowseDirectory | ActionBody::DownloadFiles
+    ) {
         for selector in [
             r#"input[aria-label="Username"]"#,
             r#"input[aria-label="Chat username"]"#,
@@ -11983,7 +12014,10 @@ fn mount_reference_actions(
                         return;
                     }
                 }
-                if matches!(normalized.as_str(), "copy review" | "copy manifest" | "copy token") {
+                if matches!(
+                    normalized.as_str(),
+                    "copy review" | "copy manifest" | "copy token"
+                ) {
                     let facts = document
                         .query_selector("[data-slskr-parity-reference] .slskr-reference-facts")
                         .ok()
@@ -12063,12 +12097,8 @@ fn mount_reference_actions(
                 }
                 let body = native_action_body(&document, &button_for_callback, action, &value);
                 let method = action.method.to_string();
-                let target = native_action_target_for_ui(
-                    &document,
-                    &button_for_callback,
-                    action,
-                    "",
-                );
+                let target =
+                    native_action_target_for_ui(&document, &button_for_callback, action, "");
                 let id = native_action_id(&document, &button_for_callback, action);
                 let path = concrete_action_path_with_target_and_id(
                     &route_path,
@@ -12207,9 +12237,9 @@ fn keyboard_event_started_in_text_control(document: &web_sys::Document) -> bool 
 
 #[cfg(target_arch = "wasm32")]
 fn focus_first_card_filter(document: &web_sys::Document) {
-    if let Ok(Some(filter)) = document
-        .query_selector(".slskr-card-filter, [data-slskr-native-filter], [data-slskr-search-setting=\"query\"]")
-    {
+    if let Ok(Some(filter)) = document.query_selector(
+        ".slskr-card-filter, [data-slskr-native-filter], [data-slskr-search-setting=\"query\"]",
+    ) {
         if let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() {
             let _ = input.focus();
             let _ = input.select();
@@ -14928,29 +14958,29 @@ fn mount_toolbar_actions(
                     }
                     return;
                 };
-                let target_value = if action.path.contains(":username")
-                    || action.path.contains(":roomName")
-                {
-                    toolbar_values.first().cloned().unwrap_or_default()
-                } else {
-                    String::new()
-                };
+                let target_value =
+                    if action.path.contains(":username") || action.path.contains(":roomName") {
+                        toolbar_values.first().cloned().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
                 let body_value = match action.body {
-                    ActionBody::ConversationMessage | ActionBody::RoomMessage => toolbar_values
-                        .get(1)
-                        .cloned()
-                        .unwrap_or_else(|| native_action_value(&document, &button_for_callback, action.body)),
-                    ActionBody::BrowseDirectory => toolbar_values
-                        .get(1)
-                        .cloned()
-                        .unwrap_or_else(|| native_action_value(&document, &button_for_callback, action.body)),
+                    ActionBody::ConversationMessage | ActionBody::RoomMessage => {
+                        toolbar_values.get(1).cloned().unwrap_or_else(|| {
+                            native_action_value(&document, &button_for_callback, action.body)
+                        })
+                    }
+                    ActionBody::BrowseDirectory => {
+                        toolbar_values.get(1).cloned().unwrap_or_else(|| {
+                            native_action_value(&document, &button_for_callback, action.body)
+                        })
+                    }
                     ActionBody::DownloadFiles => {
                         native_action_value(&document, &button_for_callback, action.body)
                     }
-                    _ => toolbar_values
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| native_action_value(&document, &button_for_callback, action.body)),
+                    _ => toolbar_values.first().cloned().unwrap_or_else(|| {
+                        native_action_value(&document, &button_for_callback, action.body)
+                    }),
                 };
                 if !native_route_action_is_ready(
                     &document,
@@ -14962,12 +14992,7 @@ fn mount_toolbar_actions(
                 ) {
                     return;
                 }
-                let body = native_action_body(
-                    &document,
-                    &button_for_callback,
-                    action,
-                    &body_value,
-                );
+                let body = native_action_body(&document, &button_for_callback, action, &body_value);
                 let window = window.clone();
                 let document = document.clone();
                 let method = action.method.to_string();
@@ -15078,12 +15103,8 @@ fn mount_route_actions(
                 let return_to_searches = route_kind(&route_path) == RouteKind::Search
                     && route_path != "/searches"
                     && matches!(action.label, "Clear Searches" | "Remove Search");
-                let target = native_action_target_for_ui(
-                    &document,
-                    &button_for_callback,
-                    action,
-                    "",
-                );
+                let target =
+                    native_action_target_for_ui(&document, &button_for_callback, action, "");
                 let id = native_action_id(&document, &button_for_callback, action);
                 let path = concrete_action_path_with_target_and_id(
                     &route_path,
@@ -18234,13 +18255,51 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_text(window: &web_sys::Window, url: &str) -> Result<String, JsValue> {
-    let response_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url)).await?;
+    let share_response = url.ends_with("/transfers/speeds");
+    let response_value =
+        wasm_bindgen_futures::JsFuture::from(fetch_text_request(window, url)).await?;
     let response: web_sys::Response = response_value.dyn_into()?;
     if !response.ok() {
         return Err(JsValue::from_str(&format!("HTTP {}", response.status())));
     }
+    let response = if share_response {
+        response.clone()
+    } else {
+        Ok(response)
+    }?;
     let text = wasm_bindgen_futures::JsFuture::from(response.text()?).await?;
     Ok(text.as_string().unwrap_or_default())
+}
+
+#[cfg(target_arch = "wasm32")]
+const TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS: f64 = 200.0;
+
+#[cfg(target_arch = "wasm32")]
+std::thread_local! {
+    static TRANSFER_SPEEDS_REQUEST_CACHE: RefCell<Option<(f64, js_sys::Promise)>> = const {
+        RefCell::new(None)
+    };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fetch_text_request(window: &web_sys::Window, url: &str) -> js_sys::Promise {
+    if !url.ends_with("/transfers/speeds") {
+        return window.fetch_with_str(url);
+    }
+
+    let now = js_sys::Date::now();
+    TRANSFER_SPEEDS_REQUEST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((requested_at, request)) = cache.as_ref() {
+            if now >= *requested_at && now - *requested_at < TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS {
+                return request.clone();
+            }
+        }
+
+        let request = window.fetch_with_str(url);
+        *cache = Some((now, request.clone()));
+        request
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -20633,27 +20692,17 @@ mod tests {
                 "Preview playlist",
                 "playlist-intake-native",
             ),
-            ("/wishlist", "Wishlist", "Add wanted search", "wishlist-native"),
             (
-                "/downloads",
-                "Downloads",
-                "Download",
-                "transfers-native",
+                "/wishlist",
+                "Wishlist",
+                "Add wanted search",
+                "wishlist-native",
             ),
-            (
-                "/uploads",
-                "Uploads",
-                "Clear completed",
-                "transfers-native",
-            ),
+            ("/downloads", "Downloads", "Download", "transfers-native"),
+            ("/uploads", "Uploads", "Clear completed", "transfers-native"),
             ("/messages", "Conversations", "Reply", "messaging-native"),
             ("/users", "Users", "Watch", "users-native"),
-            (
-                "/contacts",
-                "Contacts",
-                "Add contact",
-                "contacts-native",
-            ),
+            ("/contacts", "Contacts", "Add contact", "contacts-native"),
             ("/solid", "Solid", "Connect identity", "solid-native"),
             (
                 "/collections",
@@ -20667,19 +20716,9 @@ mod tests {
                 "Issue token",
                 "sharegroups-native",
             ),
-            (
-                "/shared",
-                "Shared with Me",
-                "Open",
-                "shared-native",
-            ),
+            ("/shared", "Shared with Me", "Open", "shared-native"),
             ("/browse", "Browse", "Browse", "browse-native"),
-            (
-                "/system",
-                "System",
-                "Rescan Shares",
-                "system-native",
-            ),
+            ("/system", "System", "Rescan Shares", "system-native"),
         ];
 
         for (path, heading, action, native_class) in expectations {
@@ -21124,11 +21163,19 @@ mod tests {
             ("/system", "Vacuum database", "Vacuum Database"),
             ("/system", "Check Lidarr", "Check Lidarr"),
             ("/system", "Refresh Lidarr Sync", "Refresh Lidarr Sync"),
-            ("/system", "Track MusicBrainz Target", "Track MusicBrainz Target"),
+            (
+                "/system",
+                "Track MusicBrainz Target",
+                "Track MusicBrainz Target",
+            ),
             ("/system", "Refresh MusicBrainz", "Refresh MusicBrainz"),
             ("/system", "Start SongID Run", "Start SongID Run"),
             ("/system", "Refresh SongID", "Refresh SongID"),
-            ("/system", "Scan Library Health", "Start Library Health Scan"),
+            (
+                "/system",
+                "Scan Library Health",
+                "Start Library Health Scan",
+            ),
             ("/system", "Fix Library Issues", "Fix Library Issues"),
         ];
 
@@ -21338,11 +21385,7 @@ mod tests {
         }
 
         let downloads = route_page_html("/downloads");
-        for value in [
-            "Transfer Group",
-            "No downloads selected",
-            "Retry All",
-        ] {
+        for value in ["Transfer Group", "No downloads selected", "Retry All"] {
             assert!(
                 downloads.contains(value),
                 "downloads workspace should contain {value}"
@@ -21362,11 +21405,7 @@ mod tests {
         }
 
         let users = route_page_html("/users");
-        for value in [
-            "User Detail",
-            "No user selected",
-            "Save note",
-        ] {
+        for value in ["User Detail", "No user selected", "Save note"] {
             assert!(
                 users.contains(value),
                 "users workspace should contain {value}"
@@ -21374,11 +21413,7 @@ mod tests {
         }
 
         let contacts = route_page_html("/contacts");
-        for value in [
-            "All Contacts",
-            "No contact selected",
-            "Refresh Nearby",
-        ] {
+        for value in ["All Contacts", "No contact selected", "Refresh Nearby"] {
             assert!(
                 contacts.contains(value),
                 "contacts workspace should contain {value}"
@@ -21512,10 +21547,7 @@ mod tests {
                     "Update Share Grant",
                 ],
             ),
-            (
-                "/shared",
-                &["Stream", "Backfill", "Copy token"],
-            ),
+            ("/shared", &["Stream", "Backfill", "Copy token"]),
             ("/browse", &["Download Selected", "Open a New Browse Tab"]),
             (
                 "/system",
@@ -21592,7 +21624,11 @@ mod tests {
             ),
             (
                 "/shared",
-                &["data-slskr-native-editor", "Inbound Access Editor", "Copy token"],
+                &[
+                    "data-slskr-native-editor",
+                    "Inbound Access Editor",
+                    "Copy token",
+                ],
             ),
             (
                 "/system",
@@ -21966,11 +22002,9 @@ mod tests {
             "/api/v0/searches/search-42"
         );
 
-        let collection_item = route_action_for_native_label(
-            "/collections",
-            "Remove Collection Item",
-        )
-        .expect("collection item action");
+        let collection_item =
+            route_action_for_native_label("/collections", "Remove Collection Item")
+                .expect("collection item action");
         assert_eq!(
             concrete_action_path_with_target_and_id(
                 "/collections",
@@ -22127,7 +22161,7 @@ mod tests {
         assert!(sharegroups.contains("Trusted"));
         assert!(sharegroups.contains("2 members"));
 
-            let shared = route_workspace_result_html(
+        let shared = route_workspace_result_html(
                 "/shared",
                 &[EndpointBody {
                     endpoint: ApiEndpoint {

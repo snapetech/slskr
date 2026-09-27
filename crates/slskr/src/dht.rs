@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn shared_udp_mode_moves_mainline_to_a_bounded_internal_endpoint() {
         let rendezvous = Rendezvous::with_runtime_builder(
-            50_300,
+            0,
             Some(50_305),
             Some(&[]),
             true,
@@ -399,14 +399,20 @@ mod tests {
         let backend = rendezvous
             .shared_udp_backend()
             .expect("shared mode has a mainline backend");
-        assert_ne!(backend.port(), 50_300);
+        let public_port = rendezvous
+            .shared_udp_socket()
+            .expect("shared mode has a public socket")
+            .local_addr()
+            .unwrap()
+            .port();
+        assert_ne!(backend.port(), public_port);
         assert_ne!(backend.port(), 0);
     }
 
     #[test]
     fn shared_udp_mode_exposes_the_public_socket_port() {
         let rendezvous = Rendezvous::with_runtime_builder(
-            50_301,
+            0,
             Some(50_305),
             Some(&[]),
             true,
@@ -419,8 +425,10 @@ mod tests {
         let public_socket = rendezvous
             .shared_udp_socket()
             .expect("shared mode has a public socket");
-        assert_eq!(public_socket.local_addr().unwrap().port(), 50_301);
-        assert_ne!(rendezvous.shared_udp_backend().unwrap().port(), 50_301);
+        let public_port = public_socket.local_addr().unwrap().port();
+        assert_ne!(public_port, 0);
+        assert_eq!(rendezvous.shared_public_port, Some(public_port));
+        assert_ne!(rendezvous.shared_udp_backend().unwrap().port(), public_port);
     }
 
     #[tokio::test]

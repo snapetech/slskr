@@ -1,7 +1,9 @@
 use std::net::Ipv4Addr;
 
 use proptest::prelude::*;
-use slskr_protocol::{DecodeError, EncodeError, ProtocolTextEncoding, Reader, Writer};
+use slskr_protocol::{
+    init::MAX_INIT_FIELD_BYTES, DecodeError, EncodeError, ProtocolTextEncoding, Reader, Writer,
+};
 
 proptest! {
     #[test]
@@ -162,4 +164,21 @@ fn reader_reports_trailing_bytes() {
 
     assert_eq!(reader.read_u8().unwrap(), 1);
     assert_eq!(reader.finish(), Err(DecodeError::TrailingBytes(1)));
+}
+
+#[test]
+fn bounded_string_rejects_oversized_wire_length_before_reading_bytes() {
+    let length = MAX_INIT_FIELD_BYTES + 1;
+    let mut input = (length as u32).to_le_bytes().to_vec();
+    input.extend(std::iter::repeat_n(b'x', length));
+    let mut reader = Reader::new(&input);
+
+    assert_eq!(
+        reader.read_string_with_max(MAX_INIT_FIELD_BYTES),
+        Err(DecodeError::InvalidStringLength {
+            length,
+            remaining: MAX_INIT_FIELD_BYTES,
+        })
+    );
+    assert_eq!(reader.offset(), 4);
 }

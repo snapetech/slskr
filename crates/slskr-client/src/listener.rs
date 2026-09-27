@@ -1,4 +1,7 @@
-use slskr_protocol::{frame::InitFrame, init::InitMessage};
+use slskr_protocol::{
+    frame::InitFrame,
+    init::{InitCode, InitMessage, MAX_PEER_INIT_FRAME_LEN},
+};
 use std::net::SocketAddr;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
@@ -117,6 +120,9 @@ impl Listener {
         })?
     }
 
+    /// Accept plain or type-1 framed Soulseek initialization from a shared
+    /// endpoint. Legacy one-byte connection-kind traffic remains on the
+    /// dedicated [`Self::accept`] contract rather than this shared endpoint.
     pub async fn accept_shared(
         &self,
     ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
@@ -209,70 +215,188 @@ where
     }
 }
 
+/// Demultiplex a shared Soulseek endpoint carrying framed initialization.
+///
+/// The shared endpoint has an explicit framed contract: plain `InitFrame` and
+/// type-1 obfuscated `InitFrame` traffic are accepted here, while the legacy
+/// one-byte `P`/`F`/`D` connection-kind contract remains on
+/// the dedicated [`demux_incoming`]/[`Listener::accept`] path. Keeping the raw
+/// contract separate is necessary because those bytes are also valid first
+/// bytes of a frame length or an obfuscation key; no byte-only parser can
+/// distinguish those streams without guessing.
 pub async fn demux_shared_incoming<S>(mut stream: S) -> Result<IncomingConnection<S>, ClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    // Raw direct connections begin with a one-byte connection kind. Init
-    // frames begin with a four-byte length prefix, while type-1 obfuscation
-    // begins with a four-byte key. Preserve the raw form before consuming the
-    // prefix used to distinguish the two framed forms.
-    let first = stream.read_u8().await?;
-    if let Ok(kind) = ConnectionKind::try_from(first) {
-        return Ok(match kind {
-            ConnectionKind::PeerMessages => {
-                IncomingConnection::PeerMessages(PeerMessageConnection::new(stream))
-            }
-            ConnectionKind::FileTransfer => {
-                IncomingConnection::FileTransfer(FileTransferConnection::new(stream))
-            }
-            ConnectionKind::Distributed => {
-                IncomingConnection::Distributed(DistributedConnection::new(stream))
-            }
-        });
+    let mut buffered = Vec::with_capacity(8);
+    read_shared_bytes(&mut stream, &mut buffered, 4).await?;
+
+    // Known init messages are at least nine bytes on the wire. Handle a
+    // shorter plain frame before reading the obfuscation lookahead so an
+    // unknown one-byte init extension is not over-read.
+    let plain_length = u32::from_le_bytes(
+        buffered[..4]
+            .try_into()
+            .expect("shared demux reads a four-byte prefix"),
+    ) as usize;
+    let short_plain = (1..=crate::io::DEFAULT_MAX_FRAME_LEN)
+        .contains(&plain_length)
+        .then_some(4 + plain_length)
+        .filter(|encoded_len| *encoded_len < 8);
+    if let Some(encoded_len) = short_plain {
+        read_shared_bytes(&mut stream, &mut buffered, encoded_len).await?;
+        if let Ok(message) = decode_shared_candidate(&buffered[..encoded_len], false) {
+            return incoming_from_init_message(message, stream, false);
+        }
     }
 
-    let mut prefix = [0_u8; 4];
-    prefix[0] = first;
-    stream.read_exact(&mut prefix[1..]).await?;
-    let candidate_length = u32::from_le_bytes(prefix) as usize;
-    if (1..=crate::io::DEFAULT_MAX_FRAME_LEN).contains(&candidate_length) {
-        let mut encoded = Vec::with_capacity(4 + candidate_length);
-        encoded.extend_from_slice(&prefix);
-        encoded.resize(4 + candidate_length, 0);
-        stream.read_exact(&mut encoded[4..]).await?;
-        let frame = InitFrame::decode(&encoded)?;
-        return incoming_from_init_message(InitMessage::decode(frame)?, stream, false);
+    read_shared_bytes(&mut stream, &mut buffered, 8).await?;
+    let candidates = shared_frame_candidates(&buffered)?;
+    let mut unknown = None;
+    let mut last_error = None;
+
+    // Prefer the shortest valid candidate. This is a compatibility heuristic:
+    // type-1 has no additional wire discriminator here, and the same bytes can
+    // form valid plain and obfuscated init frames. The listener cannot infer
+    // the sender's intent in that case; resolving it requires a protocol change.
+    for candidate in candidates {
+        if let Err(error) =
+            validate_shared_candidate_header(&mut stream, &mut buffered, candidate).await
+        {
+            last_error = Some(error);
+            continue;
+        }
+        read_shared_bytes(&mut stream, &mut buffered, candidate.encoded_len).await?;
+        let encoded = &buffered[..candidate.encoded_len];
+        match decode_shared_candidate(encoded, candidate.obfuscated) {
+            Ok(message @ (InitMessage::PeerInit { .. } | InitMessage::PierceFirewall { .. })) => {
+                if let Err(error) = validate_shared_init_message(&message) {
+                    last_error = Some(error);
+                    continue;
+                }
+                return incoming_from_init_message(message, stream, candidate.obfuscated);
+            }
+            Ok(message @ InitMessage::Unknown { .. }) => {
+                unknown.get_or_insert((candidate, message));
+            }
+            Err(error) => last_error = Some(error),
+        }
     }
 
-    // The first four bytes are the obfuscation key. The next four bytes are
-    // the rotated init-frame length prefix. Decode the header before
-    // allocating or reading the remainder so malformed peers cannot request
-    // an unbounded buffer.
-    let mut first_block = [0_u8; 8];
-    first_block[..4].copy_from_slice(&prefix);
-    stream.read_exact(&mut first_block[4..]).await?;
-    let decoded_first_block = slskr_protocol::decode_rotated(&first_block)?;
-    let length = u32::from_le_bytes([
-        decoded_first_block[0],
-        decoded_first_block[1],
-        decoded_first_block[2],
-        decoded_first_block[3],
-    ]) as usize;
-    if !(1..=crate::io::DEFAULT_MAX_FRAME_LEN).contains(&length) {
+    let Some((candidate, message)) = unknown else {
+        return Err(last_error.unwrap_or(ClientError::ConnectionClosed));
+    };
+    incoming_from_init_message(message, stream, candidate.obfuscated)
+}
+
+async fn validate_shared_candidate_header<S>(
+    stream: &mut S,
+    buffered: &mut Vec<u8>,
+    candidate: SharedFrameCandidate,
+) -> Result<(), ClientError>
+where
+    S: AsyncRead + Unpin,
+{
+    let (prefix_len, code) = if candidate.obfuscated {
+        // The first eight obfuscated bytes contain the key and decoded length;
+        // nine bytes are enough to expose the decoded init code without
+        // allocating the advertised frame body.
+        read_shared_bytes(stream, buffered, 9).await?;
+        let decoded = slskr_protocol::decode_rotated(&buffered[..9])?;
+        (8, decoded[4])
+    } else {
+        (4, buffered[4])
+    };
+    let length = candidate
+        .encoded_len
+        .checked_sub(prefix_len)
+        .expect("shared candidate includes its frame prefix");
+    if code == InitCode::PeerInit.as_u8() && length > MAX_PEER_INIT_FRAME_LEN {
         return Err(ClientError::FrameTooLarge {
             length,
+            max: MAX_PEER_INIT_FRAME_LEN,
+        });
+    }
+    Ok(())
+}
+
+fn validate_shared_init_message(message: &InitMessage) -> Result<(), ClientError> {
+    if let InitMessage::PeerInit {
+        username,
+        connection_type,
+        ..
+    } = message
+    {
+        normalize_peer_username(username)?;
+        ConnectionKind::try_from_connection_type(connection_type)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SharedFrameCandidate {
+    encoded_len: usize,
+    obfuscated: bool,
+}
+
+fn shared_frame_candidates(first_block: &[u8]) -> Result<Vec<SharedFrameCandidate>, ClientError> {
+    let plain_length =
+        u32::from_le_bytes(first_block[..4].try_into().expect("four-byte prefix")) as usize;
+    let obfuscated_prefix = slskr_protocol::decode_rotated(first_block)?;
+    let obfuscated_length =
+        u32::from_le_bytes(obfuscated_prefix[..4].try_into().expect("four-byte prefix")) as usize;
+
+    let mut candidates = Vec::with_capacity(2);
+    if (1..=crate::io::DEFAULT_MAX_FRAME_LEN).contains(&plain_length) {
+        candidates.push(SharedFrameCandidate {
+            encoded_len: 4 + plain_length,
+            obfuscated: false,
+        });
+    }
+    if (1..=crate::io::DEFAULT_MAX_FRAME_LEN).contains(&obfuscated_length) {
+        candidates.push(SharedFrameCandidate {
+            encoded_len: 8 + obfuscated_length,
+            obfuscated: true,
+        });
+    }
+    candidates.sort_by_key(|candidate| candidate.encoded_len);
+    if candidates.is_empty() {
+        return Err(ClientError::FrameTooLarge {
+            length: plain_length.max(obfuscated_length),
             max: crate::io::DEFAULT_MAX_FRAME_LEN,
         });
     }
-    let mut obfuscated = Vec::with_capacity(8 + length);
-    obfuscated.extend_from_slice(&first_block);
-    obfuscated.resize(8 + length, 0);
-    stream.read_exact(&mut obfuscated[8..]).await?;
-    let decoded = slskr_protocol::decode_rotated(&obfuscated)?;
+    Ok(candidates)
+}
+
+fn decode_shared_candidate(encoded: &[u8], obfuscated: bool) -> Result<InitMessage, ClientError> {
+    let decoded = if obfuscated {
+        slskr_protocol::decode_rotated(encoded)?
+    } else {
+        encoded.to_vec()
+    };
     let frame = InitFrame::decode(&decoded)?;
-    let message = decode_obfuscated_init_message(frame)?;
-    incoming_from_init_message(message, stream, true)
+    if obfuscated {
+        decode_obfuscated_init_message(frame)
+    } else {
+        Ok(InitMessage::decode(frame)?)
+    }
+}
+
+async fn read_shared_bytes<S>(
+    stream: &mut S,
+    buffered: &mut Vec<u8>,
+    length: usize,
+) -> Result<(), ClientError>
+where
+    S: AsyncRead + Unpin,
+{
+    if buffered.len() < length {
+        let start = buffered.len();
+        buffered.resize(length, 0);
+        stream.read_exact(&mut buffered[start..]).await?;
+    }
+    Ok(())
 }
 
 const SHARED_MESH_CLASSIFICATION_ATTEMPTS: usize = 5;
@@ -283,10 +407,10 @@ const TLS_MAJOR_VERSION: u8 = 0x03;
 /// Classify a stream for the current upstream shared TCP endpoint.
 ///
 /// A mesh overlay connection starts with a TLS record header (`0x16, 0x03`).
-/// Soulseek plain and obfuscated traffic starts with different bytes and is
-/// passed to the existing bounded Soulseek demux. The peek is intentionally
-/// conservative: a partial TLS header is rejected after the bounded retry
-/// window, while non-TLS traffic is never guessed as mesh traffic.
+/// Other traffic is passed to the framed Soulseek demux. The peek is
+/// intentionally conservative: a partial TLS header is rejected after the
+/// bounded retry window, while non-TLS traffic is never guessed as mesh
+/// traffic.
 pub async fn demux_shared_mesh_incoming(
     stream: TcpStream,
 ) -> Result<SharedIncomingConnection<TcpStream>, ClientError> {

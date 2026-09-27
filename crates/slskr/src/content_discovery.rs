@@ -747,6 +747,18 @@ impl ContentDiscoveryStore {
         Ok(merged)
     }
 
+    pub(crate) fn restore_shadow_records(
+        &mut self,
+        records: Vec<ShadowIndexRecord>,
+    ) -> Result<(), String> {
+        let current = std::mem::replace(&mut self.shadow_records, records);
+        if let Err(error) = self.persist() {
+            self.shadow_records = current;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn persist(&self) -> Result<(), String> {
         let Some(path) = self.state_path.as_deref() else {
             return Ok(());

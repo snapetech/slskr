@@ -31,5 +31,9 @@ uuid = "1"
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 
+[[bench]]
+name = "file_transfer_payload"
+harness = false
+
 [lints]
 workspace = true

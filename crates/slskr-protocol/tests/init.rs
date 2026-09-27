@@ -1,6 +1,11 @@
 use std::collections::HashSet;
 
-use slskr_protocol::{frame::InitFrame, init::InitCode, InitMessage};
+use slskr_protocol::{
+    error::DecodeError,
+    frame::InitFrame,
+    init::{InitCode, MAX_INIT_FIELD_BYTES},
+    InitMessage,
+};
 
 #[test]
 fn init_codes_map_known_values() {
@@ -57,4 +62,36 @@ fn unknown_init_messages_preserve_payload() {
             payload: vec![1, 2, 3]
         }
     );
+}
+
+#[test]
+fn peer_init_rejects_oversized_username_before_string_ownership() {
+    let length = MAX_INIT_FIELD_BYTES + 1;
+    let mut payload = (length as u32).to_le_bytes().to_vec();
+    payload.extend(std::iter::repeat_n(b'x', length));
+
+    assert!(matches!(
+        InitMessage::decode(InitFrame::new(InitCode::PeerInit.as_u8(), payload)),
+        Err(DecodeError::InvalidStringLength {
+            length: actual,
+            remaining: MAX_INIT_FIELD_BYTES,
+        }) if actual == length
+    ));
+}
+
+#[test]
+fn peer_init_rejects_oversized_connection_type_before_string_ownership() {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0_u32.to_le_bytes());
+    let length = MAX_INIT_FIELD_BYTES + 1;
+    payload.extend_from_slice(&(length as u32).to_le_bytes());
+    payload.extend(std::iter::repeat_n(b'x', length));
+
+    assert!(matches!(
+        InitMessage::decode(InitFrame::new(InitCode::PeerInit.as_u8(), payload)),
+        Err(DecodeError::InvalidStringLength {
+            length: actual,
+            remaining: MAX_INIT_FIELD_BYTES,
+        }) if actual == length
+    ));
 }

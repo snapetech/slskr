@@ -1,5 +1,8 @@
 //! WebSocket event feed for `/api/events/ws`.
 
+use std::collections::HashSet;
+
+use serde::Deserialize;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     sync::{broadcast, mpsc, RwLock},
@@ -16,6 +19,8 @@ const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const CLIENT_FRAME_CHANNEL_CAPACITY: usize = 16;
 const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_EVENT_FRAME_BYTES: usize = 64 * 1024;
+const MAX_SUBSCRIPTION_TOPICS: usize = 128;
+const MAX_SUBSCRIPTION_TOPIC_BYTES: usize = 128;
 
 pub fn valid_sec_websocket_key(sec_websocket_key: &str) -> bool {
     let Ok(decoded) = STANDARD.decode(sec_websocket_key.as_bytes()) else {
@@ -108,6 +113,7 @@ where
     W: AsyncWrite + Unpin,
 {
     let mut last_sent_id = 0;
+    let mut subscribed_topics: Option<HashSet<String>> = None;
 
     let replay = {
         let events = events.read().await;
@@ -145,11 +151,23 @@ where
                     None => return Ok(()),
                     Some(Ok(ClientFrame::Ping(payload))) => write_frame(writer, 0x8a, &payload).await?,
                     Some(Ok(ClientFrame::Pong)) => awaiting_pong = false,
+                    Some(Ok(ClientFrame::Subscription { subscribe, topics })) => {
+                        let selected = subscribed_topics.get_or_insert_with(HashSet::new);
+                        if subscribe {
+                            selected.extend(topics);
+                        } else {
+                            for topic in topics {
+                                selected.remove(&topic);
+                            }
+                        }
+                    }
                     Some(Err(error)) => return Err(error),
                 },
             received = receiver.recv() => match received {
                 Ok(record) => {
-                if record.id > last_sent_id {
+                if record.id > last_sent_id
+                    && event_is_subscribed(&record, subscribed_topics.as_ref())
+                {
                     write_text_frame(writer, &event_frame_json(&record)).await?;
                     last_sent_id = record.id;
                 }
@@ -164,7 +182,9 @@ where
                     .collect::<Vec<_>>();
                 drop(events);
                 for record in missed {
-                    write_text_frame(writer, &event_frame_json(&record)).await?;
+                    if event_is_subscribed(&record, subscribed_topics.as_ref()) {
+                        write_text_frame(writer, &event_frame_json(&record)).await?;
+                    }
                     last_sent_id = record.id;
                 }
             }
@@ -192,6 +212,51 @@ enum ClientFrame {
     Close(Vec<u8>),
     Ping(Vec<u8>),
     Pong,
+    Subscription {
+        subscribe: bool,
+        topics: Vec<String>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct SubscriptionMessage {
+    #[serde(rename = "type")]
+    kind: String,
+    data: SubscriptionData,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubscriptionData {
+    topics: Vec<String>,
+}
+
+fn event_is_subscribed(record: &EventRecord, selected: Option<&HashSet<String>>) -> bool {
+    selected.is_none_or(|topics| topics.contains(&record.kind) || topics.contains(record.topic()))
+}
+
+fn decode_subscription(payload: &[u8]) -> Result<ClientFrame, String> {
+    let message: SubscriptionMessage = serde_json::from_slice(payload)
+        .map_err(|_| "event websocket subscription was not valid JSON".to_owned())?;
+    let subscribe = match message.kind.as_str() {
+        "subscribe" => true,
+        "unsubscribe" => false,
+        _ => return Err("event websocket subscription used an unknown operation".to_owned()),
+    };
+    if message.data.topics.is_empty() || message.data.topics.len() > MAX_SUBSCRIPTION_TOPICS {
+        return Err("event websocket subscription topic count is invalid".to_owned());
+    }
+    if message
+        .data
+        .topics
+        .iter()
+        .any(|topic| topic.is_empty() || topic.len() > MAX_SUBSCRIPTION_TOPIC_BYTES)
+    {
+        return Err("event websocket subscription topic is invalid".to_owned());
+    }
+    Ok(ClientFrame::Subscription {
+        subscribe,
+        topics: message.data.topics,
+    })
 }
 
 async fn read_client_frame<R>(reader: &mut R) -> Result<ClientFrame, String>
@@ -251,8 +316,11 @@ where
     if is_control && len > 125 {
         return Err("client websocket control frame is too large".to_owned());
     }
-    if !is_control {
-        return Err("event websocket does not accept client data frames".to_owned());
+    if opcode == 0x0 {
+        return Err("event websocket does not accept continuation frames".to_owned());
+    }
+    if opcode == 0x2 {
+        return Err("event websocket does not accept binary data frames".to_owned());
     }
     let mut mask = [0_u8; 4];
     reader
@@ -276,7 +344,8 @@ where
         }
         0x9 => Ok(ClientFrame::Ping(payload)),
         0xa => Ok(ClientFrame::Pong),
-        _ => unreachable!("validated websocket control opcode"),
+        0x1 => decode_subscription(&payload),
+        _ => unreachable!("validated websocket opcode"),
     }
 }
 
@@ -413,14 +482,14 @@ mod tests {
         task::{Context, Poll},
     };
 
-    use futures_util::StreamExt;
+    use futures_util::{SinkExt, StreamExt};
     use tokio::{
         io::{BufReader, BufWriter},
         net::TcpListener,
         sync::{broadcast, oneshot, RwLock},
         time::{self, Duration},
     };
-    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
 
     use super::*;
     use crate::{http_server, EventStore};
@@ -575,6 +644,84 @@ mod tests {
         assert!(text.contains(r#""resource":"42""#), "{text}");
     }
 
+    #[tokio::test]
+    async fn websocket_client_subscription_filters_broadcast_events() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let events = Arc::new(RwLock::new(EventStore::new(10)));
+        let (event_tx, _) = broadcast::channel(10);
+        let (ready_tx, ready_rx) = oneshot::channel();
+
+        let server_events = Arc::clone(&events);
+        let server_event_rx = event_tx.subscribe();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read_half, write_half) = stream.into_split();
+            let mut reader = BufReader::new(read_half);
+            let mut writer = BufWriter::new(write_half);
+            let (request, _) = http_server::read_http_request(&mut reader)
+                .await
+                .unwrap()
+                .unwrap();
+            let key = request.headers.sec_websocket_key.as_deref().unwrap();
+            write_upgrade_response(&mut writer, key, None)
+                .await
+                .unwrap();
+            let _ = ready_tx.send(());
+            let _ = stream_events(reader, &mut writer, &server_events, server_event_rx).await;
+        });
+
+        // Local-only test listener: the production event feed should be served behind TLS as wss://.
+        let (mut socket, _) = connect_async(format!("ws://{address}/api/events/ws")) // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+            .await
+            .unwrap();
+        ready_rx.await.unwrap();
+        socket
+            .send(Message::Text(
+                r#"{"type":"subscribe","data":{"topics":["searches"]}}"#
+                    .to_owned()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        time::sleep(Duration::from_millis(20)).await;
+
+        event_tx
+            .send(EventRecord {
+                id: 1,
+                kind: "transfer.completed".to_owned(),
+                resource: "transfer-1".to_owned(),
+                detail: None,
+                created_at: 1,
+            })
+            .unwrap();
+        event_tx
+            .send(EventRecord {
+                id: 2,
+                kind: "search.completed".to_owned(),
+                resource: "search-1".to_owned(),
+                detail: None,
+                created_at: 2,
+            })
+            .unwrap();
+
+        let message = time::timeout(Duration::from_secs(2), async {
+            loop {
+                let message = socket.next().await.unwrap().unwrap();
+                if message.is_text() {
+                    break message;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let text = message.to_text().unwrap();
+        assert!(text.contains(r#""type":"search.completed""#), "{text}");
+        assert!(time::timeout(Duration::from_millis(100), socket.next())
+            .await
+            .is_err());
+    }
+
     fn masked_client_frame(first_byte: u8, payload: &[u8]) -> Vec<u8> {
         let mut frame = Vec::with_capacity(6 + payload.len());
         frame.push(first_byte);
@@ -601,14 +748,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_websocket_rejects_client_data_before_payload_read() {
-        for opcode in [0x80, 0x81, 0x82] {
+    async fn event_websocket_rejects_continuation_and_binary_frames_before_payload_read() {
+        for (opcode, expected) in [
+            (0x80, "event websocket does not accept continuation frames"),
+            (0x82, "event websocket does not accept binary data frames"),
+        ] {
             let frame = masked_client_frame(opcode, b"hello");
             let mut reader = &frame[..];
             let error = read_client_frame(&mut reader).await.unwrap_err();
-            assert_eq!(error, "event websocket does not accept client data frames");
+            assert_eq!(error, expected);
             assert_eq!(reader.len(), 9, "mask and payload should remain unread");
         }
+    }
+
+    #[tokio::test]
+    async fn event_websocket_accepts_subscription_frames() {
+        let frame = masked_client_frame(
+            0x81,
+            br#"{"type":"subscribe","data":{"topics":["search.completed"]}}"#,
+        );
+        let mut reader = &frame[..];
+        assert!(matches!(
+            read_client_frame(&mut reader).await.unwrap(),
+            ClientFrame::Subscription { subscribe: true, topics }
+                if topics == ["search.completed"]
+        ));
+    }
+
+    #[test]
+    fn subscription_filter_matches_event_types() {
+        let record = EventRecord {
+            id: 1,
+            kind: "search.completed".to_owned(),
+            resource: "search-1".to_owned(),
+            detail: None,
+            created_at: 1,
+        };
+        let selected = HashSet::from(["search.completed".to_owned()]);
+        assert!(event_is_subscribed(&record, None));
+        assert!(event_is_subscribed(&record, Some(&selected)));
+        assert!(!event_is_subscribed(
+            &record,
+            Some(&HashSet::from(["transfer.completed".to_owned()]))
+        ));
     }
 
     #[tokio::test]

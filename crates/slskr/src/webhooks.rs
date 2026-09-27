@@ -17,6 +17,7 @@ use tokio::sync::{RwLock, Semaphore};
 use tokio_rustls::rustls;
 use uuid::Uuid;
 
+use super::{logging, record_daemon_log, scripts, unix_timestamp, update_session, AppState};
 use crate::persistence::DatabaseManager;
 use crate::utils::{is_blocked_outbound_ipv4, is_blocked_outbound_ipv6};
 
@@ -401,6 +402,14 @@ fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
 /// Webhook dispatcher for async event publishing
 pub struct WebhookDispatcher;
 
+#[derive(Clone)]
+pub(crate) struct WebhookDispatchContext {
+    pub(crate) manager: Arc<RwLock<WebhookManager>>,
+    pub(crate) deliveries: Arc<Semaphore>,
+    pub(crate) persistence_turn: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) database: Option<DatabaseManager>,
+}
+
 #[derive(Debug)]
 struct SelfIssuedWebhookVerifier {
     standard: Arc<rustls::client::WebPkiServerVerifier>,
@@ -624,21 +633,19 @@ impl WebhookDispatcher {
 
     /// Dispatch event to all matching webhooks
     pub async fn dispatch(
-        manager: Arc<RwLock<WebhookManager>>,
-        deliveries: Arc<Semaphore>,
-        database: Option<DatabaseManager>,
+        context: WebhookDispatchContext,
+        eligible_webhooks: Vec<Webhook>,
         correlation_id: String,
         event: WebhookEvent,
         data: serde_json::Value,
     ) {
-        let webhooks = {
-            let manager = manager.read().await;
-            manager
-                .get_for_event(event)
-                .into_iter()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
+        let WebhookDispatchContext {
+            manager,
+            deliveries,
+            persistence_turn,
+            database,
+        } = context;
+        let webhooks = eligible_webhooks;
 
         if webhooks.is_empty() {
             return;
@@ -666,7 +673,14 @@ impl WebhookDispatcher {
                         eprintln!("[WEBHOOK] Failed to persist dropped delivery outcome: {error}");
                     }
                 }
-                Self::record_delivery_stats(&manager, database.as_ref(), &webhook.id, 0).await;
+                Self::record_delivery_stats(
+                    &manager,
+                    database.as_ref(),
+                    webhook.clone(),
+                    0,
+                    Arc::clone(&persistence_turn),
+                )
+                .await;
                 continue;
             };
             // Spawn async task for each webhook delivery (no blocking)
@@ -675,10 +689,12 @@ impl WebhookDispatcher {
             let webhook_timeout = webhook.timeout_seconds;
             let webhook_max_retries = webhook.max_retries;
             let webhook_id = webhook.id.clone();
+            let stats_webhook = webhook.clone();
             let payload_clone = payload_json.clone();
             let database = database.clone();
             let correlation_id = correlation_id.clone();
             let manager = Arc::clone(&manager);
+            let persistence_turn = Arc::clone(&persistence_turn);
 
             tokio::spawn(async move {
                 let _delivery_permit = delivery_permit;
@@ -705,8 +721,14 @@ impl WebhookDispatcher {
                         )
                     }
                 };
-                Self::record_delivery_stats(&manager, database.as_ref(), &webhook_id, retry_count)
-                    .await;
+                Self::record_delivery_stats(
+                    &manager,
+                    database.as_ref(),
+                    stats_webhook,
+                    retry_count,
+                    persistence_turn,
+                )
+                .await;
                 if let Some(database) = database {
                     if let Err(error) = database
                         .complete_webhook_logs_with_attempt(
@@ -728,25 +750,49 @@ impl WebhookDispatcher {
     async fn record_delivery_stats(
         manager: &Arc<RwLock<WebhookManager>>,
         database: Option<&DatabaseManager>,
-        webhook_id: &str,
+        expected_webhook: Webhook,
         retry_count: u32,
+        persistence_turn: Arc<tokio::sync::Mutex<()>>,
     ) {
+        let _persistence_turn = persistence_turn.lock().await;
+        let webhook_id = expected_webhook.id.clone();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        {
+        let previous_stats = {
             let mut manager = manager.write().await;
-            if let Some(webhook) = manager.get_mut(webhook_id) {
-                webhook.last_triggered = Some(timestamp);
-                webhook.retry_count = retry_count;
+            let Some(webhook) = manager.get_mut(&webhook_id) else {
+                return;
+            };
+            if !same_webhook_definition(webhook, &expected_webhook) {
+                return;
             }
-        }
+            let previous_stats = (webhook.last_triggered, webhook.retry_count);
+            webhook.last_triggered = Some(timestamp);
+            webhook.retry_count = retry_count;
+            previous_stats
+        };
         if let Some(database) = database {
-            if let Err(error) = database
-                .update_webhook_delivery_stats(webhook_id, timestamp, retry_count)
+            let persistence_error = match database
+                .update_webhook_delivery_stats(&webhook_id, timestamp, retry_count)
                 .await
             {
+                Ok(rows) if rows > 0 => None,
+                Ok(_) => Some("persisted webhook row is missing".to_owned()),
+                Err(error) => Some(error.to_string()),
+            };
+            if let Some(error) = persistence_error {
+                let mut manager = manager.write().await;
+                if let Some(webhook) = manager.get_mut(&expected_webhook.id) {
+                    if same_webhook_definition(webhook, &expected_webhook)
+                        && webhook.last_triggered == Some(timestamp)
+                        && webhook.retry_count == retry_count
+                    {
+                        webhook.last_triggered = previous_stats.0;
+                        webhook.retry_count = previous_stats.1;
+                    }
+                }
                 eprintln!("[WEBHOOK] Failed to persist delivery statistics: {error}");
             }
         }
@@ -901,6 +947,17 @@ fn webhook_definition_is_valid(webhook: &Webhook) -> bool {
         && validate_webhook_secret(&webhook.secret).is_ok()
 }
 
+fn same_webhook_definition(current: &Webhook, expected: &Webhook) -> bool {
+    current.id == expected.id
+        && current.url == expected.url
+        && current.events == expected.events
+        && current.secret == expected.secret
+        && current.active == expected.active
+        && current.created_at == expected.created_at
+        && current.max_retries == expected.max_retries
+        && current.timeout_seconds == expected.timeout_seconds
+}
+
 async fn validate_and_resolve_webhook_url(
     url: &str,
     timeout: Duration,
@@ -1043,6 +1100,292 @@ fn sanitized_webhook_url_for_log(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(parsed) => parsed.origin().ascii_serialization(),
         Err(_) => "<invalid webhook url>".to_string(),
+    }
+}
+
+pub(super) fn webhook_from_persisted(record: crate::persistence::WebhookRecord) -> Option<Webhook> {
+    let events = record
+        .events
+        .split(',')
+        .filter_map(WebhookEvent::from_wire)
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return None;
+    }
+    Some(Webhook {
+        id: record.id,
+        url: record.url,
+        events,
+        secret: record.secret,
+        active: record.active,
+        created_at: record.created_at,
+        last_triggered: record.last_triggered,
+        retry_count: u32::try_from(record.retry_count).unwrap_or(0),
+        max_retries: u32::try_from(record.max_retries).unwrap_or(3),
+        timeout_seconds: u32::try_from(record.timeout_seconds).unwrap_or(30),
+    })
+}
+
+fn webhook_persistence_record(webhook: &Webhook) -> crate::persistence::WebhookRecord {
+    crate::persistence::WebhookRecord {
+        id: webhook.id.clone(),
+        url: webhook.url.clone(),
+        events: webhook
+            .events
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        secret: webhook.secret.clone(),
+        active: webhook.active,
+        created_at: webhook.created_at,
+        last_triggered: webhook.last_triggered,
+        retry_count: i32::try_from(webhook.retry_count).unwrap_or(i32::MAX),
+        max_retries: i32::try_from(webhook.max_retries).unwrap_or(i32::MAX),
+        timeout_seconds: i32::try_from(webhook.timeout_seconds).unwrap_or(i32::MAX),
+    }
+}
+
+pub(super) fn extract_webhook_events(body: &str) -> Result<Vec<WebhookEvent>, &'static str> {
+    let payload = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "webhook payload must be valid JSON")?;
+    let Some(value) = payload.get("events") else {
+        return Ok(vec![WebhookEvent::SearchCreated]);
+    };
+
+    let values = match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(|value| value.as_str().ok_or("webhook events must be strings"))
+            .collect::<Result<Vec<_>, _>>()?,
+        serde_json::Value::String(value) => value.split(',').collect::<Vec<_>>(),
+        _ => return Err("webhook events must be an array or comma-separated string"),
+    };
+    if values.len() > MAX_WEBHOOK_EVENTS {
+        return Err("too many webhook events");
+    }
+
+    let mut events = Vec::with_capacity(values.len());
+    for value in values {
+        let event = WebhookEvent::from_wire(value).ok_or("invalid webhook event")?;
+        if !events.contains(&event) {
+            events.push(event);
+        }
+    }
+    if events.is_empty() {
+        return Err("no valid events specified");
+    }
+    Ok(events)
+}
+
+pub(super) async fn persist_webhook_checked(
+    state: &AppState,
+    webhook: &Webhook,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.insert_webhook(&webhook_persistence_record(webhook))
+        .await
+        .map_err(|error| format!("webhook persistence failed: {error}"))?;
+    Ok(true)
+}
+
+pub(super) async fn persist_webhook_delete_checked(
+    state: &AppState,
+    id: &str,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_webhook(id)
+        .await
+        .map_err(|error| format!("webhook deletion persistence failed: {error}"))?;
+    Ok(true)
+}
+
+pub(super) async fn rollback_webhooks_if_unchanged(
+    state: &AppState,
+    previous: WebhookManager,
+    mutated: &WebhookManager,
+) {
+    let mut webhooks = state.webhooks.write().await;
+    if *webhooks == *mutated {
+        *webhooks = previous;
+    }
+}
+
+pub(super) async fn persist_webhook_dispatch_logs(
+    state: &AppState,
+    manager: &WebhookManager,
+    event: WebhookEvent,
+    correlation_id: &str,
+    request_body: &str,
+    _persistence_turn: &tokio::sync::MutexGuard<'_, ()>,
+) -> Option<String> {
+    let db = state.db.as_ref()?;
+    let mut failures = 0_usize;
+    let mut first_error = None;
+    for webhook in manager.get_for_event(event) {
+        let record = crate::persistence::WebhookLogRecord {
+            id: format!("log_{}", uuid::Uuid::new_v4()),
+            webhook_id: webhook.id.clone(),
+            event: event.to_string(),
+            correlation_id: correlation_id.to_owned(),
+            status: "queued".to_owned(),
+            request_body: request_body.to_owned(),
+            response_status: None,
+            response_body: None,
+            error_message: None,
+            attempt: 1,
+            timestamp: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
+        };
+        if let Err(error) = db.insert_webhook_log(&record).await {
+            failures = failures.saturating_add(1);
+            if first_error.is_none() {
+                first_error = Some(error.to_string());
+            }
+        }
+    }
+    first_error.map(|error| {
+        format!("webhook audit persistence failed for {failures} delivery record(s): {error}")
+    })
+}
+
+pub(super) async fn dispatch_webhook_event(
+    state: &AppState,
+    correlation_id: String,
+    event: WebhookEvent,
+    data: serde_json::Value,
+) {
+    let frozen_event_name = frozen_webhook_event_name(event);
+    scripts::dispatch(
+        state.integration_settings.read().await.scripts.clone(),
+        state.config.state_dir.join("scripts"),
+        state.config.controller_profile,
+        frozen_event_name,
+        &data,
+    );
+    dispatch_frozen_webhook_event(state, event, &data).await;
+    let (eligible_webhooks, log_error) = {
+        let persistence_turn = state.webhook_persistence_lock.lock().await;
+        let webhooks = state.webhooks.read().await.clone();
+        let request_body = WebhookPayload::new(event, correlation_id.clone(), data.clone())
+            .to_string()
+            .unwrap_or_default();
+        let log_error = persist_webhook_dispatch_logs(
+            state,
+            &webhooks,
+            event,
+            &correlation_id,
+            &request_body,
+            &persistence_turn,
+        )
+        .await;
+        let eligible_webhooks = webhooks.get_for_event(event).into_iter().cloned().collect();
+        (eligible_webhooks, log_error)
+    };
+    if let Some(error) = log_error {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(error);
+        })
+        .await;
+    }
+    WebhookDispatcher::dispatch(
+        WebhookDispatchContext {
+            manager: Arc::clone(&state.webhooks),
+            deliveries: Arc::clone(&state.webhook_deliveries),
+            persistence_turn: Arc::clone(&state.webhook_persistence_lock),
+            database: state.db.clone(),
+        },
+        eligible_webhooks,
+        correlation_id,
+        event,
+        data,
+    )
+    .await;
+}
+
+fn frozen_webhook_event_name(event: WebhookEvent) -> &'static str {
+    match event {
+        WebhookEvent::TransferCompleted => "DownloadFileComplete",
+        WebhookEvent::TransferFailed => "DownloadFileFailed",
+        WebhookEvent::MessageReceived => "PrivateMessageReceived",
+        WebhookEvent::SearchCompleted => "SearchResponsesReceived",
+        WebhookEvent::UserConnected => "SoulseekClientConnected",
+        WebhookEvent::UserDisconnected => "SoulseekClientDisconnected",
+        WebhookEvent::RoomJoined | WebhookEvent::RoomLeft => "RoomMessageReceived",
+        WebhookEvent::TransferStarted => "PeerDownloadedFromUs",
+        WebhookEvent::SearchCreated => "PeerSearchedUs",
+        WebhookEvent::MessageSent
+        | WebhookEvent::ApiKeyCreated
+        | WebhookEvent::ApiKeyRevoked
+        | WebhookEvent::ConfigChanged => "Noop",
+    }
+}
+
+async fn dispatch_frozen_webhook_event(
+    state: &AppState,
+    event: WebhookEvent,
+    data: &serde_json::Value,
+) {
+    let event_name = frozen_webhook_event_name(event);
+    let hooks = state
+        .integration_settings
+        .read()
+        .await
+        .frozen_webhooks
+        .clone();
+    let payload = serde_json::json!({
+        "id": uuid::Uuid::new_v4(),
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "type": event_name,
+        "version": 0,
+        "data": data,
+    })
+    .to_string();
+    for (name, hook) in hooks {
+        if !hook.on.iter().any(|value| {
+            value.eq_ignore_ascii_case("Any") || value.eq_ignore_ascii_case(event_name)
+        }) {
+            continue;
+        }
+        let Ok(permit) = Arc::clone(&state.webhook_deliveries).try_acquire_owned() else {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "webhook",
+                format!("Frozen webhook {name} delivery pool is full"),
+            )
+            .await;
+            continue;
+        };
+        let headers = hook
+            .call
+            .headers
+            .into_iter()
+            .map(|header| (header.name, header.value))
+            .collect::<Vec<_>>();
+        let url = hook.call.url;
+        let timeout = u64::try_from(hook.timeout).unwrap_or(500);
+        let attempts = u32::try_from(hook.retry.attempts).unwrap_or(1);
+        let ignore_certificate_errors = hook.call.ignore_certificate_errors;
+        let payload = payload.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            if let Err(error) = WebhookDispatcher::send_frozen_compat_webhook(
+                &url,
+                &headers,
+                &payload,
+                timeout,
+                attempts,
+                ignore_certificate_errors,
+            )
+            .await
+            {
+                eprintln!("[WEBHOOK] Frozen webhook {name} delivery failed: {error}");
+            }
+        });
     }
 }
 
@@ -1479,9 +1822,13 @@ mod tests {
         let deliveries = Arc::new(Semaphore::new(0));
 
         WebhookDispatcher::dispatch(
-            Arc::clone(&manager),
-            Arc::clone(&deliveries),
-            Some(database.clone()),
+            WebhookDispatchContext {
+                manager: Arc::clone(&manager),
+                deliveries: Arc::clone(&deliveries),
+                persistence_turn: Arc::new(tokio::sync::Mutex::new(())),
+                database: Some(database.clone()),
+            },
+            vec![webhook],
             "correlation".to_owned(),
             WebhookEvent::SearchCreated,
             serde_json::json!({"query": "bounded"}),
@@ -1512,6 +1859,110 @@ mod tests {
             .expect("webhook remains persisted");
         assert!(persisted.last_triggered.is_some());
         assert_eq!(persisted.retry_count, 0);
+    }
+
+    #[tokio::test]
+    async fn delivery_stats_wait_for_persistence_turn_before_mutating() {
+        let manager = Arc::new(RwLock::new(WebhookManager::new()));
+        let webhook = Webhook::new(
+            "https://example.com/hook".to_owned(),
+            vec![WebhookEvent::SearchCreated],
+            Webhook::generate_secret().expect("test randomness"),
+        );
+        let webhook_id = webhook.id.clone();
+        manager
+            .write()
+            .await
+            .register(webhook.clone())
+            .expect("register webhook");
+        let database = DatabaseManager::in_memory().await.expect("in-memory db");
+        database
+            .insert_webhook(&crate::persistence::WebhookRecord {
+                id: webhook_id.clone(),
+                url: webhook.url.clone(),
+                events: WebhookEvent::SearchCreated.to_string(),
+                secret: webhook.secret.clone(),
+                active: true,
+                created_at: webhook.created_at,
+                last_triggered: None,
+                retry_count: 0,
+                max_retries: i32::try_from(webhook.max_retries).unwrap_or(i32::MAX),
+                timeout_seconds: i32::try_from(webhook.timeout_seconds).unwrap_or(i32::MAX),
+            })
+            .await
+            .expect("persist webhook");
+
+        let persistence_turn = Arc::new(tokio::sync::Mutex::new(()));
+        let held_turn = persistence_turn.lock().await;
+        let task_manager = Arc::clone(&manager);
+        let task_turn = Arc::clone(&persistence_turn);
+        let task_database = database.clone();
+        let mut update = tokio::spawn(async move {
+            WebhookDispatcher::record_delivery_stats(
+                &task_manager,
+                Some(&task_database),
+                webhook,
+                2,
+                task_turn,
+            )
+            .await;
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut update)
+            .await
+            .is_err());
+
+        let manager_read = manager.read().await;
+        assert!(manager_read
+            .get(&webhook_id)
+            .expect("webhook remains registered")
+            .last_triggered
+            .is_none());
+        let persisted = database
+            .get_webhook(&webhook_id)
+            .await
+            .expect("read queued webhook")
+            .expect("webhook remains persisted");
+        assert!(persisted.last_triggered.is_none());
+        drop(manager_read);
+
+        drop(held_turn);
+        update.await.expect("delivery stats persistence task");
+        let manager_read = manager.read().await;
+        let webhook = manager_read
+            .get(&webhook_id)
+            .expect("webhook remains registered");
+        assert!(webhook.last_triggered.is_some());
+        assert_eq!(webhook.retry_count, 2);
+        drop(manager_read);
+        let persisted = database
+            .get_webhook(&webhook_id)
+            .await
+            .expect("read persisted webhook statistics")
+            .expect("webhook remains persisted");
+        assert!(persisted.last_triggered.is_some());
+        assert_eq!(persisted.retry_count, 2);
+
+        let previous = manager
+            .read()
+            .await
+            .get(&webhook_id)
+            .expect("webhook remains registered")
+            .clone();
+        database.close_for_test().await;
+        WebhookDispatcher::record_delivery_stats(
+            &manager,
+            Some(&database),
+            previous.clone(),
+            3,
+            Arc::new(tokio::sync::Mutex::new(())),
+        )
+        .await;
+        let manager_read = manager.read().await;
+        let current = manager_read
+            .get(&webhook_id)
+            .expect("failed write keeps webhook registered");
+        assert_eq!(current.last_triggered, previous.last_triggered);
+        assert_eq!(current.retry_count, previous.retry_count);
     }
 
     #[test]

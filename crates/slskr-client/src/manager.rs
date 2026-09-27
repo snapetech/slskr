@@ -3,7 +3,10 @@ use std::{
     future::Future,
     hash::{Hash, Hasher},
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -28,6 +31,7 @@ pub type PeerConnector<S> = Arc<dyn Fn(String) -> ConnectFuture<S> + Send + Sync
 
 const PEER_CONNECT_STRIPES: usize = 64;
 pub const DEFAULT_MANAGER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_MANAGER_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenGenerator {
@@ -81,6 +85,7 @@ impl Default for TokenGenerator {
 
 pub struct ConnectionManager<ServerStream, PeerStream> {
     server: Arc<Mutex<ServerSession<ServerStream>>>,
+    server_usable: Arc<AtomicBool>,
     peer_cache: PeerConnectionCache<PeerStream>,
     connector: PeerConnector<PeerStream>,
     tokens: Arc<Mutex<TokenGenerator>>,
@@ -100,6 +105,7 @@ where
     ) -> Self {
         Self {
             server: Arc::new(Mutex::new(server)),
+            server_usable: Arc::new(AtomicBool::new(true)),
             peer_cache,
             connector,
             tokens: Arc::new(Mutex::new(TokenGenerator::default())),
@@ -181,15 +187,43 @@ where
         username: &str,
         kind: ConnectionKind,
     ) -> Result<IndirectPeerRequest, ClientError> {
+        self.request_indirect_with_timeout(username, kind, DEFAULT_MANAGER_REQUEST_TIMEOUT)
+            .await
+    }
+
+    pub async fn request_indirect_with_timeout(
+        &self,
+        username: &str,
+        kind: ConnectionKind,
+        timeout: Duration,
+    ) -> Result<IndirectPeerRequest, ClientError> {
+        if !self.server_usable.load(Ordering::Acquire) {
+            return Err(ClientError::ConnectionClosed);
+        }
         let username = normalize_peer_username(username)?;
         let token = self.tokens.lock().await.next_nonzero_token();
         let request = IndirectPeerRequest::new(token, username.to_owned(), kind);
-        self.server
-            .lock()
-            .await
-            .send_server_message(request.server_message())
-            .await?;
-        Ok(request)
+        match time::timeout(timeout, async {
+            self.server
+                .lock()
+                .await
+                .send_server_message(request.server_message())
+                .await
+        })
+        .await
+        {
+            Ok(Ok(())) => Ok(request),
+            Ok(Err(error)) => {
+                self.server_usable.store(false, Ordering::Release);
+                Err(error)
+            }
+            Err(_) => {
+                self.server_usable.store(false, Ordering::Release);
+                Err(ClientError::TimedOut {
+                    operation: "managed indirect request",
+                })
+            }
+        }
     }
 
     pub fn complete_inbound_distributed(

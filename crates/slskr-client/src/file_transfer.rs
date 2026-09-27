@@ -126,7 +126,6 @@ where
             self.write_obfuscated_payload(chunk).await
         } else {
             self.stream.write_all(chunk).await?;
-            self.stream.flush().await?;
             Ok(())
         }
     }
@@ -177,7 +176,6 @@ where
         self.stream
             .write_all(&encode_rotated(&frame, rand::random()))
             .await?;
-        self.stream.flush().await?;
         Ok(())
     }
 

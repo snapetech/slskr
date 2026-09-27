@@ -1,5 +1,6 @@
 //! Storage module: file I/O, caching, and persistence operations.
 
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,6 +10,78 @@ use slskr_client::share_payload::{compress_zlib_payload, decompress_zlib_payload
 
 const MAX_PARSED_SHARE_FOLDERS: usize = 20_000;
 const MAX_PARSED_SHARE_FILES: usize = 20_000;
+
+pub(crate) fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("slskr-state");
+    let temp_path = parent.join(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    write_file_atomic_with_temp_path(path, &temp_path, contents.as_ref())
+}
+
+pub(crate) fn write_file_atomic_with_temp_path(
+    path: &Path,
+    temp_path: &Path,
+    contents: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+
+    {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(temp_path)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+    }
+
+    match replace_file(temp_path, path) {
+        Ok(()) => sync_state_directory(path.parent().unwrap_or_else(|| Path::new("."))),
+        Err(error) => {
+            let _ = fs::remove_file(temp_path);
+            Err(error)
+        }
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn sync_state_directory(path: &Path) -> std::io::Result<()> {
+    fs::File::open(path).and_then(|directory| directory.sync_all())
+}
+
+#[cfg(not(unix))]
+pub(crate) fn sync_state_directory(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(not(unix))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    // std::fs::rename does not replace an existing destination on Windows.
+    // The state directory is private and both names are fixed beneath it, so
+    // removing the old entry first is the safe-code fallback available here.
+    match fs::remove_file(destination) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::rename(source, destination)
+}
 
 // ============================================================================
 // Shared Files and Transfer Capacity
@@ -28,27 +101,33 @@ pub fn share_cache_path(state_dir: &Path) -> PathBuf {
 }
 
 pub fn write_share_cache(path: &Path, entries: &[FileEntry]) -> Result<(), String> {
-    let content = entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}\t{}\t{}\t{}",
-                escape_cache_field(&entry.filename),
-                entry.size,
-                entry.code,
-                escape_cache_field(&entry.extension)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut content = String::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if index > 0 {
+            content.push('\n');
+        }
+        append_escaped_cache_field(&mut content, &entry.filename);
+        let _ = write!(content, "\t{}\t{}\t", entry.size, entry.code);
+        append_escaped_cache_field(&mut content, &entry.extension);
+    }
     fs::write(path, content).map_err(|error| error.to_string())
 }
 
 pub fn escape_cache_field(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('\n', "\\n")
-        .replace('\t', "\\t")
+    let mut escaped = String::with_capacity(value.len());
+    append_escaped_cache_field(&mut escaped, value);
+    escaped
+}
+
+fn append_escaped_cache_field(output: &mut String, value: &str) {
+    for character in value.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\t' => output.push_str("\\t"),
+            character => output.push(character),
+        }
+    }
 }
 
 pub fn extension_for(filename: &str) -> String {
@@ -166,45 +245,11 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
         }
         parsed_files += file_count;
 
-        for _ in 0..file_count {
-            let code = reader
-                .read_u8()
-                .map_err(|e| format!("cannot read file code: {e}"))?;
-            let (filename, filename_encoding) = reader
-                .read_string_with_encoding()
-                .map_err(|e| format!("cannot read filename: {e}"))?;
-            let size = reader
-                .read_u64_le()
-                .map_err(|e| format!("cannot read file size: {e}"))?;
-            let (extension, extension_encoding) = reader
-                .read_string_with_encoding()
-                .map_err(|e| format!("cannot read extension: {e}"))?;
-            let attr_count = reader
-                .read_bounded_count("shared file attributes", 8)
-                .map_err(|e| format!("cannot read attr count: {e}"))?;
-            let mut attributes = Vec::new();
-            for _ in 0..attr_count {
-                let attr_code = reader
-                    .read_u32_le()
-                    .map_err(|e| format!("cannot read attr code: {e}"))?;
-                let attr_value = reader
-                    .read_u32_le()
-                    .map_err(|e| format!("cannot read attr value: {e}"))?;
-                attributes.push(slskr_client::protocol::peer::FileAttribute {
-                    code: attr_code,
-                    value: attr_value,
-                });
-            }
-            entries.push(FileEntry {
-                code,
-                filename,
-                filename_encoding,
-                size,
-                extension,
-                extension_encoding,
-                attributes,
-            });
-        }
+        entries.extend(decode_file_entries(
+            &mut reader,
+            file_count,
+            "shared files",
+        )?);
     }
     Ok(entries)
 }
@@ -268,31 +313,40 @@ pub fn parse_folder_file_list_payload(
             "folder files exceeds {MAX_PARSED_SHARE_FILES} entries"
         ));
     }
-    let mut entries = Vec::new();
+    let entries = decode_file_entries(&mut reader, file_count, "folder files")?;
+    Ok((folders, entries))
+}
+
+fn decode_file_entries(
+    reader: &mut Reader<'_>,
+    file_count: usize,
+    field: &str,
+) -> Result<Vec<FileEntry>, String> {
+    let mut entries = Vec::with_capacity(file_count);
     for _ in 0..file_count {
         let code = reader
             .read_u8()
-            .map_err(|e| format!("cannot read file code: {e}"))?;
+            .map_err(|e| format!("cannot read {field} file code: {e}"))?;
         let (filename, filename_encoding) = reader
             .read_string_with_encoding()
-            .map_err(|e| format!("cannot read filename: {e}"))?;
+            .map_err(|e| format!("cannot read {field} filename: {e}"))?;
         let size = reader
             .read_u64_le()
-            .map_err(|e| format!("cannot read file size: {e}"))?;
+            .map_err(|e| format!("cannot read {field} file size: {e}"))?;
         let (extension, extension_encoding) = reader
             .read_string_with_encoding()
-            .map_err(|e| format!("cannot read extension: {e}"))?;
+            .map_err(|e| format!("cannot read {field} extension: {e}"))?;
         let attr_count = reader
-            .read_bounded_count("folder file attributes", 8)
-            .map_err(|e| format!("cannot read attr count: {e}"))?;
-        let mut attributes = Vec::new();
+            .read_bounded_count("file attributes", 8)
+            .map_err(|e| format!("cannot read {field} attr count: {e}"))?;
+        let mut attributes = Vec::with_capacity(attr_count);
         for _ in 0..attr_count {
             let attr_code = reader
                 .read_u32_le()
-                .map_err(|e| format!("cannot read attr code: {e}"))?;
+                .map_err(|e| format!("cannot read {field} attr code: {e}"))?;
             let attr_value = reader
                 .read_u32_le()
-                .map_err(|e| format!("cannot read attr value: {e}"))?;
+                .map_err(|e| format!("cannot read {field} attr value: {e}"))?;
             attributes.push(slskr_client::protocol::peer::FileAttribute {
                 code: attr_code,
                 value: attr_value,
@@ -308,7 +362,7 @@ pub fn parse_folder_file_list_payload(
             attributes,
         });
     }
-    Ok((folders, entries))
+    Ok(entries)
 }
 
 // ============================================================================
@@ -363,4 +417,49 @@ pub fn group_share_entries(entries: &[FileEntry]) -> Vec<(String, Vec<FileEntry>
         groups.entry(folder).or_default().push(entry.clone());
     }
     groups.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slskr_client::protocol::peer::FileAttribute;
+
+    fn fixture_entry(filename: &str) -> FileEntry {
+        FileEntry {
+            code: 1,
+            filename: filename.to_owned(),
+            filename_encoding: Default::default(),
+            size: 42,
+            extension: "mp3".to_owned(),
+            extension_encoding: Default::default(),
+            attributes: vec![FileAttribute {
+                code: 1,
+                value: 320,
+            }],
+        }
+    }
+
+    #[test]
+    fn shared_payload_round_trips_through_bounded_decoder() {
+        let entries = vec![fixture_entry("Album/track.mp3")];
+        let payload = build_shared_file_list_payload(&entries).expect("encode share payload");
+
+        assert_eq!(parse_shared_file_list_payload(&payload).unwrap(), entries);
+    }
+
+    #[test]
+    fn malformed_share_folder_count_is_rejected_before_allocation() {
+        let mut writer = Writer::new();
+        writer.write_u32_le((MAX_PARSED_SHARE_FOLDERS + 1) as u32);
+        let payload = compress_zlib_payload(&writer.into_inner()).expect("compress payload");
+
+        let error = parse_shared_file_list_payload(&payload).unwrap_err();
+
+        assert!(error.contains("cannot read folder count"));
+    }
+
+    #[test]
+    fn cache_fields_escape_delimiters_without_chained_allocations() {
+        assert_eq!(escape_cache_field("a\\b\tc\nd"), "a\\\\b\\tc\\nd");
+    }
 }
