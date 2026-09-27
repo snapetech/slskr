@@ -1,3 +1,7 @@
+#[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/bridge_contracts.rs"]
+mod bridge_contracts;
+
 include!("controller_tests/segment_01.rs");
 include!("controller_tests/segment_02.rs");
 include!("controller_tests/segment_03.rs");

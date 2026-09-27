@@ -5900,3 +5900,24 @@ shutdown/distributed crash-restart proof still passes with this adapter.
 The existing retained artifacts keep their original source and harness hashes;
 a later hosted run must confirm the scanner result for the replacement.
 This is an internal-only validation-tool change.
+
+## RF-024 Full Controller Bridge Contract Ownership (2026-09-27)
+
+The bridge client-isolation and search/download oracle-shape regressions now
+live in a real `controller_tests::bridge_contracts` module. They import only
+the shared state/share fixtures and use the crate's route entry point. Exact
+reconstruction of the moved bodies is recorded alongside pre-edit snapshots
+in `target/rf-controller-bridge-before-module/`. The full-controller/legacy
+all-targets compile passes. This internal-only step starts ownership boundaries
+inside the remaining full-controller includes; RF-024 remains open.
+
+## RF-001 Unknown Initialization Stream Boundary (2026-09-27)
+
+The shared-port parser retained the shortest unknown frame while probing a
+longer alternate interpretation. If neither was known, it returned the shorter
+frame with an already advanced stream. The fallback now rejects this case as
+ambiguous. A real TCP regression constructs two valid unknown interpretations
+of different lengths; another checks that an unambiguous unknown initialization
+retains its payload and subsequent bytes. The listener still uses the existing
+shared port. This closes the fallback stream-boundary defect; the broader
+legacy plain/obfuscated ambiguity remains open under RF-001.

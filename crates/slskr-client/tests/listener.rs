@@ -730,3 +730,49 @@ async fn tcp_pair() -> (TcpStream, TcpStream) {
     let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
     (client.unwrap(), accepted.unwrap().0)
 }
+
+#[tokio::test]
+async fn shared_demux_rejects_unknown_fallback_after_consuming_alternate_frame() {
+    let unknown = InitMessage::Unknown {
+        code: 0x42,
+        payload: vec![0x55; 6],
+    };
+    let wire = encode_rotated(&unknown.encode().unwrap().encode().unwrap(), 5);
+    // Both interpretations are valid unknown init frames of different lengths.
+    let plain = InitFrame::decode(&wire[..9]).unwrap();
+    assert!(matches!(
+        InitMessage::decode(plain).unwrap(),
+        InitMessage::Unknown { .. }
+    ));
+    let obfuscated = InitFrame::decode(&decode_rotated(&wire).unwrap()).unwrap();
+    assert_eq!(InitMessage::decode(obfuscated).unwrap(), unknown);
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+    let error = demux_shared_incoming(server).await.unwrap_err();
+    assert!(matches!(error, ClientError::AmbiguousInitFrame));
+}
+
+#[tokio::test]
+async fn shared_demux_preserves_unambiguous_unknown_frame_and_following_bytes() {
+    let unknown = InitMessage::Unknown {
+        code: 0x42,
+        payload: vec![0x55; 6],
+    };
+    let wire = encode_rotated(&unknown.encode().unwrap().encode().unwrap(), 0x8000_0000);
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+    client.write_all(b"sentinel").await.unwrap();
+    let IncomingConnection::UnknownInit {
+        code,
+        payload,
+        mut stream,
+    } = demux_shared_incoming(server).await.unwrap()
+    else {
+        panic!("expected unambiguous unknown init");
+    };
+    assert_eq!(code, 0x42);
+    assert_eq!(payload, vec![0x55; 6]);
+    let mut following = [0u8; 8];
+    stream.read_exact(&mut following).await.unwrap();
+    assert_eq!(&following, b"sentinel");
+}

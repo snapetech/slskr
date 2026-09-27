@@ -274,6 +274,11 @@ where
     let Some((candidate, message)) = unknown else {
         return Err(last_error.unwrap_or(ClientError::ConnectionClosed));
     };
+    // An alternate interpretation may have consumed bytes beyond this frame.
+    // Returning the shorter unknown frame would silently truncate its stream.
+    if buffered.len() != candidate.encoded_len {
+        return Err(ClientError::AmbiguousInitFrame);
+    }
     incoming_from_init_message(message, stream, candidate.obfuscated)
 }
 
@@ -536,17 +541,17 @@ where
         Ok(ConnectionKind::PeerMessages) => {
             return Ok(IncomingConnection::PeerMessages(
                 PeerMessageConnection::new(stream),
-            ))
+            ));
         }
         Ok(ConnectionKind::FileTransfer) => {
             return Ok(IncomingConnection::FileTransfer(
                 FileTransferConnection::new(stream),
-            ))
+            ));
         }
         Ok(ConnectionKind::Distributed) => {
             return Ok(IncomingConnection::Distributed(DistributedConnection::new(
                 stream,
-            )))
+            )));
         }
         Err(ClientError::UnknownConnectionKind(_)) => {}
         Err(error) => return Err(error),
