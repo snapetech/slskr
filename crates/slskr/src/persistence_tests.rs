@@ -1368,6 +1368,32 @@ async fn test_webhook_operations_persist_config_and_logs() {
 }
 
 #[tokio::test]
+async fn wishlist_scheduler_state_rejects_out_of_range_values() {
+    let db = DatabaseManager::in_memory().await.unwrap();
+    db.save_wishlist_scheduler_state(1, Some(60)).await.unwrap();
+
+    db.execute_raw_for_test("UPDATE wishlist_scheduler_state SET next_index = -1 WHERE id = 1")
+        .await
+        .unwrap();
+    assert!(db.load_wishlist_scheduler_state().await.is_err());
+    db.execute_raw_for_test("UPDATE wishlist_scheduler_state SET next_index = 1, server_interval_seconds = -1 WHERE id = 1")
+        .await
+        .unwrap();
+    assert!(db.load_wishlist_scheduler_state().await.is_err());
+
+    assert!(db
+        .save_wishlist_scheduler_state(1, Some(u64::MAX))
+        .await
+        .is_err());
+    if usize::BITS > 63 {
+        assert!(db
+            .save_wishlist_scheduler_state(usize::MAX, None)
+            .await
+            .is_err());
+    }
+}
+
+#[tokio::test]
 async fn test_distributed_tree_state_operations() {
     let root = std::env::temp_dir().join(format!(
         "slskr-distributed-restart-{}-{}",

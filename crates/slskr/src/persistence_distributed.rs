@@ -15,9 +15,16 @@ impl DatabaseManager {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(result.map(|(next_index, server_interval)| {
-            (next_index as usize, server_interval.map(|secs| secs as u64))
-        }))
+        result
+            .map(
+                |(next_index, server_interval)| -> Result<_, Box<dyn std::error::Error>> {
+                    Ok((
+                        usize::try_from(next_index)?,
+                        server_interval.map(u64::try_from).transpose()?,
+                    ))
+                },
+            )
+            .transpose()
     }
 
     /// Save wishlist scheduler state
@@ -34,8 +41,8 @@ impl DatabaseManager {
             VALUES (1, ?, ?, ?)
             "#,
         )
-        .bind(next_index as i64)
-        .bind(server_interval_seconds.map(|secs| secs as i64))
+        .bind(i64::try_from(next_index)?)
+        .bind(server_interval_seconds.map(i64::try_from).transpose()?)
         .bind(now)
         .execute(&self.pool)
         .await?;
