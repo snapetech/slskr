@@ -96,6 +96,9 @@ The `docs/dev/` directory holds audit ledgers and internal review playbooks:
 | [Adversarial fuzz](dev/bug-council-adversarial-fuzz.md) | Fuzz and adversarial-input review notes. |
 | [Roslyn analyzers](dev/bug-council-roslyn-analyzers.md) | Legacy analyzer notes retained for migration context. |
 | [Bug council phases](dev/bug-council-phases.md) | Audit phase plan. |
+| [Refactor and efficiency plan](dev/refactoring-efficiency-plan.md) | Living whole-project refactor backlog and execution status. |
+| [Whole-project refactor audit](dev/refactor-audit-20260915.md) | Evidence snapshot, findings, priorities, and validation requirements from the 2026-09-15 review. |
+| [Refactor handoff](dev/refactor-handoff-20260915.md) | Current dirty-worktree handoff, validation baseline, residual work, and safe resume procedure. |
 
 ## Documentation Status
 

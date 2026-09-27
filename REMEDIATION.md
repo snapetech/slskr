@@ -1,15 +1,20 @@
-# slskr Remediation Plan
+# slskr Historical Remediation Baseline
 
-This document is the single source of truth for what is real, what has been
-cut, and what we are going to do about it. Anyone (human or agent) picking up
-this project should read this before producing more code or markdown.
+This document is the dated remediation baseline for the initial cleanup and
+the historical phase decisions recorded below. The active whole-project
+refactor status now lives in
+[`docs/dev/refactoring-efficiency-plan.md`](docs/dev/refactoring-efficiency-plan.md)
+and its evidence ledger
+[`docs/dev/refactor-audit-20260915.md`](docs/dev/refactor-audit-20260915.md).
+Anyone picking up current implementation work should use those active records,
+not infer current status from the historical checklist in this file.
 
 If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 `PHASE_N_DONE.md` again, stop. Update *this* document instead.
 
 ---
 
-## 0. Snapshot (2026-05-13)
+## 0. Historical snapshot (2026-05-13)
 
 - `cargo test --workspace` passes.
 - `scripts/check-remediation-baseline.sh` passes.

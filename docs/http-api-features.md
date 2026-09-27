@@ -286,7 +286,7 @@ ws.onopen = () => {
   // Subscribe to only search events
   ws.send(JSON.stringify({
     type: 'subscribe',
-    topics: ['search.started', 'search.completed']
+    data: {topics: ['search.started', 'search.completed']}
   }));
 };
 
@@ -311,7 +311,7 @@ ws.on('open', () => {
   // Subscribe to transfers
   ws.send(JSON.stringify({
     type: 'subscribe',
-    topics: ['transfer.started', 'transfer.completed']
+    data: {topics: ['transfer.started', 'transfer.completed']}
   }));
 });
 

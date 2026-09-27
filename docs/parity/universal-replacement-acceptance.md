@@ -1,5 +1,11 @@
 # Universal replacement acceptance
 
+Evidence classification: this is a dated certification record for the pinned
+2026-08-20 frozen boundary. Paths under `target/` are retained-run artifact
+references and are not assumed to exist in a clean checkout. A release must
+run the current release gate and provide fresh live artifacts before treating
+this historical closure as current certification.
+
 ## Goal
 
 slskR is complete only when a user, automation client, peer, operator, or

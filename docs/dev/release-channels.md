@@ -14,7 +14,7 @@ slskdN release system, with slskR-specific package and project names.
 | AUR binary package | `slskr-bin` | `AUR_SSH_KEY` |
 | COPR | `slskdn/slskr` (x86_64 and aarch64) | Preferred: `COPR_KERBEROS_PRINCIPAL`, `COPR_KERBEROS_KEYTAB_B64`; fallback: `COPR_LOGIN`, `COPR_TOKEN` |
 | Launchpad PPA | `~keefshape/ubuntu/slskdn` (amd64; arm64 source-ready) | `GPG_PRIVATE_KEY`, optional `LAUNCHPAD_SFTP_KEY`, optional `LAUNCHPAD_SFTP_USER` |
-| Homebrew tap | `snapetech/homebrew-slskr` | `TAP_GITHUB_TOKEN` |
+| Homebrew tap | `snapetech/homebrew-slskdn` (compatibility tap) | `TAP_GITHUB_TOKEN` |
 | Snap | `slskr` (amd64 and arm64) | Snap Store credentials managed outside this workflow |
 | Flatpak | `io.github.slskd.slskr` (x86_64 and aarch64) | Flathub credentials managed outside this workflow |
 | Helm | `packaging/helm/slskr` (multi-arch GHCR image) | none |

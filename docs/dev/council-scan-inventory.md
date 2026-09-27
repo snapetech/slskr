@@ -1,6 +1,7 @@
 # Council Scan Inventory
 
-Date: 2026-09-03
+Scan date: 2026-09-24
+Source commit: 0dfab48cd16e6e7910759fa7d60e5d21b7b28be1
 
 > Council process upgrades (mirrored from slskNet.Runtime, 2026-05-06): see `bug-council-severity-schema.md`, `bug-council-sibling-search.md`, `bug-council-negative-space.md`, `bug-council-behavior-pinning.md`, and `bug-council-phases.md`. Future sweep rows on this file should adopt the severity/confidence schema; the wire-frame trust boundary is now declared and enforced by `scripts/check-council-negative-space.sh`.
 
@@ -60,12 +61,12 @@ Latest scanner counts:
 
 | Candidate Class | Count |
 | --- | ---: |
-| Constructor/mutable collection candidates | 8 |
-| Protocol count/length candidates | 135 |
-| Protocol scalar emission candidates | 181 |
-| Resolver/raw stream candidates | 909 |
-| Task/cancellation/lifecycle candidates | 1049 |
-| Example Web API candidates | 280 |
+| Constructor/mutable collection candidates | 9 |
+| Protocol count/length candidates | 154 |
+| Protocol scalar emission candidates | 183 |
+| Resolver/raw stream candidates | 1018 |
+| Task/cancellation/lifecycle candidates | 1218 |
+| Example Web API candidates | 323 |
 
 ### Constructor/mutable collection candidates
 
@@ -126,7 +127,7 @@ Latest scanner counts:
 | TypeScript SDK request abort timer cleanup | Client SDKs | Fixed | Medium | High | BUG-037: request timers are now cleared in a `finally` block when `fetch` resolves or rejects, preventing timer buildup across failed requests/retries. | `client-ts/src/client.test.ts`; `npm test -- --runInBand`; SDK gate runs TS tests/build. |
 | TypeScript SDK explicit zero retry/timeout config | Client SDKs | Fixed | Medium | High | BUG-038: constructor defaults now use nullish coalescing so `retries: 0`, `timeout: 0`, and `retryDelay: 0` are honored instead of replaced by defaults. | `client-ts/src/client.test.ts`; `npm test -- --runInBand`; SDK gate runs TS tests/build. |
 | Daemon session manager task | Backend/API + Network Runtime | Existing Guard | Low | High | Session commands use bounded `mpsc`, receive/readiness are wrapped in timeouts, reconnect uses configured delay, and the task exits when the command channel closes. | Session and API route tests. |
-| Daemon listener connection tasks | Network Runtime | Existing Guard | Low | High | Listener accept loops update state, per-connection handling is split into tasks, and HTTP connections are capped by a semaphore. | Listener/client contract tests and remediation baseline. |
+| Daemon listener connection tasks | Network Runtime | Existing Guard | Low | High | Listener accept loops are supervised; plain HTTP, HTTPS, and Unix-socket HTTP share a 256-connection semaphore. Plain HTTP handlers are joined by the serving loop, while HTTPS/Unix handlers are registered and joined by `ManagedTaskRegistry` shutdown. | Listener lifecycle regression, runtime boundary guard, and remediation baseline. |
 | WebSocket event stream reader and heartbeat | Backend/API | Existing Guard | Low | High | Client frame reads are capped, invalid frames close the stream, broadcast lag is replayed from bounded event history, and the reader task is aborted when the stream exits. | WebSocket event/auth tests. |
 | Webhook delivery tasks | Backend/API + Release/Ops | Existing Guard | Low | High | Registered webhooks are capped, delivery concurrency is capped by semaphore, timeouts are clamped, redirects are disabled, and delivery pool saturation drops work instead of queueing unbounded requests. | Webhook tests and outbound policy gate. |
 | React/dashboard abort controllers | Frontend/API Handling | Existing Guard | Low | High | Fetch hooks and player panes abort pending requests on cleanup and ignore abort errors. | Frontend test/build gates. |

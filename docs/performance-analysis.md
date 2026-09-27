@@ -6,16 +6,25 @@ runtime benchmarks.
 
 ## Current inventory
 
-As of the 2026-09-02 completed refactoring swath:
+As of the 2026-09-15 local audit baseline (HEAD `0dfab48`):
 
 - Rust workspace source: approximately 370,000 lines.
-- `crates/slskr/src/lib.rs`: approximately 90,000 lines; the opt-in
+- `crates/slskr/src/lib.rs`: approximately 93,000 lines; the opt-in
   historical differential suite is maintained in a separate source file.
 - `crates/slskr/src/route_dispatch.rs`: approximately 1,548 lines, plus
   eight included route-group files totaling approximately 18,068 lines.
 - `web/src`: approximately 95,500 lines.
-- Default daemon unit tests: 442.
-- Web tests: 514.
+- Default daemon unit tests: 550.
+- Web tests: 836 across 141 files.
+
+The dated baseline above remains historical. The latest local continuation
+snapshot on 2026-09-24 reports:
+
+- Web tests: 872 across 146 files (`npm --prefix web test`).
+- Dashboard tests: 38 across 11 files with V8 coverage thresholds, last measured
+  on 2026-09-22 (`npm --prefix dashboard run test:coverage`).
+
+These are test-suite inventory measurements, not latency or throughput claims.
 
 These are structural measurements only. No latency or throughput number is
 claimed here until it comes from the real benchmark artifact.
@@ -72,6 +81,11 @@ python3 scripts/compare-benchmark.py \
 The comparison checks the aggregate and each endpoint case. Missing metrics
 and workload drift are invalid results, not successful comparisons.
 
+The benchmark and RustyMilk compatibility/performance/smoke commands are
+diagnostic-only today. They are not scheduled regression thresholds; operators
+must retain the generated JSON and environment metadata when using them as
+release evidence.
+
 For an isolated local daemon comparison, disable the native controller
 limiter and raise the API quota only in the benchmark process environment:
 
@@ -109,13 +123,24 @@ reported acceptance result; no universal latency improvement is claimed.
 
 The current SQLite profiler recorded the supporting plans on a fresh migrated
 database: `idx_messages_username_created` serves username-plus-created-at
-message reads and `idx_library_items_created` serves recent library reads,
-with no temporary sort B-tree in either plan. Other tested search, transfer,
-share, and recent-list paths retained their existing indexes.
+message reads, `idx_library_items_created` serves recent library reads, and
+the transfer-status and webhook-timestamp composite indexes serve their
+ordered pages without a temporary sort B-tree. Search-result pages use the
+existing `search_id` index, whose implicit rowid order already satisfies
+`ORDER BY id`; startup removes the redundant `(search_id, id)` index. A
+synthetic 1M/500K/500K cardinality artifact is retained under
+`benchmarks/artifacts/20260924-sqlite-cardinality.md`; real-database cardinality
+benchmarks remain open.
 
-The Web build emitted a 331,410-byte System chunk and a separate 150,875-byte
-MediaCore chunk; the prior combined System chunk was 481,703 bytes. The named
-bundle-budget check passed, including the 632,535-byte vendor chunk.
+The 2026-09-24 Web production build is 1,084.68 KiB initial JavaScript and
+593.07 KiB all-JavaScript gzip against 1,150 KiB and 600 KiB aggregate budgets.
+The System entry chunk is 9.17 KiB, down from 236.95 KiB before the remaining
+panes were grouped into six section chunks; AdminPolicies, Integrations, and
+MediaCore remain separate dynamic chunks. The retained asset graph is in
+[`benchmarks/artifacts/20260924-system-pane-asset-graph.md`](../benchmarks/artifacts/20260924-system-pane-asset-graph.md).
+The dashboard build measured 242.02 KiB initial JavaScript and 87.84 KiB gzip
+against 260 KiB and 100 KiB budgets. These are build artifacts, not latency or
+throughput claims.
 
 The Web UI's shared polling controller is used for periodic refreshes that
 remain active while a screen is mounted. It waits for each request to finish,
@@ -142,7 +167,7 @@ npm --prefix web run test:bundle-budget
 
 Record wall time externally with the shell or CI runner, and record daemon
 CPU/RSS with the platform's process tools during the HTTP benchmark. The
-workspace's one-job Cargo setting and release profile are deliberate responses
+The workspace's one-job Cargo setting and release profile are deliberate responses
 to the daemon's size; change them only when timing and peak-memory evidence
 show a safe improvement.
 

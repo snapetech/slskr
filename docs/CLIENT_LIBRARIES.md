@@ -23,6 +23,11 @@ pip install -e .
 pip install aiohttp
 ```
 
+The maintained Python client supports Python 3.10 through 3.13 and publishes
+an sdist and wheel. Runtime dependencies are constrained to the supported
+`aiohttp` 3.x API family; use `client-python/constraints.txt` when resolving
+the development environment.
+
 ### Quick Start
 
 ```python
@@ -120,15 +125,15 @@ ws = await client.connect_ws()
 async def handle_message(event):
     print(f"Message: {event}")
 
-async def handle_search_update(event):
-    print(f"Search update: {event}")
+async def handle_search_result(event):
+    print(f"Search result: {event.get('data', {})}")
 
 # Register listeners
-ws.on("message", handle_message)
-ws.on("search_update", handle_search_update)
+ws.on("message.received", handle_message)
+ws.on("search.result", handle_search_result)
 
 # Subscribe to topics
-ws.subscribe("messages", "search_updates", "transfer_updates")
+ws.subscribe("message.received", "search.result", "transfer.started")
 
 # Listen for events (async)
 while ws.is_connected():
@@ -171,7 +176,6 @@ except NetworkError as e:
 ### Examples
 
 - `examples/basic_usage.py` - Essential API operations
-- `examples/batch_operations.py` - Batch operation patterns
 - `examples/websocket_events.py` - Real-time event handling
 - `examples/advanced_usage.py` - Error handling, retries, concurrency, pagination
 - `examples/integration_example.py` - Coordinated multi-feature operations
@@ -333,7 +337,6 @@ client.ListTransfers(ctx, direction, status, limit, offset)
 client.CreateTransfer(ctx, direction, peerUsername, filename)
 client.GetTransfer(ctx, transferID)
 client.CancelTransfer(ctx, transferID)
-client.SendMessage(ctx, recipient, content)
 
 // Users & Rooms
 client.GetUser(ctx, username)
@@ -399,12 +402,12 @@ connectionCh := make(chan bool, 10)
 errorCh := make(chan error, 10)
 
 // Register listeners
-ws.On("message", messageCh)
+ws.On("message.received", messageCh)
 ws.OnConnectionChange(connectionCh)
 ws.OnError(errorCh)
 
 // Subscribe to topics
-ws.Subscribe("messages", "search_updates", "transfer_updates")
+ws.Subscribe("message.received", "search.result", "transfer.started")
 
 // Listen for events
 for {
@@ -454,7 +457,6 @@ for result := range results {
 ### Examples
 
 - `examples/basic_usage.go` - Essential API operations
-- `examples/batch_operations.go` - Batch operation patterns
 - `examples/websocket_events.go` - Real-time event handling
 - `examples/advanced_usage.go` - Concurrency, pagination, error handling, integration
 
@@ -514,15 +516,15 @@ const client = new SlskrClient({
 });
 
 // Create search
-const search = await client.search.create({
+const search = await client.createSearch({
     query: 'beethoven symphony'
 });
 
 // Get results
-const results = await client.search.getResults(search.id);
+const results = await client.getSearchDetails(search.id);
 
 // Send message
-await client.messages.send({
+await client.sendMessage({
     recipient: 'username',
     content: 'Hello!'
 });
@@ -568,13 +570,14 @@ offset = 0
 all_results = []
 
 while True:
-    results = await client.list_searches(limit=limit, offset=offset)
-    if not results:
+    details = await client.get_search_details(search_id, limit=limit, offset=offset)
+    page = details.get("results", [])
+    if not page:
         break
-    all_results.extend(results)
-    if len(results) < limit:
+    all_results.extend(page)
+    if len(page) < limit:
         break
-    offset += limit
+    offset += len(page)
 ```
 
 **Go**
@@ -582,18 +585,22 @@ while True:
 ```go
 limit := 50
 offset := 0
-var allResults []map[string]interface{}
+total := 0
 
 for {
-    results, err := client.ListSearches(ctx, limit, offset)
-    if err != nil || len(results) == 0 {
+    details, err := client.GetSearchDetails(ctx, searchID, limit, offset)
+    if err != nil {
         break
     }
-    allResults = append(allResults, results...)
-    if len(results) < limit {
+    page, ok := details["results"].([]interface{})
+    if !ok || len(page) == 0 {
         break
     }
-    offset += limit
+    total += len(page)
+    if len(page) < limit {
+        break
+    }
+    offset += len(page)
 }
 ```
 
@@ -709,7 +716,8 @@ async def limited_search(query):
 
 ```bash
 cd client-python
-python -m pytest examples/
+python -m pytest tests/
+python -m py_compile examples/*.py
 ```
 
 ### Go
@@ -717,7 +725,18 @@ python -m pytest examples/
 ```bash
 cd client-go
 go test ./...
-go run examples/basic_usage.go
+for example in examples/*.go; do go test -tags examples "./$example" || exit 1; done
+```
+
+### TypeScript
+
+```bash
+cd client-ts
+npm test -- --runInBand
+npm run build
+npx tsc --ignoreConfig --strict --target ES2020 --module Node16 \
+  --moduleResolution Node16 --esModuleInterop --skipLibCheck \
+  --ignoreDeprecations 6.0 --noEmit examples/basic-usage.ts
 ```
 
 ## Contributing

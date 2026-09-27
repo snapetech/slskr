@@ -18,7 +18,7 @@ Simple examples showing how to use the HTTP client to:
 cd client-ts
 npm install
 npm run build
-node examples/basic-usage.js
+# Type-check client-ts/examples/basic-usage.ts; see docs/CLIENT_LIBRARIES.md
 ```
 
 ### 2. Search Monitor
@@ -34,16 +34,18 @@ Real-time search monitoring application:
 import asyncio
 import websockets
 import json
+import urllib.parse
 
 async def monitor_searches():
-    uri = "ws://localhost:8080/api/events/ws"
-    headers = {"Authorization": "Bearer YOUR-TOKEN"}
+    uri = "ws://127.0.0.1:5030/api/events/ws"
+    token = "YOUR-TOKEN"
+    subprotocol = "slskr.api-token." + urllib.parse.quote(token, safe="")
     
-    async with websockets.connect(uri, subprotocols=["chat"]) as ws:
+    async with websockets.connect(uri, subprotocols=[subprotocol]) as ws:
         # Subscribe to search events
         await ws.send(json.dumps({
             "type": "subscribe",
-            "topics": ["search.started", "search.completed"]
+            "data": {"topics": ["search.started", "search.completed"]}
         }))
         
         async for msg in ws:
@@ -69,7 +71,7 @@ Bulk transfer management:
 #!/bin/bash
 
 TOKEN="your-bearer-token"
-API="http://localhost:8080"
+API="http://127.0.0.1:5030"
 
 # List active downloads
 curl -H "Authorization: Bearer $TOKEN" \
@@ -78,7 +80,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 # Start multiple downloads (batch)
 curl -X POST -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
-     -H "Origin: http://localhost:8080" \
+     -H "Origin: http://127.0.0.1:5030" \
      -d '{
        "operations": [
          {"id":"d1","method":"POST","path":"/api/transfers","body":{"direction":"download","peer_username":"user1","filename":"song.mp3"}},
@@ -105,7 +107,7 @@ Send messages to multiple users:
 const SlskrClient = require('@slskr/api-client');
 
 const client = new SlskrClient({
-  baseUrl: 'http://localhost:8080',
+  baseUrl: 'http://127.0.0.1:5030',
   token: 'your-token'
 });
 
@@ -141,7 +143,7 @@ Browse shared files from other users:
 #!/bin/bash
 
 TOKEN="your-bearer-token"
-API="http://localhost:8080"
+API="http://127.0.0.1:5030"
 
 # Browse user files
 curl -H "Authorization: Bearer $TOKEN" \
@@ -153,14 +155,14 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 # Request browse permission
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-     -H "Origin: http://localhost:8080" \
+     -H "Origin: http://127.0.0.1:5030" \
      -H "Content-Type: application/json" \
      -d '{}' \
      "$API/api/v0/users/username/browse/request"
 
 # Request a specific folder
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-     -H "Origin: http://localhost:8080" \
+     -H "Origin: http://127.0.0.1:5030" \
      -H "Content-Type: application/json" \
      -d '{"folder":"Music"}' \
      "$API/api/v0/users/username/browse/folder"
@@ -192,7 +194,7 @@ Web dashboard showing:
 
   <script>
     const client = new SlskrClient({
-      baseUrl: 'http://localhost:8080',
+      baseUrl: 'http://127.0.0.1:5030',
       token: 'your-token'
     });
 
@@ -230,7 +232,7 @@ const { default: SlskrClient, BatchClient } = require('@slskr/api-client');
 
 async function benchmark() {
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'token'
   });
 
@@ -274,7 +276,7 @@ import {
 
 async function robustOperation() {
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'token',
     retries: 3,
     timeout: 30000
@@ -311,13 +313,13 @@ async function robustOperation() {
 - Node.js 14+ (for TypeScript examples)
 - Python 3.7+ (for Python examples)
 - curl (for Bash examples)
-- slskr server running on http://localhost:8080
+- slskr server running on http://127.0.0.1:5030
 
 ### Setup
 
 1. Set Bearer token:
 ```bash
-export SOULSEEK_TOKEN="your-bearer-token"
+export SLSKR_API_TOKEN="your-bearer-token"
 ```
 
 2. For TypeScript examples:
@@ -329,18 +331,14 @@ npm run build
 
 3. Run examples:
 ```bash
-# TypeScript
-npx ts-node examples/basic-usage.ts
-
-# Python
-python3 examples/search_monitor.py
-
-# Bash
-bash examples/transfer_manager.sh
-
-# Node.js
-node examples/message_broadcaster.js
+# Python examples
+python3 client-python/examples/basic_usage.py
+python3 client-python/examples/websocket_events.py
 ```
+
+The TypeScript example is source-only; use the type-check command in
+`docs/CLIENT_LIBRARIES.md` before running it from an application that provides
+the package runtime.
 
 ## Integration Examples
 
@@ -350,11 +348,11 @@ node examples/message_broadcaster.js
 version: '3'
 services:
   slskr:
-    image: slskr:latest
+    image: ghcr.io/snapetech/slskr:REPLACE_WITH_RELEASE_TAG
     ports:
-      - "8080:8080"
+      - "5030:5030"
     environment:
-      - HTTP_API_BEARER_TOKEN=secret-token
+      - SLSKR_API_TOKEN=secret-token
       - RUST_LOG=info
 
   example-app:
@@ -366,8 +364,8 @@ services:
     working_dir: /app
     command: npm start
     environment:
-      - SOULSEEK_API_URL=http://slskr:8080
-      - SOULSEEK_TOKEN=secret-token
+      - API_BASE_URL=http://slskr:5030
+      - SLSKR_API_TOKEN=secret-token
 ```
 
 ### Kubernetes Deployment
@@ -378,8 +376,8 @@ kind: ConfigMap
 metadata:
   name: example-app-config
 data:
-  SOULSEEK_API_URL: "http://slskr:8080"
-  SOULSEEK_TOKEN: "secret-token"
+  API_BASE_URL: "http://slskr:5030"
+  SLSKR_API_TOKEN: "secret-token"
 
 ---
 apiVersion: apps/v1
