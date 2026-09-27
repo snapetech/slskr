@@ -92,7 +92,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-003 | Distributed mutations previously held `distributed_network` guards across SQLite work, and tree metadata plus child rows used separate transactions. Runtime updates now publish revisioned snapshots; one worker coalesces to the latest bounded snapshot after the state guard is released. `DatabaseManager` loads both tables in one read transaction and replaces both in one write transaction. Graceful shutdown now writes the latest snapshot after managed producers stop. | Database latency previously blocked distributed-state readers, and a failed child replacement could leave branch metadata and child depths from different states. | The current 622-test daemon library suite passes, including cross-table rollback, latest-snapshot persistence, file-backed reopen, startup hydration, and a shutdown-overlap regression proving a registered task is dropped before the final runtime revision reopens from SQLite. Retained live shutdown-overlap and crash/restart evidence remain. | In progress, local transaction/hydration/shutdown proof |
 | RF-004 | `crates/slskr/src/persistence.rs:4114-4184` was the remaining unbatched ignored-result path; the current batch uses bounded search/identity/result batches, preserves `fallback_attempts`, and adds metadata plus failure-injection rollback regressions. The production `serve` path now calls the shared `load_wishlist_store` startup helper. | Search metadata and large ignored-result updates were previously at risk. | The current 622-test daemon library suite passes. A file-backed close/reopen regression loads through the production startup helper and verifies the rehydrated ignore rule through API reads and search filtering. | Verified locally |
 | RF-005 | `crates/slskr-client/src/manager.rs:179-224` previously held the server mutex while awaiting an unbounded `send_server_message`; the first implementation batch now bounds the send and marks the session unusable after timeout/error. | A backpressured server previously blocked every indirect request and could strand the manager. | Full manager suite passes with the non-reading peer and subsequent-request regression. | Verified |
-| RF-006 | `AppState` owns a `ManagedTaskRegistry` backed by a `JoinSet`; long-lived workers, schedulers, listener managers, bridge/relay services, overlay gateway, DHT, signal/version services, Unix/HTTPS accept loops, and their HTTPS/Unix HTTP handlers are registered for joined shutdown. Plain HTTP handlers use a joined request set. All three listener types share a 256-connection semaphore. | Accepted HTTP work is bounded and tied to listener lifecycle; retained live HTTP/share-scan shutdown proof passes, while clean-runner coverage for other managed services remains absent. | Focused regression proves HTTPS/Unix handlers share capacity and are aborted/joined with the managed registry; existing shutdown-flush and share-scan overlap regressions pass. The retained `55be6aec` live HTTP/share-scan overlap proof passes; collect clean-runner coverage for the remaining managed services. | In progress, stronger local proof |
+| RF-006 | `AppState` owns a `ManagedTaskRegistry` backed by a `JoinSet`; long-lived workers, schedulers, listener managers, bridge/relay services, overlay gateway, DHT, signal/version services, Unix/HTTPS accept loops, and their HTTPS/Unix HTTP handlers are registered for joined shutdown. Plain HTTP handlers use a joined request set. Distributed parent and child socket loops now also use the managed task registry. All three listener types share a 256-connection semaphore. | Accepted HTTP work is bounded and tied to listener lifecycle; retained live HTTP/share-scan shutdown proof passes, while clean-runner coverage for other managed services remains absent. | Focused regression proves HTTPS/Unix handlers share capacity and are aborted/joined with the managed registry; existing shutdown-flush and share-scan overlap regressions pass. The retained `55be6aec` live HTTP/share-scan overlap proof passes; collect clean-runner coverage for the remaining managed services. | In progress, stronger local proof |
 | RF-007 | The share-index worker owns the cancellation token with the scan permit, checks it during filesystem traversal, returns `SHARE_SCAN_CANCELLED_ERROR`, and refuses to publish partial snapshots. Configuration reloads and runtime share-setting changes now share an index persistence turn; generation checks reject completed scans built from older settings before SQLite replacement or live publication. | Cancelled or stale rebuilds cannot replace a newer live or durable share index, and a settings reload preserves its pending-rescan state. | Focused shutdown and watched-reload regressions pass. A clean-worktree native process run at `55be6aec` observed a real 20,000-file scan during SIGTERM, returned 503 to the in-flight scan request, exited zero in 0.114 seconds, retained zero partial SQLite share rows, and reopened with zero files. The retained source/binary/harness-bound proof is `benchmarks/artifacts/20260927-rf-shutdown-overlap.json`. | Verified locally, retained live shutdown proof |
 
 ### P1 CI, Release, And Packaging
@@ -5797,7 +5797,8 @@ Hosted Windows archive construction, archive verification, and the packaged
 binary smoke all passed at `339e6812` in GitHub CI run
 [36354468661](https://github.com/snapetech/slskr/actions/runs/36354468661).
 The macOS and all Linux platform jobs also passed at that revision. The overall
-workflow and downstream package-surface job remain pending at this checkpoint.
+workflow and downstream package-surface job completed successfully, including
+Debian/RPM packages for both architectures and deployment/package policy checks.
 
 ## RF-034 Shared Web Asset Build (2026-09-27)
 
@@ -5848,3 +5849,15 @@ shutdown both completed in 0.114 seconds, the scan returned 503, SQLite remained
 valid with zero partial rows, and restart reported zero files. This closes the
 retained live overlap requirement for RF-007. RF-006 still requires clean-runner
 coverage for the other managed services.
+
+## RF-006 Distributed Link Shutdown Ownership (2026-09-27)
+
+The distributed parent and child socket loops still used detached `tokio::spawn`
+calls after the broader task-registry migration. Both now use the managed task
+registry, which aborts and joins producers before the final distributed snapshot
+is persisted. A file-backed regression registers a real TCP child, receives the
+branch metadata, sends a depth update, shuts down the registry, observes socket
+closure, and reloads the latest child depth from SQLite. The focused regression
+and all 647 daemon library tests pass, as do the full-controller/legacy feature
+compile and changed-file formatter. Broader clean-runner and live parent/service
+coverage remains open.

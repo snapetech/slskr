@@ -1096,6 +1096,66 @@ async fn managed_shutdown_persists_final_distributed_snapshot_after_worker_stops
 }
 
 #[tokio::test]
+async fn managed_shutdown_closes_distributed_child_and_persists_latest_depth() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-distributed-child-shutdown-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).expect("create child shutdown state directory");
+    let db_path = root.join("slskr.db");
+    let db = super::persistence::DatabaseManager::new(db_path.to_str().unwrap())
+        .await
+        .expect("open child shutdown database");
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (client, accepted) = tokio::join!(
+        tokio::net::TcpStream::connect(listener.local_addr().unwrap()),
+        listener.accept()
+    );
+    let (server, _) = accepted.unwrap();
+    super::register_distributed_child(Arc::clone(&state), "child".to_owned(), server, false)
+        .await
+        .expect("register distributed child");
+    let mut peer = slskr_client::stream::DistributedConnection::new(client.unwrap());
+    peer.receive().await.expect("receive branch level");
+    peer.receive().await.expect("receive branch root");
+    peer.send(&super::DistributedMessage::ChildDepth { depth: 3 })
+        .await
+        .expect("send latest child depth");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if state
+                .distributed_network
+                .read()
+                .await
+                .child_depths
+                .get("child")
+                == Some(&3)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("observe child depth before shutdown");
+
+    state.shutdown_managed_tasks().await;
+    assert!(tokio::time::timeout(Duration::from_secs(1), peer.receive())
+        .await
+        .expect("managed shutdown closes the child socket")
+        .is_err());
+    let (_, children) = db
+        .load_distributed_state()
+        .await
+        .expect("read final child snapshot");
+    assert_eq!(children, vec![("child".to_owned(), 3)]);
+    db.close_for_test().await;
+    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn pod_mutations_leave_pod_reads_available_while_waiting_for_channel_store() {
     let (state, _receiver) = test_state_with_env(MapEnv::default());
     for pod_id in ["pod-lock-put", "pod-lock-delete"] {
