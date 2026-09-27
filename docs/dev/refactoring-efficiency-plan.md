@@ -5784,3 +5784,13 @@ intermittent MediaCore opinion test failure; that test and its 36-test file
 passed separately. The test suite now resets queued mock responses before each
 case, and the complete Web suite passes 905 tests across 148 files. The next
 full gate and hosted CI run will validate the combined packaging and test fixes.
+
+## RF-034 Shared Web Asset Build (2026-09-27)
+
+The seven platform CI jobs previously ran `npm ci` and built the same production
+Web assets independently. CI now has one `web-assets` job that installs, builds,
+verifies, and uploads `web/build`. Each platform job downloads that artifact
+before its release archive build, while retaining its platform-specific binary
+build and archive verification. The workflow passes actionlint and the release
+workflow policy check locally. The shared-artifact path still needs hosted
+matrix proof; RF-034 remains in progress until that run completes.
