@@ -5726,3 +5726,10 @@ is not yet isolated; RF-024 remains in progress.
 lines. The pre-format extraction reconstructed all 252,983 original bytes.
 Its relative fixture references were adjusted, the runtime boundary guard and
 formatter pass, and the default daemon library suite passes all 642 tests.
+
+The 9,481-line controller-options differential shell script is now a 539-line
+entry point and six sourced parts under 1,900 lines each. The extraction
+reconstructed all 457,048 original bytes. Shell syntax/hygiene checks include
+the new parts, and the isolated `options` scenario passed for both frozen
+slskd and slskdN targets. The rest of the differential scenario matrix awaits
+the final release gate.
