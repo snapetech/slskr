@@ -14,7 +14,10 @@ for id in BUG-005 BUG-006 BUG-007; do
   fi
 done
 
-if ! rg -n 'validate_webhook_url_for_registration\(&url\)' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'validate_webhook_url_for_registration\(&url\)' \
+  crates/slskr/src/route_dispatch_group_1_events.rs >/dev/null ||
+   ! rg -n 'validate_webhook_url_for_registration\(&url\)' \
+  crates/slskr/src/legacy_route_dispatch_group_01.rs >/dev/null; then
   printf 'webhook outbound policy check failed: registration routes must validate webhook URLs before saving\n' >&2
   status=1
 fi

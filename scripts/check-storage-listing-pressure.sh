@@ -22,12 +22,14 @@ if ! rg -n 'SLSKD_STORAGE_MAX_RECURSION_DEPTH|slskd_recursive_storage_listing_bo
   status=1
 fi
 
-if ! rg -n 'SLSKD_STORAGE_MAX_DELETE_DEPTH|scoped_storage_delete_bounds_directory_depth' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'SLSKD_STORAGE_MAX_DELETE_DEPTH' crates/slskr/src/controller_storage.rs >/dev/null ||
+   ! rg -n 'scoped_storage_delete_bounds_directory_depth' crates/slskr/src/controller_tests.rs >/dev/null; then
   printf 'storage listing pressure check failed: recursive deletion depth budget is missing\n' >&2
   status=1
 fi
 
-if ! rg -n 'reserve_storage_delete_entry|scoped_storage_delete_bounds_directory_width' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'reserve_storage_delete_entry' crates/slskr/src/controller_storage.rs >/dev/null ||
+   ! rg -n 'scoped_storage_delete_bounds_directory_width' crates/slskr/src/controller_tests.rs >/dev/null; then
   printf 'storage listing pressure check failed: recursive deletion width budget is missing\n' >&2
   status=1
 fi
@@ -42,7 +44,7 @@ if ! rg -n 'StorageDirectoryListOptions|limit.*offset|from_query' crates/slskr/s
   status=1
 fi
 
-if ! rg -n 'truncated|entryCount' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'truncated|entryCount' crates/slskr/src/controller_storage.rs >/dev/null; then
   printf 'storage listing pressure check failed: storage listing response metadata is missing\n' >&2
   status=1
 fi
@@ -52,8 +54,8 @@ if ! rg -n 'controller_recursive_storage_listing_has_lower_budget|controller_sto
   status=1
 fi
 
-if ! rg -n 'controller_rate_limit_policy\(' crates/slskr/src/lib.rs >/dev/null \
-  || ! rg -n '\.check_ip_partition\(' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'controller_rate_limit_policy\(' crates/slskr/src/http_connection.rs >/dev/null \
+  || ! rg -n '\.check_ip_partition\(' crates/slskr/src/http_connection.rs >/dev/null; then
   printf 'storage listing pressure check failed: HTTP route rate-limit coverage is missing\n' >&2
   status=1
 fi
