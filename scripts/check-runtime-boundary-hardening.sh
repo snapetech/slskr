@@ -32,6 +32,7 @@ source_files=(
   crates/slskr/src/legacy_route_dispatch_group_09.rs
   crates/slskr/src/legacy_route_dispatch_group_10.rs
   crates/slskr/src/controller_tests.rs
+  crates/slskr/src/controller_tests/segment_*.rs
   crates/slskr/src/destination_state.rs
   crates/slskr/src/database_maintenance.rs
   crates/slskr/src/event_store.rs

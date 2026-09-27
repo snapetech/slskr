@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
-controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests.rs)
+controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests/segment_*.rs)
 
 if ! rg -n 'SLSKR_TRUSTED_PROXY_CIDRS|trusted_proxy_cidrs' crates/slskr/src docs >/dev/null; then
   printf 'rate-limit proxy policy check failed: trusted proxy CIDR configuration is missing\n' >&2

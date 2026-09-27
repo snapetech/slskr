@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
-controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests.rs)
+controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests/segment_*.rs)
 
 if ! rg -n 'SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES|SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES' crates/slskr/src/lib.rs >/dev/null; then
   printf 'storage listing pressure check failed: recursive storage listing budget constants are missing\n' >&2
@@ -23,13 +23,13 @@ if ! rg -n 'SLSKD_STORAGE_MAX_RECURSION_DEPTH|slskd_recursive_storage_listing_bo
 fi
 
 if ! rg -n 'SLSKD_STORAGE_MAX_DELETE_DEPTH' crates/slskr/src/controller_storage.rs >/dev/null ||
-   ! rg -n 'scoped_storage_delete_bounds_directory_depth' crates/slskr/src/controller_tests.rs >/dev/null; then
+   ! rg -n 'scoped_storage_delete_bounds_directory_depth' crates/slskr/src/controller_tests >/dev/null; then
   printf 'storage listing pressure check failed: recursive deletion depth budget is missing\n' >&2
   status=1
 fi
 
 if ! rg -n 'reserve_storage_delete_entry' crates/slskr/src/controller_storage.rs >/dev/null ||
-   ! rg -n 'scoped_storage_delete_bounds_directory_width' crates/slskr/src/controller_tests.rs >/dev/null; then
+   ! rg -n 'scoped_storage_delete_bounds_directory_width' crates/slskr/src/controller_tests >/dev/null; then
   printf 'storage listing pressure check failed: recursive deletion width budget is missing\n' >&2
   status=1
 fi

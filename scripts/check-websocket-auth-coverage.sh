@@ -54,7 +54,7 @@ for anchor in \
   if ! rg -n --fixed-strings -- "$anchor" \
     crates/slskr/src/lib.rs \
     crates/slskr/src/http_connection.rs \
-    crates/slskr/src/controller_tests.rs >/dev/null; then
+    crates/slskr/src/controller_tests >/dev/null; then
     printf 'websocket auth coverage check failed: missing WebSocket admission anchor %s\n' "$anchor" >&2
     status=1
   fi

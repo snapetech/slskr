@@ -5709,3 +5709,15 @@ completed successfully at `5d497f55`. Its Rust UI and slskd API parity job
 passed and retained a 298-file artifact. The credentialed live-interoperability
 job produced a skipped TSV because the hosted secret is not configured; this
 does not close RF-072 or the scheduled-artifact requirement in RF-073.
+
+The first broader RF-024 pass split `slskr-web/src/lib.rs` into seven bounded
+files (largest 5,822 lines), preserving an exact 881,329-byte reconstruction
+before formatting. Host and WASM checks, all 86 crate tests, and the changed-file
+formatter pass. The tests now inspect the React route, navigation, and header
+owners after their earlier split. `controller_tests.rs` was then split into 29
+test segments (largest 5,855 lines), with an exact 5,310,963-byte
+reconstruction before formatting. Fixture paths were adjusted for the new
+directory. The full-controller and legacy-route test target compiles, and six
+source-owner policy guards, module hygiene, shell hygiene, and formatting pass.
+The segments still share one Rust module through `include!`, so test ownership
+is not yet isolated; RF-024 remains in progress.
