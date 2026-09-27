@@ -3996,7 +3996,8 @@ async fn relay_signalr_hub_authenticates_agent_and_issues_share_token() {
         super::handle_http_connection(stream, server_state).await
     });
 
-    let (mut socket, _) = connect_async(format!("ws://{address}/hub/relay"))
+    // The test listener is bound to loopback only; TLS is unavailable on this fixture.
+    let (mut socket, _) = connect_async(format!("ws://{address}/hub/relay")) // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
         .await
         .expect("relay SignalR connection");
     socket
