@@ -5794,3 +5794,14 @@ before its release archive build, while retaining its platform-specific binary
 build and archive verification. The workflow passes actionlint and the release
 workflow policy check locally. The shared-artifact path still needs hosted
 matrix proof; RF-034 remains in progress until that run completes.
+
+## RF-024 Protocol Parity Inventory Ownership (2026-09-27)
+
+The protocol enum/string inventory readers and per-case manifest entry builder
+now live in `scripts/parity_protocol_inventory.py`; the main parity audit
+imports their public functions. The four extracted function bodies were
+preserved byte-for-byte from a pre-edit snapshot. Both frozen target inventories
+and all generated entry rows match the original implementation (123/615 for
+slskd and 170/850 for slskdN). Python compilation, CLI import, and the audit
+tooling check pass. This is a real module boundary, but RF-024 remains open
+while the large Rust test segments still share flat `include!` scope.
