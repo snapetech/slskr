@@ -140,7 +140,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-026 | `docs/dev/bug-burndown-ledger.md` marks several SDK/docs items verified while the current checks do not exercise the cited behavior. | Audit closure is not evidence-backed. | The ledger now names the executable checks for BUG-020, BUG-030, and BUG-039; docs freshness, SDK example contracts, the aggregate SDK gate, and the remediation baseline pass. Hosted/live compatibility rows remain explicitly separate. | Verified locally; hosted/live evidence separate |
 | RF-032 | `docs/full-network-test-plan.md` mixed a historical all-pass result with a newer missing-artifact plan; `REMEDIATION.md` was a stale snapshot that said daemon tests were excluded even though CI runs them. | Operators could not tell current release evidence from archived history. | The network plan labels dated results historical and points operators to current release/live gates; REMEDIATION is explicitly historical with active-plan links. A scoped local-link and referenced-script audit found no broken current paths; absent script names appear only as proposed work. The server-code count is corrected to the 103-code validated inventory, and docs freshness passes. | Verified locally; fresh live certification remains separate |
 | RF-033 | Council counts had drifted across `docs/dev/council-scan-inventory.md`, `.council/latest-candidate-counts.md`, and the active backlog; benchmark comparison/profile tests were not invoked; frontend configs lacked coverage thresholds. | Audit numbers drift and executable performance/coverage checks are absent. | The generated report now stamps date/commit provenance; active-backlog, inventory-closure, and council-freshness gates validate synchronized copies. Dashboard V8 coverage remains ratcheted in CI/release. CI and release now run the seven benchmark comparison/SQLite profiler unit tests and a focused Web API/session/event-lifecycle coverage gate at 84% statements, 75% branches, 72% functions, and 86% lines; the focused 50-test run passes at 85.54%, 78.13%, 73.91%, and 87.38%. | Verified locally |
-| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two identical local builds produced SHA-256 `cb0ec78f41813cb7bf564c22057e1d56483219144a136a9d7456bb9e52ff853d`; shared CI artifacts remain open. | In progress, local deterministic proof |
+| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS hosted archives passed, while Windows hosted confirmation and shared CI artifacts remain open. | In progress, local deterministic proof |
 | RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Retain clean-runner/actionlint evidence before external closure. | Verified locally, external runner open |
 | RF-036 | `crates/slskr-protocol/src/server.rs` repeated server-code variants, inventory metadata, numeric conversion, and direction-specific matches. | Adding a protocol code can update one table and miss another. | A declarative macro owns the variants, numeric values, inventory order, names, and numeric decoding. The 103-code two-direction test inventory classifies every code as typed or opaque and fails if dispatch drifts. All 25 server protocol tests pass. | Verified locally |
 | RF-037 | `crates/slskr-client/src/overlay.rs` combines framing, handshake DTOs, validation, service DTOs, and request lifecycle in about 2,200 lines. | Unrelated changes share one review/compile boundary. | Framing, protocol messages/validation, and TLS/client lifecycle now have separate private modules; `overlay` preserves the public re-exports. The complete locked client package test suite passes. | Verified locally |
@@ -5730,9 +5730,9 @@ formatter pass, and the default daemon library suite passes all 642 tests.
 The 9,481-line controller-options differential shell script is now a 539-line
 entry point and six sourced parts under 1,900 lines each. The extraction
 reconstructed all 457,048 original bytes. Shell syntax/hygiene checks include
-the new parts, and the isolated `options` scenario passed for both frozen
-slskd and slskdN targets. The rest of the differential scenario matrix awaits
-the final release gate.
+the new parts, and the complete differential matrix passed for both frozen
+slskd and slskdN targets in the `6163c7f8` release gate and the later
+`c6eedb8b` gate retry.
 
 The 6,063-line parity audit Python entry point is now 3,759 lines. Its seven
 frozen-source exception constants/functions moved into the 2,336-line
@@ -5756,3 +5756,31 @@ depths/indices/intervals; persisted user timestamps clamp negative values.
 Focused regressions pass, as do the protocol taint lens and adversarial corpus.
 Council candidate counts remain heuristic line counts, not a proof that every
 cast is dangerous.
+
+## Release Gate And Hosted Packaging Follow-up (2026-09-27)
+
+The complete local release gate passed at `6163c7f8`, including the frozen
+controller-options matrix, workspace Rust tests, security scans, Web tests,
+dashboard checks, SDK gates, and artifact checks. GitHub Rust CI and all Linux
+platform jobs and all CodeQL language jobs also passed at `c6eedb8b`.
+
+Hosted macOS arm64 and x64 archive jobs passed at `c6eedb8b` after replacing
+GNU-specific tar flags with a sorted Python tar writer. Hosted Windows x64
+found two separate ZIP packaging errors: the staging timestamp call used an
+unsupported `follow_symlinks` argument, and `ZipInfo` received a `datetime`
+instead of its required six-field tuple. Both are corrected in the current
+batch. With a fixed `SOURCE_DATE_EPOCH`, two local tar builds have identical
+SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`;
+the release artifact verifier accepts all 115 normalized entries. Executing
+the exact ZIP writer block twice against the same staged tree produced
+identical SHA-256 `6e1e2d6ddfe082906077158451b7ac2eaf286292a9707ebd6fa1202525f2e307`;
+the artifact verifier accepted its 110 entries. Hosted Windows proof is still
+pending at this source revision.
+
+An exact-tip local gate at `c6eedb8b` had one frozen slskdN regex-protocol
+startup bind failure. That isolated differential passed for both frozen targets
+on retry, and the subsequent full matrix passed. The same gate later had one
+intermittent MediaCore opinion test failure; that test and its 36-test file
+passed separately. The test suite now resets queued mock responses before each
+case, and the complete Web suite passes 905 tests across 148 files. The next
+full gate and hosted CI run will validate the combined packaging and test fixes.

@@ -159,7 +159,7 @@ import zipfile
 archive = pathlib.Path(os.environ["ARCHIVE"])
 root = pathlib.Path(os.environ["DIST_DIR"]) / os.environ["ROOT_NAME"]
 epoch = max(int(os.environ["SOURCE_DATE_EPOCH"]), 315532800)
-timestamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).replace(tzinfo=None)
+timestamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).timetuple()[:6]
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     for path in sorted(root.rglob("*")):
         if not path.is_file():

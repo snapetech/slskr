@@ -36,7 +36,7 @@ vi.mock('react-toastify', () => ({
 
 describe('MediaCore', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mediacore.getContentIdStats.mockResolvedValue({
       mappingsByDomain: {},
       totalDomains: 0,
