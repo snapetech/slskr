@@ -98,7 +98,7 @@ class Footer extends Component {
 
     void this.fetchBuildInfo();
 
-    if (session.isLoggedIn()) {
+    if (this.props.runtimeProfile !== 'legacy' && session.isLoggedIn()) {
       this.pollController = createPollingController(
         async () => {
           await Promise.all([this.fetchStats(), this.fetchSpeeds()]);

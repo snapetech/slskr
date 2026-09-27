@@ -20,6 +20,46 @@ describe('fetchWithoutRedirects', () => {
 });
 
 describe('readJsonResponse', () => {
+  it('parses complete JSON from a streaming response', async () => {
+    await expect(readJsonResponse(new Response('{"ok":true}'))).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it('returns undefined for empty text and empty streams', async () => {
+    await expect(
+      readJsonResponse({
+        body: null,
+        headers: new Headers(),
+        text: async () => '  ',
+      }),
+    ).resolves.toBeUndefined();
+    await expect(readJsonResponse(new Response('  '))).resolves.toBeUndefined();
+  });
+
+  it('parses JSON from a response without a readable stream', async () => {
+    await expect(
+      readJsonResponse({
+        body: null,
+        headers: new Headers(),
+        text: async () => '{"ok":true}',
+      }),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it('rejects oversized text fallback by its encoded byte length', async () => {
+    await expect(
+      readJsonResponse(
+        {
+          body: null,
+          headers: new Headers(),
+          text: async () => 'éé',
+        },
+        3,
+      ),
+    ).rejects.toThrow('exceeds 3 bytes');
+  });
+
   it('rejects a response that declares more bytes than the limit', async () => {
     await expect(
       readJsonResponse(
@@ -29,6 +69,21 @@ describe('readJsonResponse', () => {
         16,
       ),
     ).rejects.toThrow('exceeds 16 bytes');
+  });
+
+  it('cancels the body when the declared length exceeds the limit', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      readJsonResponse(
+        {
+          body: { cancel },
+          headers: new Headers({ 'Content-Length': '4' }),
+        },
+        3,
+      ),
+    ).rejects.toThrow('exceeds 3 bytes');
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('cancels a streaming response when it crosses the limit', async () => {

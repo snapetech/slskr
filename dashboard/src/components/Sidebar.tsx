@@ -43,13 +43,14 @@ export default function Sidebar() {
           <Link
             key={path}
             to={path}
+            aria-current={location.pathname === path ? "page" : undefined}
             className={`flex items-center px-6 py-3 transition-colors ${
               location.pathname === path
                 ? "bg-blue-600 text-white"
                 : "text-gray-300 hover:bg-gray-800 hover:text-white"
             }`}
           >
-            <Icon className="w-5 h-5 mr-3" />
+            <Icon aria-hidden="true" className="w-5 h-5 mr-3" />
             {label}
           </Link>
         ))}

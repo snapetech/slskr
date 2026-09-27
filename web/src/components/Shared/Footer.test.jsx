@@ -113,6 +113,16 @@ describe('Footer', () => {
     expect(getSpeeds).not.toHaveBeenCalled();
   });
 
+  it('does not start native telemetry polling for the legacy profile', () => {
+    render(<Footer runtimeProfile="legacy" />);
+
+    expect(screen.getByText('slskd 0.0.0 AGPLv3')).toBeInTheDocument();
+    expect(getBuild).not.toHaveBeenCalled();
+    expect(getStats).not.toHaveBeenCalled();
+    expect(getSlskrStats).not.toHaveBeenCalled();
+    expect(getSpeeds).not.toHaveBeenCalled();
+  });
+
   it('distinguishes unavailable telemetry from measured zero values', async () => {
     getStats.mockRejectedValue(new Error('Network stats unavailable'));
     getSlskrStats.mockRejectedValue(new Error('slskr stats unavailable'));

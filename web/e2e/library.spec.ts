@@ -60,15 +60,9 @@ test.describe('library ingest', () => {
     await expect(browseNav).toBeAttached({ timeout: 15_000 });
 
     await clickNav(page, T.navBrowse);
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 });
-
-    // Verify page loads without crashing
-    await expect(page.locator('body')).toBeVisible({ timeout: 3_000 });
-
-    // If browse content exists, verify it's visible
-    const browseContent = page.getByTestId(T.browseContent);
-    if ((await browseContent.count()) > 0) {
-      await expect(browseContent).toBeVisible({ timeout: 5_000 });
-    }
+    await expect(page).toHaveURL(/\/browse/, { timeout: 10_000 });
+    await expect(page.getByTestId(T.browseContent)).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });

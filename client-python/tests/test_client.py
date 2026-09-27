@@ -1,6 +1,8 @@
 import asyncio
 import inspect
 import json
+from pathlib import Path
+import sys
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -43,9 +45,7 @@ async def test_python_client_uses_daemon_wire_contracts():
     client._post = AsyncMock(side_effect=[{"id": 4}, {"id": 5}, None])
     client._put = AsyncMock(return_value=None)
 
-    assert await client.list_searches() == [
-        {"searchId": "search-1", "id": "search-1"}
-    ]
+    assert await client.list_searches() == [{"searchId": "search-1", "id": "search-1"}]
     assert await client.get_search_details("search-1", limit=10, offset=2) == {
         "id": "search-1",
         "results": [],
@@ -133,7 +133,9 @@ async def test_python_client_covers_session_and_extended_api_routes():
 
     assert (await client.get_sessions())[0]["username"] == "alice"
     assert (await client.create_session())["state"] == "connected"
-    assert (await client.create_session(parameters={"username": "alice"}))["state"] == "connected"
+    assert (await client.create_session(parameters={"username": "alice"}))[
+        "state"
+    ] == "connected"
     assert await client.ping_session() == {"accepted": True}
     await client.disconnect_session()
     assert await client.get_session_privileges() == {
@@ -179,8 +181,16 @@ async def test_python_client_covers_session_and_extended_api_routes():
     assert await client.invalidate_cache(["content:track"]) == {}
 
     assert ("/api/rooms/lounge%20room", None, True) in get_calls
-    assert ("/api/users/bob/browse", {"limit": 50, "offset": 0, "folder": "Albums"}, True) in get_calls
-    assert ("/api/events", {"limit": 50, "offset": 0, "kind": "search.completed"}, True) in get_calls
+    assert (
+        "/api/users/bob/browse",
+        {"limit": 50, "offset": 0, "folder": "Albums"},
+        True,
+    ) in get_calls
+    assert (
+        "/api/events",
+        {"limit": 50, "offset": 0, "kind": "search.completed"},
+        True,
+    ) in get_calls
     assert (
         "/api/events",
         {
@@ -192,10 +202,18 @@ async def test_python_client_covers_session_and_extended_api_routes():
         },
         True,
     ) in get_calls
-    assert ("/api/users/bob/browse/cancel", {"reason": "rejected by client"}, True) in post_calls
+    assert (
+        "/api/users/bob/browse/cancel",
+        {"reason": "rejected by client"},
+        True,
+    ) in post_calls
     assert ("/api/users/bob/browse/request", {}, True) in post_calls
     assert ("/api/users/bob/browse/folder", {"folder": "Albums"}, True) in post_calls
-    assert ("/api/mediacore/retrieve/cache/clear", {"keys": ["content:track"]}, True) in post_calls
+    assert (
+        "/api/mediacore/retrieve/cache/clear",
+        {"keys": ["content:track"]},
+        True,
+    ) in post_calls
     assert ("/api/rooms/lounge%20room/join", True) in delete_calls
 
 
@@ -280,9 +298,7 @@ async def test_python_client_rejects_malformed_success_response_contracts():
     with pytest.raises(ResponseContractError, match="invalid browse requests response"):
         await client.get_browse_requests()
 
-    client._get = AsyncMock(
-        return_value={"id": "search-1", "results": [None]}
-    )
+    client._get = AsyncMock(return_value={"id": "search-1", "results": [None]})
     with pytest.raises(ResponseContractError, match="invalid search details response"):
         await client.get_search_details("search-1")
 
@@ -330,7 +346,10 @@ def test_batch_builder_serializes_and_limits_operations():
     builder.get("/api/health").post("/api/searches", {"query": "ambient"})
 
     operations = builder.get_operations()
-    assert [operation.to_dict()["method"] for operation in operations] == ["GET", "POST"]
+    assert [operation.to_dict()["method"] for operation in operations] == [
+        "GET",
+        "POST",
+    ]
     assert operations[1].to_dict()["body"] == {"query": "ambient"}
     assert builder.size() == 2
 
@@ -417,6 +436,101 @@ def test_websocket_client_uses_event_endpoint_and_tracks_topics():
     assert client.get_subscribed_topics() == ["transfers"]
 
 
+async def _start_rf042_fixture():
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "web"
+        / "e2e"
+        / "fixtures"
+        / "live-subscription-fixture.py"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(fixture),
+        "--port",
+        "0",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        line = await asyncio.wait_for(process.stdout.readline(), timeout=3)
+    except Exception:
+        process.kill()
+        await process.wait()
+        raise
+    if not line.startswith(b"PORT="):
+        stderr = await process.stderr.read()
+        process.kill()
+        await process.wait()
+        raise AssertionError(
+            f"RF-042 fixture did not report a port: {line!r}; stderr={stderr!r}"
+        )
+    port = line.decode("ascii").strip().split("=", 1)[1]
+    return process, f"http://127.0.0.1:{port}"
+
+
+async def _stop_rf042_fixture(process):
+    if process.returncode is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=1)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+
+
+@pytest.mark.asyncio
+async def test_websocket_client_runs_rf042_live_subscription_contract():
+    process, base_url = await _start_rf042_fixture()
+    client = WebSocketClient(base_url, "rf042-token")
+    client.reconnect_delay = 0.01
+    client.max_reconnect_attempts = 1
+    received = []
+    unexpected_transfers = []
+    events_changed = asyncio.Event()
+
+    def on_search(event):
+        received.append(event)
+        events_changed.set()
+
+    def on_transfer(event):
+        unexpected_transfers.append(event)
+
+    client.on("search.completed", on_search)
+    client.on("transfer.completed", on_transfer)
+    client.subscribe("search.completed", "transfer.completed")
+
+    async def wait_for_event(event_id):
+        for _ in range(50):
+            if any(event.get("id") == event_id for event in received):
+                return
+            events_changed.clear()
+            try:
+                await asyncio.wait_for(events_changed.wait(), timeout=0.1)
+            except asyncio.TimeoutError:
+                pass
+        raise AssertionError(f"timed out waiting for RF-042 event {event_id}")
+
+    try:
+        await client.connect()
+        await wait_for_event("rf042-initial")
+        client.unsubscribe("transfer.completed")
+        await wait_for_event("rf042-after-unsubscribe")
+        await wait_for_event("rf042-reconnect")
+
+        assert [event["id"] for event in received] == [
+            "rf042-initial",
+            "rf042-after-unsubscribe",
+            "rf042-reconnect",
+        ]
+        assert unexpected_transfers == []
+        assert client.get_subscribed_topics() == ["search.completed"]
+    finally:
+        await client.disconnect()
+        await _stop_rf042_fixture(process)
+
+
 def test_websocket_client_rejects_non_http_base_urls():
     with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
         WebSocketClient("ftp://example.test", "token")
@@ -468,9 +582,7 @@ async def test_websocket_client_bounds_a_stalled_handshake():
     session.close = AsyncMock()
 
     with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
-        client = WebSocketClient(
-            "https://example.test", "token", connect_timeout=0.01
-        )
+        client = WebSocketClient("https://example.test", "token", connect_timeout=0.01)
         connecting = asyncio.create_task(client.connect())
         await dial_started.wait()
 
@@ -645,7 +757,7 @@ async def test_websocket_failed_subscribe_task_rolls_back_topics():
 
 
 @pytest.mark.asyncio
-async def test_websocket_stale_subscription_failure_keeps_desired_topics_for_reconnect():
+async def test_websocket_stale_subscription_failure_preserves_reconnect_topics():
     send_started = asyncio.Event()
 
     async def failed_send(_message):
@@ -846,7 +958,7 @@ async def test_python_client_coalesces_concurrent_websocket_connects():
 
 
 @pytest.mark.asyncio
-async def test_python_client_uses_default_websocket_deadline_when_http_timeout_is_disabled():
+async def test_python_client_uses_default_websocket_deadline_when_disabled():
     websocket = MagicMock()
     websocket.is_connected.return_value = True
     client = SlskrClient("https://example.test", "token", timeout=0)

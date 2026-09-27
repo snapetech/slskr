@@ -1,10 +1,111 @@
 package slskr
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
 )
+
+// APIError reports an HTTP API response with a status code of 400 or greater.
+//
+// Error preserves the client's existing "API error: <status> - <body>"
+// formatting, while Status, Code, and Details expose structured error data to
+// callers without requiring string parsing.
+type APIError struct {
+	Status  int
+	Code    string
+	Details string
+
+	message string
+	cause   error
+}
+
+// ApiError is an alias for APIError for callers using the spelling used by
+// the other SDKs.
+type ApiError = APIError
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	if e.message != "" {
+		return e.message
+	}
+	if e.Code != "" {
+		return fmt.Sprintf("API error: %d - %s", e.Status, e.Code)
+	}
+	return fmt.Sprintf("API error: %d", e.Status)
+}
+
+func (e *APIError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// IsClientError reports whether the API returned a 4xx status.
+func (e *APIError) IsClientError() bool {
+	return e != nil && e.Status >= 400 && e.Status < 500
+}
+
+// IsServerError reports whether the API returned a 5xx or higher status.
+func (e *APIError) IsServerError() bool {
+	return e != nil && e.Status >= 500
+}
+
+// IsNotFound reports whether the API returned 404 Not Found.
+func (e *APIError) IsNotFound() bool {
+	return e != nil && e.Status == 404
+}
+
+// IsUnauthorized reports whether the API returned 401 Unauthorized.
+func (e *APIError) IsUnauthorized() bool {
+	return e != nil && e.Status == 401
+}
+
+// IsForbidden reports whether the API returned 403 Forbidden.
+func (e *APIError) IsForbidden() bool {
+	return e != nil && e.Status == 403
+}
+
+// IsConflict reports whether the API returned 409 Conflict.
+func (e *APIError) IsConflict() bool {
+	return e != nil && e.Status == 409
+}
+
+func newAPIError(status int, body []byte) *APIError {
+	apiError := &APIError{
+		Status:  status,
+		Code:    fmt.Sprintf("HTTP %d", status),
+		message: fmt.Sprintf("API error: %d - %s", status, redactErrorBody(body)),
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return apiError
+	}
+	for _, key := range []string{"code", "error"} {
+		if code, ok := payload[key].(string); ok && strings.TrimSpace(code) != "" {
+			apiError.Code = code
+			break
+		}
+	}
+	if details, ok := payload["details"].(string); ok {
+		apiError.Details = details
+	}
+	return apiError
+}
+
+func newAPIErrorFromCause(status int, cause error) *APIError {
+	return &APIError{
+		Status:  status,
+		Code:    fmt.Sprintf("HTTP %d", status),
+		message: fmt.Sprintf("API error: %d - %s", status, cause),
+		cause:   cause,
+	}
+}
 
 // ResponseContractError reports a successful HTTP response that does not
 // match the JSON contract expected by the client.

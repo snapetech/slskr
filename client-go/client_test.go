@@ -151,6 +151,40 @@ func TestClientBoundsChunkedErrorResponse(t *testing.T) {
 	}
 }
 
+func TestClientReturnsTypedAPIErrorWithoutChangingErrorText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = writer.Write([]byte(`{"error":"validation_failed","message":"Invalid query","details":"query is required"}`))
+	}))
+	defer server.Close()
+
+	_, err := NewClient(server.URL, "token").Health(context.Background())
+	if err == nil {
+		t.Fatal("expected API error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T: %v", err, err)
+	}
+	if apiErr.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("unexpected API error status: %d", apiErr.Status)
+	}
+	if apiErr.Code != "validation_failed" {
+		t.Fatalf("unexpected API error code: %q", apiErr.Code)
+	}
+	if apiErr.Details != "query is required" {
+		t.Fatalf("unexpected API error details: %q", apiErr.Details)
+	}
+	if !strings.HasPrefix(apiErr.Error(), "API error: 422 - ") ||
+		!strings.Contains(apiErr.Error(), "validation_failed") {
+		t.Fatalf("API error text changed unexpectedly: %q", apiErr.Error())
+	}
+	if !apiErr.IsClientError() || apiErr.IsServerError() {
+		t.Fatalf("unexpected API error classification: %#v", apiErr)
+	}
+}
+
 func TestClientPreservesTimeoutWhileReadingErrorResponse(t *testing.T) {
 	client := NewClient("http://example.test", "token")
 	client.Timeout = 10 * time.Millisecond

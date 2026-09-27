@@ -807,9 +807,9 @@ func (c *Client) doJSON(req *http.Request, auth bool) (interface{}, error) {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
-			return nil, fmt.Errorf("API error: %d - %w", resp.StatusCode, err)
+			return nil, newAPIErrorFromCause(resp.StatusCode, err)
 		}
-		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, redactErrorBody(bodyBytes))
+		return nil, newAPIError(resp.StatusCode, bodyBytes)
 	}
 
 	bodyBytes, err := readBoundedBody(resp, maxHTTPResponseBytes)

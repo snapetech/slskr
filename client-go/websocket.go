@@ -20,6 +20,21 @@ const (
 	webSocketReadTimeout           = 2 * time.Minute
 )
 
+type eventListener struct {
+	id uint64
+	ch chan interface{}
+}
+
+type connectionListener struct {
+	id uint64
+	ch chan bool
+}
+
+type errorListener struct {
+	id uint64
+	ch chan error
+}
+
 // WebSocketClient represents a WebSocket connection to the API
 type WebSocketClient struct {
 	url                       string
@@ -43,11 +58,12 @@ type WebSocketClient struct {
 	subscriptionMu            sync.RWMutex
 	subscribedTopics          map[string]bool
 	conn                      *websocket.Conn
+	nextListenerID            uint64
 
 	// Channels for events
-	eventChannels map[string][]chan interface{}
-	connectionCh  []chan bool
-	errorCh       []chan error
+	eventChannels map[string][]eventListener
+	connectionCh  []connectionListener
+	errorCh       []errorListener
 }
 
 // NewWebSocketClient creates a new WebSocket client
@@ -67,7 +83,7 @@ func (c *Client) NewWebSocketClient(debug bool) *WebSocketClient {
 		maxReconnectAttempts: 5,
 		reconnectDelay:       time.Second,
 		subscribedTopics:     make(map[string]bool),
-		eventChannels:        make(map[string][]chan interface{}),
+		eventChannels:        make(map[string][]eventListener),
 	}
 }
 
@@ -428,29 +444,50 @@ func (w *WebSocketClient) GetSubscribedTopics() []string {
 	return topics
 }
 
-// On registers an event listener
-func (w *WebSocketClient) On(eventType string, ch chan interface{}) {
+// On registers an event listener and returns an idempotent unsubscribe
+// function. Existing callers may continue to ignore the returned function.
+func (w *WebSocketClient) On(eventType string, ch chan interface{}) func() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
+	listener := eventListener{id: w.nextListenerID, ch: ch}
+	w.nextListenerID++
 	if w.eventChannels[eventType] == nil {
-		w.eventChannels[eventType] = []chan interface{}{}
+		w.eventChannels[eventType] = []eventListener{}
 	}
-	w.eventChannels[eventType] = append(w.eventChannels[eventType], ch)
+	w.eventChannels[eventType] = append(w.eventChannels[eventType], listener)
+	w.mu.Unlock()
+
+	return func() {
+		w.removeEventListener(eventType, listener.id)
+	}
 }
 
-// OnConnectionChange registers a connection state listener
-func (w *WebSocketClient) OnConnectionChange(ch chan bool) {
+// OnConnectionChange registers a connection state listener and returns an
+// idempotent unsubscribe function. Existing callers may continue to ignore
+// the returned function.
+func (w *WebSocketClient) OnConnectionChange(ch chan bool) func() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.connectionCh = append(w.connectionCh, ch)
+	listener := connectionListener{id: w.nextListenerID, ch: ch}
+	w.nextListenerID++
+	w.connectionCh = append(w.connectionCh, listener)
+	w.mu.Unlock()
+
+	return func() {
+		w.removeConnectionListener(listener.id)
+	}
 }
 
-// OnError registers an error listener
-func (w *WebSocketClient) OnError(ch chan error) {
+// OnError registers an error listener and returns an idempotent unsubscribe
+// function. Existing callers may continue to ignore the returned function.
+func (w *WebSocketClient) OnError(ch chan error) func() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.errorCh = append(w.errorCh, ch)
+	listener := errorListener{id: w.nextListenerID, ch: ch}
+	w.nextListenerID++
+	w.errorCh = append(w.errorCh, listener)
+	w.mu.Unlock()
+
+	return func() {
+		w.removeErrorListener(listener.id)
+	}
 }
 
 // ============================================================================
@@ -577,41 +614,90 @@ func (w *WebSocketClient) processMessage(msg map[string]interface{}) {
 	}
 
 	w.mu.RLock()
-	listeners := append([]chan interface{}(nil), w.eventChannels[eventType]...)
+	listeners := append([]eventListener(nil), w.eventChannels[eventType]...)
 	w.mu.RUnlock()
 
-	for _, ch := range listeners {
+	for _, listener := range listeners {
 		var value interface{} = msg
-		sendNonBlocking(ch, value)
+		sendNonBlocking(listener.ch, value)
 	}
 }
 
 func (w *WebSocketClient) notifyConnectionListeners(connected bool) {
 	w.mu.RLock()
-	listeners := make([]chan bool, len(w.connectionCh))
+	listeners := make([]connectionListener, len(w.connectionCh))
 	copy(listeners, w.connectionCh)
 	w.mu.RUnlock()
 
-	for _, ch := range listeners {
-		sendNonBlocking(ch, connected)
+	for _, listener := range listeners {
+		sendNonBlocking(listener.ch, connected)
 	}
 }
 
 func (w *WebSocketClient) notifyErrorListeners(err error) {
 	w.mu.RLock()
-	listeners := make([]chan error, len(w.errorCh))
+	listeners := make([]errorListener, len(w.errorCh))
 	copy(listeners, w.errorCh)
 	w.mu.RUnlock()
 
-	for _, ch := range listeners {
-		sendNonBlocking(ch, err)
+	for _, listener := range listeners {
+		sendNonBlocking(listener.ch, err)
+	}
+}
+
+func (w *WebSocketClient) removeEventListener(eventType string, id uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	listeners := w.eventChannels[eventType]
+	for index, listener := range listeners {
+		if listener.id != id {
+			continue
+		}
+		copy(listeners[index:], listeners[index+1:])
+		listeners[len(listeners)-1] = eventListener{}
+		listeners = listeners[:len(listeners)-1]
+		if len(listeners) == 0 {
+			delete(w.eventChannels, eventType)
+		} else {
+			w.eventChannels[eventType] = listeners
+		}
+		return
+	}
+}
+
+func (w *WebSocketClient) removeConnectionListener(id uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for index, listener := range w.connectionCh {
+		if listener.id != id {
+			continue
+		}
+		copy(w.connectionCh[index:], w.connectionCh[index+1:])
+		w.connectionCh[len(w.connectionCh)-1] = connectionListener{}
+		w.connectionCh = w.connectionCh[:len(w.connectionCh)-1]
+		return
+	}
+}
+
+func (w *WebSocketClient) removeErrorListener(id uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for index, listener := range w.errorCh {
+		if listener.id != id {
+			continue
+		}
+		copy(w.errorCh[index:], w.errorCh[index+1:])
+		w.errorCh[len(w.errorCh)-1] = errorListener{}
+		w.errorCh = w.errorCh[:len(w.errorCh)-1]
+		return
 	}
 }
 
 func sendNonBlocking[T any](ch chan T, value T) {
 	defer func() {
 		// Listener channels are supplied and owned by callers. A caller may
-		// close one without an unsubscribe API; that must not kill the reader.
+		// close one without first calling its unsubscribe function; that must
+		// not kill the reader.
 		_ = recover()
 	}()
 	select {

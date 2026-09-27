@@ -123,9 +123,9 @@ async function bulkMessageExample() {
   try {
     const response = await batch
       .builder()
-      .post('/api/messages', { recipient: 'user1', content: message }, 'msg1')
-      .post('/api/messages', { recipient: 'user2', content: message }, 'msg2')
-      .post('/api/messages', { recipient: 'user3', content: message }, 'msg3')
+      .post('/api/messages', { username: 'user1', body: message }, 'msg1')
+      .post('/api/messages', { username: 'user2', body: message }, 'msg2')
+      .post('/api/messages', { username: 'user3', body: message }, 'msg3')
       .execute();
 
     const successful = batch.getSuccessful(response);

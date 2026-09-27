@@ -52,10 +52,10 @@ class SlskrClient:
         self.retry_delay = retry_delay
         self.debug = debug
         self.session: Optional[aiohttp.ClientSession] = None
-        
+
         # Initialize batch and websocket clients
         self.batch = BatchClient(self)
-        self.ws = None  # WebSocket client created on demand
+        self.ws: Optional[WebSocketClient] = None  # created on demand
         self._ws_lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -182,7 +182,9 @@ class SlskrClient:
     async def ping_session(self, session_id: str = "server") -> Dict[str, Any]:
         """Keep the server session alive."""
         del session_id
-        return self._response_object(await self._post("/api/session/ping", {}), "session ping")
+        return self._response_object(
+            await self._post("/api/session/ping", {}), "session ping"
+        )
 
     async def disconnect_session(self, session_id: str = "server") -> None:
         """Disconnect the server session."""
@@ -209,7 +211,9 @@ class SlskrClient:
 
     async def list_users(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List watched users."""
-        result = await self._get("/api/users", params={"limit": limit, "offset": offset})
+        result = await self._get(
+            "/api/users", params={"limit": limit, "offset": offset}
+        )
         return self._response_list_with_text(
             result, "users", ("username",), "users", "entries"
         )
@@ -227,15 +231,21 @@ class SlskrClient:
 
     async def list_searches(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List searches"""
-        result = await self._get("/api/searches", params={"limit": limit, "offset": offset})
+        result = await self._get(
+            "/api/searches", params={"limit": limit, "offset": offset}
+        )
         return self._response_list_with_normalized_identifier(
             result, "searches", "id", "searchId", "token"
         )
 
-    async def create_search(self, query: str, room: str = None, target: str = None) -> Dict:
+    async def create_search(
+        self, query: str, room: str = None, target: str = None
+    ) -> Dict:
         """Create new search"""
         body = {"query": query, "room": room, "target": target}
-        result = self._response_object(await self._post("/api/searches", body), "search")
+        result = self._response_object(
+            await self._post("/api/searches", body), "search"
+        )
         return self._response_object_with_normalized_identifier(
             result, "search", "id", "searchId", "token"
         )
@@ -257,7 +267,9 @@ class SlskrClient:
 
     async def list_messages(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List messages"""
-        result = await self._get("/api/messages", params={"limit": limit, "offset": offset})
+        result = await self._get(
+            "/api/messages", params={"limit": limit, "offset": offset}
+        )
         return self._response_list_with_identifier(result, "messages", "id")
 
     async def get_user_messages(
@@ -296,7 +308,7 @@ class SlskrClient:
         offset: int = 0,
     ) -> List[Dict]:
         """List transfers"""
-        params = {"limit": limit, "offset": offset}
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if direction:
             params["direction"] = self._transfer_direction_value(direction)
         if status:
@@ -336,7 +348,9 @@ class SlskrClient:
 
     async def list_rooms(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List rooms."""
-        result = await self._get("/api/rooms", params={"limit": limit, "offset": offset})
+        result = await self._get(
+            "/api/rooms", params={"limit": limit, "offset": offset}
+        )
         return self._response_list_with_text(
             result, "rooms", ("name", "room"), "rooms", "entries"
         )
@@ -344,7 +358,10 @@ class SlskrClient:
     async def get_room(self, name: str) -> Dict[str, Any]:
         """Get room details by name."""
         return self._response_object_with_text(
-            await self._get(f"/api/rooms/{self._path_segment(name)}"), "room", "name", "room"
+            await self._get(f"/api/rooms/{self._path_segment(name)}"),
+            "room",
+            "name",
+            "room",
         )
 
     async def join_room(self, name: str) -> Dict[str, Any]:
@@ -460,12 +477,16 @@ class SlskrClient:
 
     async def list_shares(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List shared files and directories."""
-        result = await self._get("/api/shares", params={"limit": limit, "offset": offset})
+        result = await self._get(
+            "/api/shares", params={"limit": limit, "offset": offset}
+        )
         return self._response_list(result, "shares", "shares", "local", "entries")
 
     async def refresh_shares(self) -> Dict[str, Any]:
         """Rescan configured shared directories."""
-        return self._response_object(await self._post("/api/shares/rescan", {}), "share rescan")
+        return self._response_object(
+            await self._post("/api/shares/rescan", {}), "share rescan"
+        )
 
     async def get_filters(self) -> Dict[str, Any]:
         """Get download/search filter settings."""
@@ -489,7 +510,9 @@ class SlskrClient:
             await self._get("/api/mediacore/retrieve/stats"), "cache stats"
         )
 
-    async def invalidate_cache(self, keys: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def invalidate_cache(
+        self, keys: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Invalidate selected MediaCore cache keys, or the complete cache."""
         return self._response_object(
             await self._post(
@@ -509,7 +532,9 @@ class SlskrClient:
         authenticated: bool = True,
     ) -> Any:
         """Make GET request"""
-        return await self._request("GET", path, params=params, authenticated=authenticated)
+        return await self._request(
+            "GET", path, params=params, authenticated=authenticated
+        )
 
     async def _post(
         self,
@@ -561,10 +586,14 @@ class SlskrClient:
         if authenticated:
             headers["Authorization"] = f"Bearer {self.token}"
 
+        session = self.session
+        if session is None:
+            raise NetworkError("HTTP session could not be created")
+
         try:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
 
-            async with self.session.request(
+            async with session.request(
                 method,
                 url,
                 json=body,
@@ -576,12 +605,16 @@ class SlskrClient:
                     logger.debug("[slskr] %s %s %s", method, url, response.status)
 
                 if 300 <= response.status < 400:
-                    raise NetworkError("refusing HTTP redirect outside configured API origin")
+                    raise NetworkError(
+                        "refusing HTTP redirect outside configured API origin"
+                    )
 
                 if response.status >= 400:
                     error_data = {}
                     try:
-                        parsed_error = await self._read_json(response, MAX_HTTP_ERROR_BYTES)
+                        parsed_error = await self._read_json(
+                            response, MAX_HTTP_ERROR_BYTES
+                        )
                         if isinstance(parsed_error, dict):
                             error_data = parsed_error
                     except asyncio.TimeoutError:
@@ -615,8 +648,8 @@ class SlskrClient:
 
                     raise ApiError(
                         response.status,
-                        error_code,
-                        message=message,
+                        str(error_code),
+                        message=str(message),
                         details=details,
                     )
 
@@ -760,7 +793,11 @@ class SlskrClient:
 
     @classmethod
     def _response_list_with_text(
-        cls, result: Any, resource: str, text_keys: Tuple[str, ...], *collection_keys: str
+        cls,
+        result: Any,
+        resource: str,
+        text_keys: Tuple[str, ...],
+        *collection_keys: str,
     ) -> List[Dict]:
         values = cls._response_list(result, resource, *collection_keys)
         if any(
@@ -788,7 +825,10 @@ class SlskrClient:
     ) -> List[Dict]:
         values = cls._response_list(result, resource, resource, "entries")
         if any(
-            not any(cls._valid_response_identifier(value.get(key)) for key in identifier_keys)
+            not any(
+                cls._valid_response_identifier(value.get(key))
+                for key in identifier_keys
+            )
             for value in values
         ):
             raise ResponseContractError(resource)

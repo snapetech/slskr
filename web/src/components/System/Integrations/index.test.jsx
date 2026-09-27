@@ -5,7 +5,7 @@ import * as optionsApi from '../../../lib/options';
 import * as slskr from '../../../lib/slskr';
 import Integrations, { buildDefaultSpotifyRedirectUri } from './index';
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../lib/lidarr', () => ({
@@ -545,6 +545,497 @@ describe('Integrations', () => {
     ).toBeInTheDocument();
   });
 
+  it('profiles Spotify source-feed input render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+
+    render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations />
+      </React.Profiler>,
+    );
+    const spotifyClientId = screen.getByLabelText('Spotify client ID');
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.change(spotifyClientId, {
+        target: { value: `warmup-spotify-${index}` },
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      fireEvent.change(spotifyClientId, {
+        target: { value: `profile-spotify-${index}` },
+      });
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_SPOTIFY_INPUT_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles notification integration input render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+
+    render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations options={{ remoteConfiguration: true }} />
+      </React.Profiler>,
+    );
+    const pushbulletPrefix = screen.getByLabelText(
+      'Pushbullet notification prefix',
+    );
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.change(pushbulletPrefix, {
+        target: { value: `warmup-notification-${index}` },
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      fireEvent.change(pushbulletPrefix, {
+        target: { value: `profile-notification-${index}` },
+      });
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_NOTIFICATION_INPUT_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles metadata settings input render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+
+    render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations options={{ remoteConfiguration: true }} />
+      </React.Profiler>,
+    );
+    const musicBrainzUserAgent = screen.getByLabelText(
+      'MusicBrainz user agent',
+    );
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.change(musicBrainzUserAgent, {
+        target: { value: `warmup-metadata-${index}` },
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      fireEvent.change(musicBrainzUserAgent, {
+        target: { value: `profile-metadata-${index}` },
+      });
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_METADATA_INPUT_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles FTP settings input render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+
+    render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations options={{ remoteConfiguration: true }} />
+      </React.Profiler>,
+    );
+    const ftpAddress = screen.getByLabelText('FTP server address');
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.change(ftpAddress, {
+        target: { value: `warmup-ftp-${index}.example.net` },
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      fireEvent.change(ftpAddress, {
+        target: { value: `profile-ftp-${index}.example.net` },
+      });
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_FTP_INPUT_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles VPN status prop render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+    const options = {
+      integration: {
+        vpn: {
+          enabled: true,
+          gluetun: { url: 'http://127.0.0.1:8000' },
+          pollingInterval: 2500,
+          portForwarding: true,
+        },
+      },
+    };
+    const stateForPort = (forwardedPort) => ({
+      vpn: {
+        forwardedPort,
+        isConnected: true,
+        isReady: true,
+        publicIPAddress: '203.0.113.7',
+      },
+    });
+
+    const rendered = render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations options={options} state={stateForPort(50000)} />
+      </React.Profiler>,
+    );
+    for (let index = 0; index < 3; index += 1) {
+      rendered.rerender(
+        <React.Profiler id="Integrations" onRender={onRender}>
+          <Integrations options={options} state={stateForPort(50001 + index)} />
+        </React.Profiler>,
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      rendered.rerender(
+        <React.Profiler id="Integrations" onRender={onRender}>
+          <Integrations options={options} state={stateForPort(50100 + index)} />
+        </React.Profiler>,
+      );
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_VPN_STATUS_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles Lidarr import-directory input render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+
+    render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations />
+      </React.Profiler>,
+    );
+    const importDirectory = screen.getByPlaceholderText(
+      'Completed download directory visible to slskr...',
+    );
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.change(importDirectory, {
+        target: { value: `/downloads/warmup-${index}` },
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      fireEvent.change(importDirectory, {
+        target: { value: `/downloads/profile-${index}` },
+      });
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_LIDARR_INPUT_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles media-server base-URL input render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+
+    render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations />
+      </React.Profiler>,
+    );
+    const baseUrl = screen.getByLabelText('Media server base URL');
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.change(baseUrl, {
+        target: { value: `https://media-${index}.example.net` },
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      fireEvent.change(baseUrl, {
+        target: { value: `https://profile-${index}.example.net` },
+      });
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_MEDIA_SERVER_INPUT_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles Servarr readiness option render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+    const optionsForUrl = (url) => ({
+      integration: {
+        lidarr: {
+          apiKey: 'configured-key',
+          autoImportCompleted: true,
+          enabled: true,
+          importPathFrom: '/downloads/complete',
+          importPathTo: '/music',
+          syncWantedToWishlist: true,
+          url,
+        },
+      },
+    });
+
+    const rendered = render(
+      <React.Profiler id="Integrations" onRender={onRender}>
+        <Integrations options={optionsForUrl('http://lidarr-0.example.net')} />
+      </React.Profiler>,
+    );
+    for (let index = 0; index < 3; index += 1) {
+      rendered.rerender(
+        <React.Profiler id="Integrations" onRender={onRender}>
+          <Integrations options={optionsForUrl(`http://lidarr-${index + 1}.example.net`)} />
+        </React.Profiler>,
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      rendered.rerender(
+        <React.Profiler id="Integrations" onRender={onRender}>
+          <Integrations options={optionsForUrl(`http://profile-${index}.example.net`)} />
+        </React.Profiler>,
+      );
+      expect(durations.length).toBeGreaterThan(previousCommitCount);
+      inputSamples.push(durations[previousCommitCount]);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_SERVARR_OPTIONS_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
+  it('profiles federation diagnostics load render commits', async () => {
+    const durations = [];
+    const onRender = (_id, phase, actualDuration) => {
+      if (phase === 'update') durations.push(actualDuration);
+    };
+    slskr.getMetadataProcessingStatus.mockReturnValue(new Promise(() => {}));
+    const mountProfiledIntegrations = () =>
+      render(
+        <React.Profiler id="Integrations" onRender={onRender}>
+          <Integrations />
+        </React.Profiler>,
+      );
+
+    for (let index = 0; index < 3; index += 1) {
+      const mounted = mountProfiledIntegrations();
+      expect(
+        await screen.findByText(
+          'Public federation is enabled while HTTP signature verification is disabled.',
+        ),
+      ).toBeInTheDocument();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      mounted.unmount();
+    }
+
+    durations.length = 0;
+    const inputSamples = [];
+    for (let index = 0; index < 20; index += 1) {
+      const previousCommitCount = durations.length;
+      const mounted = mountProfiledIntegrations();
+      expect(
+        await screen.findByText(
+          'Public federation is enabled while HTTP signature verification is disabled.',
+        ),
+      ).toBeInTheDocument();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const samples = durations.slice(previousCommitCount);
+      expect(samples.length).toBeGreaterThan(0);
+      inputSamples.push(samples[samples.length - 1]);
+      mounted.unmount();
+    }
+
+    expect(inputSamples).toHaveLength(20);
+    expect(inputSamples.every(Number.isFinite)).toBe(true);
+    const sorted = [...inputSamples].sort((left, right) => left - right);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    console.log('INTEGRATIONS_FEDERATION_LOAD_PROFILE', JSON.stringify({
+      commits: inputSamples.length,
+      medianMs: median,
+      p95Ms: p95,
+      samplesMs: inputSamples,
+    }));
+  });
+
   it('applies notification integration settings without exposing secrets', async () => {
     optionsApi.applyOverlay.mockResolvedValue({});
 
@@ -613,7 +1104,7 @@ describe('Integrations', () => {
       });
     });
     expect(
-      screen.getByText(
+      await screen.findByText(
         'Notification integration settings applied for this running daemon.',
       ),
     ).toBeInTheDocument();

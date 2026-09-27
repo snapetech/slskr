@@ -1,5 +1,11 @@
 import './Pods.css';
 import { toDisplayError } from '../../lib/errors';
+import {
+  historyCursor,
+  isAbortError,
+  mergeMessageHistory,
+  messageKey,
+} from '../../lib/messageHistory';
 import { encodePathSegment } from '../../lib/pathEncoding';
 import * as pods from '../../lib/pods';
 import { createPollingController } from '../../lib/usePolling';
@@ -57,6 +63,7 @@ const initialState = {
 };
 
 const GOLD_STAR_CLUB_POD_ID = 'pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0';
+const MAX_POD_MESSAGES = 100;
 
 const asRecords = (value) =>
   (Array.isArray(value) ? value : []).filter(
@@ -135,6 +142,9 @@ class Pods extends Component {
       messages: null,
       pods: null,
     };
+    this.messageAbortControllers = new Map();
+    this.messageInFlight = new Map();
+    this.messageCursors = new Map();
     this.actionInFlight = {
       create: false,
       discover: false,
@@ -192,6 +202,11 @@ class Pods extends Component {
     Object.keys(this.requestIds).forEach((key) => {
       this.requestIds[key] += 1;
     });
+    for (const controller of this.messageAbortControllers.values()) {
+      controller.abort();
+    }
+    this.messageAbortControllers.clear();
+    this.messageCursors.clear();
     this.stopPolling();
   }
 
@@ -280,55 +295,95 @@ class Pods extends Component {
     }
   };
 
-  fetchMessages = async (
+  fetchMessages = (
     podId = this.state.activePodId,
     channelId = this.state.activeChannelId,
   ) => {
     if (!podId || !channelId) {
-      return;
+      return Promise.resolve();
+    }
+
+    const cacheKey = `${podId}:${channelId}`;
+    const existingRequest = this.messageInFlight.get(cacheKey);
+    if (existingRequest) return existingRequest;
+
+    for (const [key, controller] of this.messageAbortControllers) {
+      if (key !== cacheKey) controller.abort();
     }
 
     const requestId = ++this.requestIds.messages;
-    const messageKey = `${podId}:${channelId}`;
+    const since = this.messageCursors.get(cacheKey) ?? null;
+    const controller = new AbortController();
+    this.messageAbortControllers.set(cacheKey, controller);
+    let request;
 
-    try {
-      const channelMessages = await pods.getMessages(
-        podId,
-        channelId,
-      );
-      if (
-        this.isMountedFlag &&
-        requestId === this.requestIds.messages &&
+    request = (async () => {
+      try {
+        const channelMessages = await pods.getMessages(
+          podId,
+          channelId,
+          since,
+          controller.signal,
+        );
+        const normalizedMessages = asRecords(channelMessages).map(normalizeMessage);
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.messages &&
         this.state.activePodId === podId &&
         this.state.activeChannelId === channelId
-      ) {
-        this.setState((previousState) => ({
-          messages: {
-            ...previousState.messages,
-            [messageKey]: asRecords(channelMessages).map(normalizeMessage),
-          },
-          messageErrors: {
-            ...previousState.messageErrors,
-            [messageKey]: null,
-          },
-        }));
+        ) {
+          const incomingCursor = historyCursor(normalizedMessages);
+          if (incomingCursor !== null) {
+            this.messageCursors.set(
+              cacheKey,
+              Math.max(since ?? incomingCursor, incomingCursor),
+            );
+          } else if (since === null) {
+            this.messageCursors.delete(cacheKey);
+          }
+          this.setState((previousState) => ({
+            messages: {
+              ...previousState.messages,
+              [cacheKey]: mergeMessageHistory(
+                since === null ? [] : previousState.messages[cacheKey],
+                normalizedMessages,
+                MAX_POD_MESSAGES,
+              ),
+            },
+            messageErrors: {
+              ...previousState.messageErrors,
+              [cacheKey]: null,
+            },
+          }));
+        }
+      } catch (error) {
+        if (isAbortError(error, controller.signal)) return;
+        console.error('Failed to fetch messages:', error);
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.messages &&
+          this.state.activePodId === podId &&
+          this.state.activeChannelId === channelId
+        ) {
+          this.setState((previousState) => ({
+            messageErrors: {
+              ...previousState.messageErrors,
+              [cacheKey]: toDisplayError(error, 'Failed to load messages'),
+            },
+          }));
+        }
+      } finally {
+        if (this.messageInFlight.get(cacheKey) === request) {
+          this.messageInFlight.delete(cacheKey);
+          if (this.messageAbortControllers.get(cacheKey) === controller) {
+            this.messageAbortControllers.delete(cacheKey);
+          }
+        }
       }
-    } catch (error) {
-      console.error('Failed to fetch messages:', error);
-      if (
-        this.isMountedFlag &&
-        requestId === this.requestIds.messages &&
-        this.state.activePodId === podId &&
-        this.state.activeChannelId === channelId
-      ) {
-        this.setState((previousState) => ({
-          messageErrors: {
-            ...previousState.messageErrors,
-            [messageKey]: toDisplayError(error, 'Failed to load messages'),
-          },
-        }));
-      }
-    }
+    })();
+
+    this.messageInFlight.set(cacheKey, request);
+    return request;
   };
 
   getChannelIndex = (podDetail, channelId) =>
@@ -1033,7 +1088,7 @@ class Pods extends Component {
                       ) : (
                         <List relaxed="very">
                           {currentMessages.map((message, index) => (
-                              <List.Item key={index}>
+                              <List.Item key={messageKey(message)}>
                                 <List.Content>
                                   <List.Header>
                                   {String(message.senderPeerId ?? 'Unknown peer')}

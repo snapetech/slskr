@@ -14,6 +14,9 @@ Soulseek or its operators.
 - ✅ Comprehensive error handling
 - ✅ Type hints
 
+Supported runtime: Python 3.10 through 3.13. The package publishes both an
+sdist and a wheel; the repository gate builds and imports both artifacts.
+
 ## Installation
 
 ```bash
@@ -78,10 +81,12 @@ async def websocket_example():
         token="your-token"
     )
 
-    # Listen to transfer events
-    @ws.on("transfer.completed")
     async def on_transfer_completed(event):
-        print(f"Transfer completed: {event['data']}")
+        data = event.get("data", {})
+        print(f"Transfer completed: {data.get('filename')}")
+
+    # Listen to transfer events. Frames keep the event payload under data.
+    ws.on("transfer.completed", on_transfer_completed)
 
     # Connect
     await ws.connect()
@@ -188,9 +193,10 @@ ws = WebSocketClient(base_url, token)
 await ws.connect()
 ws.subscribe("transfer.started", "transfer.completed")
 
-@ws.on("transfer.completed")
 async def on_complete(event):
-    print(event)
+    print(event.get("data", {}))
+
+ws.on("transfer.completed", on_complete)
 ```
 
 Unexpected disconnects are retried with bounded exponential backoff, and the

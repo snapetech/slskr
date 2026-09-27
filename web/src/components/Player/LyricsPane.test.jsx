@@ -89,4 +89,19 @@ describe('LyricsPane', () => {
     expect(screen.getByText('Lyrics need artist and title metadata')).toBeInTheDocument();
     expect(window.fetch).not.toHaveBeenCalled();
   });
+
+  it('uses the audio timeupdate signal without starting a duplicate timer', () => {
+    const audioElement = document.createElement('audio');
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+
+    render(
+      <LyricsPane
+        audioElement={audioElement}
+        current={null}
+        visible
+      />,
+    );
+
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+  });
 });

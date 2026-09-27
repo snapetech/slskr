@@ -8,6 +8,7 @@ import {
   getMeshPeers,
   getMeshStats,
   getSlskrStats,
+  clearSlskrStatsCache,
 } from './slskr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,6 +22,7 @@ vi.mock('./api', () => ({
 describe('slskr runtime API helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSlskrStatsCache();
   });
 
   it('uses compatibility defaults only when an optional endpoint is absent', async () => {
@@ -41,6 +43,23 @@ describe('slskr runtime API helpers', () => {
     api.get.mockRejectedValue(error);
 
     await expect(getSlskrStats()).rejects.toBe(error);
+  });
+
+  it('coalesces concurrent combined stats requests and reuses a short-lived snapshot', async () => {
+    api.get.mockImplementation((endpoint) => Promise.resolve({
+      data: endpoint === '/multisource/jobs' ? { jobs: [] } : {},
+    }));
+
+    const first = getSlskrStats();
+    const second = getSlskrStats();
+    await expect(first).resolves.toEqual(await second);
+    expect(api.get).toHaveBeenCalledTimes(6);
+
+    await getSlskrStats();
+    expect(api.get).toHaveBeenCalledTimes(6);
+
+    await getSlskrStats({ force: true });
+    expect(api.get).toHaveBeenCalledTimes(12);
   });
 
   it('normalizes peer endpoint envelopes for the network dashboard', async () => {

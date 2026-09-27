@@ -174,6 +174,35 @@ describe('Messaging', () => {
     });
   });
 
+  it('coalesces a message event with an in-flight workspace hydration', async () => {
+    let resolveInitialHydration;
+    const initialHydration = new Promise((resolve) => {
+      resolveInitialHydration = resolve;
+    });
+    chat.getAll
+      .mockImplementationOnce(() => initialHydration)
+      .mockResolvedValueOnce([{ username: 'after-hydration' }]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Messaging state={{ user: { username: 'me' } }} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(chat.getAll).toHaveBeenCalledTimes(1));
+    hubHandlers['messages:changed']?.({ resource: 'after-hydration' });
+
+    expect(chat.getAll).toHaveBeenCalledTimes(1);
+    resolveInitialHydration([]);
+
+    await waitFor(() => {
+      expect(chat.getAll).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('after-hydration')).toBeInTheDocument();
+    });
+  });
+
   it('opens chat and room panels and collapses them into the dock', async () => {
     chat.getAll.mockResolvedValue([
       {
@@ -438,6 +467,48 @@ describe('Messaging', () => {
 
     expect(await screen.findByText('message service unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
+  });
+
+  it('aborts a pod history request when its workspace unmounts', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+        name: 'Gold Star Club',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockResolvedValue({
+      channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+      name: 'Gold Star Club',
+      podId: 'pod-1',
+    });
+    pods.getMembers.mockResolvedValue([]);
+    let requestSignal;
+    pods.getMessages.mockImplementation((_podId, _channelId, _since, signal) => {
+      requestSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    });
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <Messaging state={{ user: { username: 'me' } }} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByText('Gold Star Club / General'));
+    await waitFor(() => expect(requestSignal).toBeDefined());
+
+    unmount();
+
+    expect(requestSignal.aborted).toBe(true);
   });
 
   it('uses the room-style member rail for pod room channels', async () => {

@@ -1,10 +1,15 @@
 package slskr
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -394,4 +399,152 @@ func TestWebSocketClosedListenerChannelsDoNotPanic(t *testing.T) {
 	client.processMessage(map[string]interface{}{"type": "search.completed"})
 	client.notifyConnectionListeners(true)
 	client.notifyErrorListeners(fmt.Errorf("listener test"))
+}
+
+func TestWebSocketListenerUnsubscribeHandles(t *testing.T) {
+	client := NewClient("http://example.test", "token").NewWebSocketClient(false)
+	eventChannel := make(chan interface{}, 1)
+	connectionChannel := make(chan bool, 1)
+	errorChannel := make(chan error, 1)
+
+	unlistenEvent := client.On("search.completed", eventChannel)
+	unlistenConnection := client.OnConnectionChange(connectionChannel)
+	unlistenError := client.OnError(errorChannel)
+
+	client.processMessage(map[string]interface{}{"type": "search.completed"})
+	client.notifyConnectionListeners(true)
+	client.notifyErrorListeners(fmt.Errorf("listener test"))
+	if len(eventChannel) != 1 || len(connectionChannel) != 1 || len(errorChannel) != 1 {
+		t.Fatal("registered listeners did not receive notifications")
+	}
+	for len(eventChannel) > 0 {
+		<-eventChannel
+	}
+	for len(connectionChannel) > 0 {
+		<-connectionChannel
+	}
+	for len(errorChannel) > 0 {
+		<-errorChannel
+	}
+
+	unlistenEvent()
+	unlistenEvent()
+	unlistenConnection()
+	unlistenError()
+	if len(client.eventChannels["search.completed"]) != 0 || len(client.connectionCh) != 0 || len(client.errorCh) != 0 {
+		t.Fatal("unsubscribed listeners were retained")
+	}
+
+	close(eventChannel)
+	close(connectionChannel)
+	close(errorChannel)
+	client.processMessage(map[string]interface{}{"type": "search.completed"})
+	client.notifyConnectionListeners(false)
+	client.notifyErrorListeners(fmt.Errorf("listener test"))
+}
+
+func startRF042Fixture(t *testing.T) string {
+	t.Helper()
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to locate Go test source")
+	}
+	repoRoot := filepath.Dir(filepath.Dir(testFile))
+	script := filepath.Join(repoRoot, "web", "e2e", "fixtures", "live-subscription-fixture.py")
+	command := exec.Command("python3", script, "--port", "0")
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatalf("create fixture stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatalf("start RF-042 fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if command.Process != nil {
+			_ = command.Process.Kill()
+		}
+		_ = command.Wait()
+	})
+
+	line := make(chan string, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		value, readError := bufio.NewReader(stdout).ReadString('\n')
+		if readError != nil {
+			readErr <- readError
+			return
+		}
+		line <- strings.TrimSpace(value)
+	}()
+	select {
+	case value := <-line:
+		if !strings.HasPrefix(value, "PORT=") {
+			t.Fatalf("RF-042 fixture did not report a port: %q (stderr: %s)", value, stderr.String())
+		}
+		return "http://127.0.0.1:" + strings.TrimPrefix(value, "PORT=")
+	case err := <-readErr:
+		t.Fatalf("RF-042 fixture did not start: %v (stderr: %s)", err, stderr.String())
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for RF-042 fixture (stderr: %s)", stderr.String())
+	}
+	return ""
+}
+
+func receiveRF042Event(t *testing.T, events <-chan interface{}, expectedID string) map[string]interface{} {
+	t.Helper()
+	select {
+	case raw := <-events:
+		message, ok := raw.(map[string]interface{})
+		if !ok {
+			t.Fatalf("unexpected event value: %#v", raw)
+		}
+		if message["id"] != expectedID {
+			t.Fatalf("expected event %q, got %#v", expectedID, message)
+		}
+		return message
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for RF-042 event %q", expectedID)
+	}
+	return nil
+}
+
+func TestWebSocketRF042LiveSubscriptionContract(t *testing.T) {
+	baseURL := startRF042Fixture(t)
+	client := NewClient(baseURL, "rf042-token").NewWebSocketClient(false)
+	client.reconnectDelay = 5 * time.Millisecond
+	client.maxReconnectAttempts = 1
+
+	searchEvents := make(chan interface{}, 8)
+	transferEvents := make(chan interface{}, 8)
+	client.On("search.completed", searchEvents)
+	client.On("transfer.completed", transferEvents)
+
+	if err := client.Subscribe("search.completed", "transfer.completed"); err != nil {
+		t.Fatalf("subscribe before connect failed: %v", err)
+	}
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("connect to RF-042 fixture failed: %v", err)
+	}
+
+	receiveRF042Event(t, searchEvents, "rf042-initial")
+	if err := client.Unsubscribe("transfer.completed"); err != nil {
+		t.Fatalf("unsubscribe failed: %v", err)
+	}
+	receiveRF042Event(t, searchEvents, "rf042-after-unsubscribe")
+	receiveRF042Event(t, searchEvents, "rf042-reconnect")
+
+	select {
+	case event := <-transferEvents:
+		t.Fatalf("filtered transfer event was delivered: %#v", event)
+	default:
+	}
+	topics := client.GetSubscribedTopics()
+	if len(topics) != 1 || topics[0] != "search.completed" {
+		t.Fatalf("unexpected topics after unsubscribe/reconnect: %v", topics)
+	}
+	if err := client.Disconnect(context.Background()); err != nil {
+		t.Fatalf("disconnect failed: %v", err)
+	}
 }

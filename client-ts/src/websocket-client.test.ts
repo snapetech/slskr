@@ -1,3 +1,6 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import * as path from 'node:path';
+
 import { MAX_WEBSOCKET_MESSAGE_BYTES, WebSocketClient } from './websocket-client';
 
 class MockWebSocket {
@@ -309,5 +312,120 @@ describe('WebSocketClient reconnect lifecycle', () => {
       `WebSocket message exceeds ${MAX_WEBSOCKET_MESSAGE_BYTES} bytes`,
     );
     client.disconnect();
+  });
+});
+
+function startRF042Fixture(): Promise<{
+  process: ChildProcess;
+  baseUrl: string;
+}> {
+  const fixturePath = path.resolve(
+    __dirname,
+    '../../web/e2e/fixtures/live-subscription-fixture.py'
+  );
+  const fixtureProcess = spawn('python3', [fixturePath, '--port', '0'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  return new Promise((resolve, reject) => {
+    let output = '';
+    let settled = false;
+    const settleError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    fixtureProcess.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      const line = output.split('\n')[0]?.trim();
+      if (!line || !line.startsWith('PORT=')) return;
+      settled = true;
+      resolve({
+        process: fixtureProcess,
+        baseUrl: `http://127.0.0.1:${line.slice('PORT='.length)}`,
+      });
+    });
+    fixtureProcess.once('error', settleError);
+    fixtureProcess.once('exit', (code) => {
+      if (!settled) {
+        settleError(new Error(`RF-042 fixture exited before startup: ${code}`));
+      }
+    });
+  });
+}
+
+async function stopRF042Fixture(
+  fixtureProcess: ChildProcess
+): Promise<void> {
+  if (fixtureProcess.exitCode !== null || fixtureProcess.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (killTimer !== null) clearTimeout(killTimer);
+      resolve();
+    };
+    fixtureProcess.once('exit', finish);
+    fixtureProcess.kill('SIGTERM');
+    killTimer = setTimeout(() => {
+      fixtureProcess.kill('SIGKILL');
+    }, 1_000);
+  });
+}
+
+async function waitForRF042Event(
+  received: Array<{ id: string }>,
+  expectedID: string
+): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (received.some((event) => event.id === expectedID)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for RF-042 event ${expectedID}`);
+}
+
+describe('RF-042 live subscription contract', () => {
+  it('performs filtered subscribe/unsubscribe and reconnect handshakes', async () => {
+    const fixture = await startRF042Fixture();
+    const client = new WebSocketClient(fixture.baseUrl, 'rf042-token');
+    const mutableClient = client as unknown as {
+      reconnectDelay: number;
+      maxReconnectAttempts: number;
+    };
+    mutableClient.reconnectDelay = 10;
+    mutableClient.maxReconnectAttempts = 1;
+    const received: Array<{ id: string }> = [];
+    const unexpectedTransfers: unknown[] = [];
+
+    client.on('search.completed', (event) => {
+      received.push({ id: event.id });
+    });
+    client.on('transfer.completed', (event) => {
+      unexpectedTransfers.push(event);
+    });
+    client.subscribe('search.completed', 'transfer.completed');
+
+    try {
+      await client.connect();
+      await waitForRF042Event(received, 'rf042-initial');
+      client.unsubscribe('transfer.completed');
+      await waitForRF042Event(received, 'rf042-after-unsubscribe');
+      await waitForRF042Event(received, 'rf042-reconnect');
+
+      expect(received.map((event) => event.id)).toEqual([
+        'rf042-initial',
+        'rf042-after-unsubscribe',
+        'rf042-reconnect',
+      ]);
+      expect(unexpectedTransfers).toEqual([]);
+      expect(client.getSubscribedTopics()).toEqual(['search.completed']);
+    } finally {
+      client.disconnect();
+      await stopRF042Fixture(fixture.process);
+    }
   });
 });

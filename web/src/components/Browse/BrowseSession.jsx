@@ -143,12 +143,14 @@ const normalizeDirectory = (
   };
 };
 
-const normalizeDirectories = (value) => {
+export const normalizeDirectories = (value) => {
   const budget = { remaining: MAX_BROWSE_DIRECTORY_NODES };
   return asRecords(value)
     .map((directory) => normalizeDirectory(directory, 0, budget))
     .filter(Boolean);
 };
+
+export { normalizeDirectory };
 
 // Cleanup old browse cache entries using LRU strategy
 const cleanupBrowseCache = () => {
@@ -539,47 +541,36 @@ class BrowseSession extends Component {
       return [];
     }
 
-    // Optimise this process so we only:
-    // - loop through all directories once
-    // - do the split once
-    // - future look ups are done from the Map
-    const depthMap = new Map();
+    // Build direct parent lookups once instead of filtering every depth list
+    // for every directory during recursive tree construction.
+    const childrenByParent = new Map();
+    let minimumDepth = Number.POSITIVE_INFINITY;
     for (const d of normalizedDirectories) {
-      const directoryDepth = d.name.split(pathSeparator).length;
-      if (!depthMap.has(directoryDepth)) {
-        depthMap.set(directoryDepth, []);
+      const parts = d.name.split(pathSeparator);
+      const parent = parts.slice(0, -1).join(pathSeparator);
+      const directoryDepth = parts.length;
+      minimumDepth = Math.min(minimumDepth, directoryDepth);
+      if (!childrenByParent.has(parent)) {
+        childrenByParent.set(parent, []);
       }
-
-      depthMap.get(directoryDepth).push(d);
+      childrenByParent.get(parent).push(d);
     }
 
-    const depth = Math.min(...Array.from(depthMap.keys()));
-
-    return depthMap
-      .get(depth)
-      .map((directory) =>
-        this.getChildDirectories(
-          depthMap,
-          directory,
-          pathSeparator,
-          depth + 1,
-        ),
-      );
+    return normalizedDirectories
+      .filter((directory) => directory.name.split(pathSeparator).length === minimumDepth)
+      .map((directory) => this.getChildDirectories(childrenByParent, directory));
   };
 
-  getChildDirectories = (depthMap, root, separator, depth) => {
-    if (!depthMap.has(depth)) {
+  getChildDirectories = (childrenByParent, root) => {
+    const children = childrenByParent.get(root.name) || [];
+    if (children.length === 0) {
       return { ...root, children: [] };
     }
 
-    const children = depthMap
-      .get(depth)
-      .filter((d) => d.name.startsWith(root.name + separator));
-
     return {
       ...root,
-      children: children.map((c) =>
-        this.getChildDirectories(depthMap, c, separator, depth + 1),
+      children: children.map((child) =>
+        this.getChildDirectories(childrenByParent, child),
       ),
     };
   };
@@ -727,7 +718,7 @@ class BrowseSession extends Component {
     }));
 
     return (
-      <div className="search-container">
+      <div className="search-container" data-testid="browse-content">
         <Segment
           className="browse-segment"
           raised

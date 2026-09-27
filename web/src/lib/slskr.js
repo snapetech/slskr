@@ -199,7 +199,7 @@ export const getDhtStatus = async () => {
 };
 
 // Combined stats fetch for dashboard
-export const getSlskrStats = async () => {
+const loadSlskrStats = async () => {
   // Each helper preserves the compatibility default for a genuinely absent
   // optional endpoint. Promise.all must still reject real transport, auth, and
   // server failures so callers cannot mistake an outage for an empty runtime.
@@ -247,4 +247,41 @@ export const getSlskrStats = async () => {
     mesh: normalizedMesh,
     swarmJobs: Array.isArray(swarmJobs) ? swarmJobs : [],
   };
+};
+
+const SLSKR_STATS_CACHE_TTL_MS = 2_000;
+let slskrStatsCache = null;
+let slskrStatsRequest = null;
+
+export const clearSlskrStatsCache = () => {
+  slskrStatsCache = null;
+};
+
+export const getSlskrStats = async ({ force = false } = {}) => {
+  const now = Date.now();
+  if (
+    !force &&
+    slskrStatsCache &&
+    now - slskrStatsCache.createdAt < SLSKR_STATS_CACHE_TTL_MS
+  ) {
+    return slskrStatsCache.value;
+  }
+
+  if (!force && slskrStatsRequest) {
+    return slskrStatsRequest;
+  }
+
+  let request = null;
+  request = loadSlskrStats()
+    .then((value) => {
+      slskrStatsCache = { createdAt: Date.now(), value };
+      return value;
+    })
+    .finally(() => {
+      if (slskrStatsRequest === request) {
+        slskrStatsRequest = null;
+      }
+    });
+  slskrStatsRequest = request;
+  return request;
 };

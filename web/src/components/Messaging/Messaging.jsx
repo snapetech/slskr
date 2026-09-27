@@ -5,392 +5,51 @@ import {
   createRoomsHubConnection,
 } from '../../lib/hubFactory';
 import { toDisplayError } from '../../lib/errors';
+import {
+  historyCursor,
+  isAbortError,
+  mergeMessageHistory,
+  messageKey,
+} from '../../lib/messageHistory';
 import * as pods from '../../lib/pods';
 import * as rooms from '../../lib/rooms';
-import { readBoundedJson } from '../../lib/persistedJson';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import { usePolling } from '../../lib/usePolling';
 import ChatSession from '../Chat/ChatSession';
 import PodListenAlongPanel from '../Player/PodListenAlongPanel';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
-import RoomCreateModal from '../Rooms/RoomCreateModal';
+import MessagingSidebar from './MessagingSidebar';
+import BatchPrivateMessageModal from './BatchPrivateMessageModal';
 import RoomSession from '../Rooms/RoomSession';
 import UserCard from '../Shared/UserCard';
+import {
+  GOLD_STAR_CLUB_POD_ID,
+  MAX_PANELS,
+  asRecords,
+  normalizePanel,
+  loadPanels,
+  savePanels,
+  makePanel,
+  encodePodTarget,
+  decodePodTarget,
+  channelLabel,
+  normalizeConversationName,
+  isPodDirectChannel,
+  panelLabel,
+} from './messagingWorkspaceState';
+import PodChannelSession from './PodChannelSession';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
   Button,
   Card,
-  Dropdown,
-  Form,
   Icon,
-  Input,
   Label,
-  List,
-  Message,
-  Modal,
   Popup,
   Segment,
 } from 'semantic-ui-react';
 
-const STORAGE_KEY = 'slskr-messaging-workspace';
-const GOLD_STAR_CLUB_POD_ID = 'pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0';
-const MAX_PANELS = 64;
-const MAX_PANEL_TEXT_CHARACTERS = 2_048;
-const MAX_PANEL_STORAGE_CHARACTERS = 128 * 1024;
-const MAX_PANEL_COUNTER = 1_000_000_000;
-
-let panelCounter = 0;
-
-const asRecords = (value) =>
-  (Array.isArray(value) ? value : []).filter(
-    (record) => record && typeof record === 'object' && !Array.isArray(record),
-  );
-
-const normalizePanel = (panel) => {
-  if (!panel || typeof panel !== 'object' || Array.isArray(panel)) return null;
-  const type = ['chat', 'room', 'pod'].includes(panel.type) ? panel.type : null;
-  const target = `${panel.target ?? ''}`.trim().slice(0, MAX_PANEL_TEXT_CHARACTERS);
-  const label = `${panel.label ?? ''}`.trim().slice(0, MAX_PANEL_TEXT_CHARACTERS);
-  const id = `${panel.id || `${type || 'panel'}-${target}`}`
-    .trim()
-    .slice(0, MAX_PANEL_TEXT_CHARACTERS);
-  if (!type || !target) return null;
-  return {
-    collapsed: Boolean(panel.collapsed),
-    ...(label ? { label } : {}),
-    id: id || `${type}-${target}`,
-    target,
-    type,
-  };
-};
-
-const loadPanels = () => {
-  const parsed = readBoundedJson(
-    getLocalStorageItem,
-    STORAGE_KEY,
-    {},
-    MAX_PANEL_STORAGE_CHARACTERS,
-  );
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    panelCounter = 0;
-    return [];
-  }
-
-  panelCounter = Number.isSafeInteger(parsed.panelCounter) && parsed.panelCounter >= 0
-    ? Math.min(parsed.panelCounter, MAX_PANEL_COUNTER)
-    : 0;
-  return Array.isArray(parsed.panels)
-    ? parsed.panels
-        .slice(-MAX_PANELS)
-        .map(normalizePanel)
-        .filter(Boolean)
-    : [];
-};
-
-const savePanels = (panels) => {
-  const normalized = (Array.isArray(panels) ? panels : [])
-    .map(normalizePanel)
-    .filter(Boolean)
-    .slice(-MAX_PANELS);
-  let serialized = JSON.stringify({
-    panelCounter: Math.min(Math.max(panelCounter, 0), MAX_PANEL_COUNTER),
-    panels: normalized,
-  });
-
-  while (serialized.length > MAX_PANEL_STORAGE_CHARACTERS && normalized.length > 0) {
-    normalized.shift();
-    serialized = JSON.stringify({
-      panelCounter: Math.min(Math.max(panelCounter, 0), MAX_PANEL_COUNTER),
-      panels: normalized,
-    });
-  }
-
-  setLocalStorageItem(STORAGE_KEY, serialized);
-};
-
-const makePanel = (type, target, collapsed = false) => {
-  panelCounter = panelCounter >= MAX_PANEL_COUNTER ? 1 : panelCounter + 1;
-  return {
-    collapsed,
-    id: `${type}-${panelCounter}`,
-    target,
-    type,
-  };
-};
-
-const encodePodTarget = (podId, channelId) => `${podId}\u001f${channelId}`;
-
-const decodePodTarget = (target) => {
-  const [podId, channelId] = `${target || ''}`.split('\u001f');
-  return { channelId, podId };
-};
-
-const channelLabel = (channel) =>
-  [channel.podName, channel.channelName || channel.channelId]
-    .filter(Boolean)
-    .join(' / ');
-
-const normalizeConversationName = (value) => `${value || ''}`.trim().toLowerCase();
-
-const isPodDirectChannel = (channel) => {
-  const channelKind = normalizeConversationName(channel.channelKind);
-  const channelName = normalizeConversationName(
-    channel.channelName || channel.channelId,
-  );
-
-  return (
-    channelKind === 'direct' ||
-    channelName === 'dm' ||
-    channelName === 'direct' ||
-    channelName === 'direct message'
-  );
-};
-
-const panelLabel = (panel) => {
-  if (panel.type === 'room') return `#${panel.target}`;
-  if (panel.type === 'pod') return panel.label || 'Pod channel';
-
-  return panel.target;
-};
-
-const PodChannelSession = ({ channel, state }) => {
-  const [body, setBody] = useState('');
-  const [members, setMembers] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const mountedRef = useRef(false);
-  const refreshRequestIdRef = useRef(0);
-  const sendRequestIdRef = useRef(0);
-  const sendInFlightRef = useRef(false);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
-  const [messagesLoadError, setMessagesLoadError] = useState('');
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      refreshRequestIdRef.current += 1;
-      sendRequestIdRef.current += 1;
-    };
-  }, []);
-
-  const refresh = useCallback(async () => {
-    const requestId = ++refreshRequestIdRef.current;
-    if (!channel?.podId || !channel?.channelId) return;
-
-    const [messagesResult, membersResult] = await Promise.allSettled([
-      pods.getMessages(channel.podId, channel.channelId),
-      pods.getMembers(channel.podId),
-    ]);
-
-    if (
-      !mountedRef.current ||
-      requestId !== refreshRequestIdRef.current
-    ) {
-      return;
-    }
-
-    if (messagesResult.status === 'rejected') {
-      setMessagesLoadError(
-        toDisplayError(
-          messagesResult.reason,
-          'Failed to load pod channel messages',
-        ),
-      );
-      throw messagesResult.reason;
-    }
-
-    setMessages(asRecords(messagesResult.value));
-    setMessagesLoadError('');
-    if (membersResult.status === 'fulfilled') {
-      setMembers(asRecords(membersResult.value));
-      setError('');
-    } else {
-      setError(
-        toDisplayError(membersResult.reason, 'Failed to load pod members'),
-      );
-    }
-  }, [channel?.channelId, channel?.podId]);
-
-  usePolling(
-    () =>
-      refresh().catch((error) => {
-        console.error('Failed to load pod channel messages:', error);
-        if (mountedRef.current) {
-          setError(
-            toDisplayError(error, 'Failed to load pod channel messages'),
-          );
-        }
-      }),
-    2_000,
-    {
-      enabled: Boolean(channel?.podId && channel?.channelId),
-      resetKey: `${channel?.podId || ''}:${channel?.channelId || ''}`,
-    },
-  );
-
-  const send = async () => {
-    const trimmed = body.trim();
-    if (
-      !trimmed ||
-      !channel?.podId ||
-      !channel?.channelId ||
-      sendInFlightRef.current ||
-      !mountedRef.current
-    ) return;
-
-    sendInFlightRef.current = true;
-    const requestId = ++sendRequestIdRef.current;
-    setSending(true);
-    setError('');
-    try {
-      await pods.sendMessage(
-        channel.podId,
-        channel.channelId,
-        trimmed,
-        state?.user?.username || 'local-peer',
-      );
-      if (
-        !mountedRef.current ||
-        requestId !== sendRequestIdRef.current
-      ) {
-        return;
-      }
-      setBody('');
-      await refresh();
-    } catch (sendError) {
-      if (
-        mountedRef.current &&
-        requestId === sendRequestIdRef.current
-      ) {
-        setError(toDisplayError(sendError, 'Failed to send pod message'));
-      }
-    } finally {
-      sendInFlightRef.current = false;
-      if (
-        mountedRef.current &&
-        requestId === sendRequestIdRef.current
-      ) {
-        setSending(false);
-      }
-    }
-  };
-
-  return (
-    <div className="pod-message-session">
-      {!isPodDirectChannel(channel) && (
-        <PodListenAlongPanel
-          channelId={channel.channelId}
-          compact
-          podId={channel.podId}
-          user={state?.user?.username}
-        />
-      )}
-      <div className="pod-message-session-main">
-        {error ? <Message negative>{error}</Message> : null}
-        <Segment.Group>
-          <Segment className="pod-message-session-history">
-            {messagesLoadError ? null : messages.length === 0 ? (
-              <PlaceholderSegment
-                caption="No messages yet"
-                icon="comments"
-              />
-            ) : (
-              <List>
-                {messages.map((message, index) => (
-                  <List.Content
-                    className={`room-message ${message.senderPeerId === state?.user?.username ? 'room-message-self' : ''}`}
-                    key={`${message.timestampUnixMs || index}-${index}`}
-                  >
-                    <span className="room-message-time">
-                      {message.timestampUnixMs
-                        ? new Date(message.timestampUnixMs).toLocaleTimeString()
-                        : ''}
-                    </span>
-                    <span className="room-message-name">
-                      {String(message.senderPeerId ?? message.username ?? 'Unknown peer')}:{' '}
-                    </span>
-                    <span className="room-message-message">
-                      {String(message.body ?? '')}
-                    </span>
-                  </List.Content>
-                ))}
-              </List>
-            )}
-          </Segment>
-          <Segment className="pod-message-session-composer">
-            <div className="messaging-start-row">
-              <Input
-                aria-label={`Message ${channelLabel(channel)}`}
-                className="pod-message-session-input"
-                fluid
-                onChange={(event) => setBody(event.target.value)}
-                onKeyUp={(event) => {
-                  if (event.key === 'Enter') {
-                    send().catch((error) => {
-                      console.error('Failed to send pod message:', error);
-                    });
-                  }
-                }}
-                placeholder={`Message ${channel.channelName || channel.channelId}`}
-                value={body}
-              />
-              <Popup
-                content="Send this message to the pod channel."
-                trigger={
-                  <Button
-                    aria-label={`Send message to ${channelLabel(channel)}`}
-                    disabled={!body.trim() || sending}
-                    icon="send"
-                    loading={sending}
-                    onClick={() =>
-                      send().catch((error) => {
-                        console.error('Failed to send pod message:', error);
-                      })
-                    }
-                    primary
-                    title={`Send message to ${channelLabel(channel)}`}
-                  />
-                }
-              />
-            </div>
-          </Segment>
-        </Segment.Group>
-        <Segment className="room-users pod-message-users">
-          <div className="room-users-header">
-            <Icon name="users" />
-            Members ({members.length})
-          </div>
-          <List
-            divided
-            relaxed
-          >
-            {members.map((member) => {
-              const username = String(
-                member.peerId || member.username || member.PeerId || 'Unknown peer',
-              );
-
-              return (
-                <List.Item key={username}>
-                  <List.Content>
-                    <List.Header>
-                      <UserCard username={username}>{username}</UserCard>
-                    </List.Header>
-                    <List.Description>
-                      {String(member.role || member.Role || 'Member')}
-                    </List.Description>
-                  </List.Content>
-                </List.Item>
-              );
-            })}
-          </List>
-        </Segment>
-      </div>
-    </div>
-  );
-};
 
 const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const navigate = useNavigate();
@@ -409,6 +68,8 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const [roomSearchLoading, setRoomSearchLoading] = useState(false);
   const mountedRef = useRef(false);
   const hydrateRequestIdRef = useRef(0);
+  const workspaceRefreshInFlightRef = useRef(false);
+  const workspaceRefreshPendingRef = useRef(false);
   const availableRoomsRequestIdRef = useRef(0);
   const workspaceActionRequestIdRef = useRef(new Map());
   const batchRequestIdRef = useRef(0);
@@ -422,6 +83,8 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     return () => {
       mountedRef.current = false;
       hydrateRequestIdRef.current += 1;
+      workspaceRefreshInFlightRef.current = false;
+      workspaceRefreshPendingRef.current = false;
       availableRoomsRequestIdRef.current += 1;
       workspaceActionRequestIdRef.current.clear();
       workspaceActionInFlightRef.current.clear();
@@ -606,6 +269,12 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   }, [runtimeProfile]);
 
   const refreshWorkspace = useCallback(async () => {
+    if (workspaceRefreshInFlightRef.current) {
+      workspaceRefreshPendingRef.current = true;
+      return false;
+    }
+
+    workspaceRefreshInFlightRef.current = true;
     try {
       return await hydrate();
     } catch (error) {
@@ -616,6 +285,14 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
         );
       }
       return false;
+    } finally {
+      workspaceRefreshInFlightRef.current = false;
+      if (workspaceRefreshPendingRef.current && mountedRef.current) {
+        workspaceRefreshPendingRef.current = false;
+        Promise.resolve().then(() => {
+          if (mountedRef.current) void refreshWorkspace();
+        });
+      }
     }
   }, [hydrate]);
 
@@ -1012,243 +689,30 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   return (
     <div className="messaging-workspace">
       <div className="messaging-shell">
-        <Segment className="messaging-sidebar">
-          <div className="messaging-sidebar-header">
-            <div className="messaging-sidebar-title">
-              <Icon name="comments" />
-              Messages
-            </div>
-            <Popup
-              content="Reload saved conversations and joined rooms from the daemon."
-              trigger={
-                <Button
-                  aria-label="Refresh messages workspace"
-                  icon="refresh"
-                  onClick={() => refreshWorkspace()}
-                  size="mini"
-                  title="Refresh messages workspace"
-                />
-              }
-            />
-          </div>
-          {workspaceError ? <Message warning>{workspaceError}</Message> : null}
-
-          <div className="messaging-sidebar-section">
-            <div className="messaging-sidebar-section-title">Direct Message</div>
-            <div className="messaging-start-row">
-              <Input
-                aria-label="Chat username"
-                fluid
-                onChange={(event) => setChatTarget(event.target.value)}
-                onKeyUp={(event) => {
-                  if (event.key === 'Enter' && chatTarget.trim()) {
-                    openPanel('chat', chatTarget);
-                    setChatTarget('');
-                  }
-                }}
-                placeholder="username"
-                size="small"
-                value={chatTarget}
-              />
-              <Popup
-                content="Open a direct-message panel for this user."
-                trigger={
-                  <Button
-                    aria-label="Open direct-message panel"
-                    disabled={!chatTarget.trim()}
-                    icon="comment"
-                    onClick={() => {
-                      openPanel('chat', chatTarget);
-                      setChatTarget('');
-                    }}
-                    size="small"
-                    title="Open direct-message panel"
-                  />
-                }
-              />
-            </div>
-          </div>
-
-          <div className="messaging-sidebar-section">
-            <div className="messaging-sidebar-section-title">
-              Saved Chats
-              <Label size="mini">{conversations.length}</Label>
-            </div>
-            <div className="messaging-list">
-              {conversations.map((conversation) => (
-                <div
-                  className="messaging-list-action-row"
-                  key={conversation.username}
-                >
-                  <Popup
-                    content="Open this conversation as a workspace panel."
-                    trigger={
-                      <Button
-                        basic
-                        className="messaging-list-button"
-                        compact
-                        onClick={() => openPanel('chat', conversation.username)}
-                        size="small"
-                      >
-                        <Icon name="comment alternate" />
-                        {conversation.username}
-                        {bridgedPodNames.has(
-                          normalizeConversationName(conversation.username),
-                        ) && (
-                          <Label
-                            size="mini"
-                            title="Pod direct channel is folded into this saved direct message."
-                          >
-                            pod
-                          </Label>
-                        )}
-                        {conversation.hasUnAcknowledgedMessages && (
-                          <Label
-                            color="red"
-                            size="mini"
-                          >
-                            {conversation.unAcknowledgedMessageCount}
-                          </Label>
-                        )}
-                      </Button>
-                    }
-                  />
-                  <Popup
-                    content="Permanently delete this saved message thread."
-                    trigger={
-                      <Button
-                        aria-label={`Delete message thread with ${conversation.username}`}
-                        disabled={isWorkspaceActionPending(`chat:delete:${conversation.username}`)}
-                        icon="trash alternate"
-                        negative
-                        onClick={() => deleteConversation(conversation.username)}
-                        size="small"
-                        title={`Delete message thread with ${conversation.username}`}
-                      />
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="messaging-sidebar-section">
-            <div className="messaging-sidebar-section-title">Join Room</div>
-            <div className="messaging-start-row">
-              <Dropdown
-                aria-label="Search rooms"
-                clearable
-                fluid
-                loading={roomSearchLoading}
-                onChange={(_, { value }) => joinRoom(value)}
-                onOpen={fetchAvailableRooms}
-                options={roomOptions}
-                placeholder="Search rooms"
-                search
-                selection
-                size="small"
-              />
-              <RoomCreateModal onCreateRoom={(roomName) => joinRoom(roomName)} />
-            </div>
-            {availableRoomsError ? (
-              <Message negative>{availableRoomsError}</Message>
-            ) : null}
-          </div>
-
-          <div className="messaging-sidebar-section">
-            <div className="messaging-sidebar-section-title">
-              Joined Rooms
-              <Label size="mini">{joinedRooms.length}</Label>
-            </div>
-            <div className="messaging-list">
-              {joinedRooms.map((roomName) => (
-                <div
-                  className="messaging-list-action-row"
-                  key={roomName}
-                >
-                  <Popup
-                    content="Open this room as a workspace panel."
-                    trigger={
-                      <Button
-                        basic
-                        className="messaging-list-button"
-                        compact
-                        onClick={() => openPanel('room', roomName)}
-                        size="small"
-                      >
-                        <Icon name="comments" />
-                        #{roomName}
-                      </Button>
-                    }
-                  />
-                  <Popup
-                    content="Leave this room and remove it from joined rooms."
-                    trigger={
-                      <Button
-                        aria-label={`Leave room ${roomName}`}
-                        disabled={isWorkspaceActionPending(`room:leave:${roomName}`)}
-                        icon="sign-out"
-                        negative
-                        onClick={() => leaveRoom(roomName)}
-                        size="small"
-                        title={`Leave room ${roomName}`}
-                      />
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="messaging-sidebar-section">
-            <div className="messaging-sidebar-section-title">
-              Pod Channels
-              <Label size="mini">{visiblePodChannels.length}</Label>
-            </div>
-            <div className="messaging-list">
-              {visiblePodChannels.map((channel) => (
-                <div
-                  className="messaging-list-action-row"
-                  key={channel.target}
-                >
-                  <Popup
-                    content="Open this pod channel in the unified message workspace."
-                    trigger={
-                      <Button
-                        basic
-                        className="messaging-list-button"
-                        compact
-                        onClick={() =>
-                          openPanel('pod', channel.target, {
-                            label: channelLabel(channel),
-                          })
-                        }
-                        size="small"
-                      >
-                        <Icon name="comments outline" />
-                        {channelLabel(channel)}
-                      </Button>
-                    }
-                  />
-                  <Popup
-                    content="Leave this pod and remove its channels from Messages."
-                    trigger={
-                      <Button
-                        aria-label={`Leave pod ${channel.podName}`}
-                        disabled={isWorkspaceActionPending(`pod:leave:${channel.podId}`)}
-                        icon="sign-out"
-                        negative
-                        onClick={() => leavePod(channel)}
-                        size="small"
-                        title={`Leave pod ${channel.podName}`}
-                      />
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </Segment>
+        <MessagingSidebar
+          actions={{
+            deleteConversation,
+            fetchAvailableRooms,
+            isWorkspaceActionPending,
+            joinRoom,
+            leavePod,
+            leaveRoom,
+            openPanel,
+            refreshWorkspace,
+            setChatTarget,
+          }}
+          state={{
+            availableRoomsError,
+            bridgedPodNames,
+            chatTarget,
+            conversations,
+            joinedRooms,
+            roomOptions,
+            roomSearchLoading,
+            visiblePodChannels,
+            workspaceError,
+          }}
+        />
 
         <div className="messaging-main">
           <Segment className="messaging-toolbar">
@@ -1288,52 +752,20 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
             />
           </Segment>
 
-          <Modal
-            onClose={() => setBatchModalOpen(false)}
-            open={batchModalOpen}
-            size="small"
-          >
-            <Modal.Header>Batch Private Message</Modal.Header>
-            <Modal.Content>
-              <Message info>
-                Sends through Soulseek's multi-recipient private-message command and stores one local conversation per recipient.
-              </Message>
-              <Form>
-                <Form.TextArea
-                  aria-label="Batch private-message recipients"
-                  label="Recipients"
-                  onChange={(event) => setBatchUsernames(event.target.value)}
-                  placeholder="alice, bob, carol"
-                  value={batchUsernames}
-                />
-                <Form.TextArea
-                  aria-label="Batch private-message body"
-                  label="Message"
-                  onChange={(event) => setBatchMessage(event.target.value)}
-                  placeholder="Message"
-                  value={batchMessage}
-                />
-              </Form>
-            </Modal.Content>
-            <Modal.Actions>
-              <Button onClick={() => setBatchModalOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                disabled={
-                  batchSending ||
-                  !batchMessage.trim() ||
-                  !batchUsernames.trim()
-                }
-                loading={batchSending}
-                onClick={sendBatchMessage}
-                primary
-              >
-                <Icon name="send" />
-                Send
-              </Button>
-            </Modal.Actions>
-          </Modal>
+          <BatchPrivateMessageModal
+            actions={{
+              sendBatchMessage,
+              setBatchMessage,
+              setBatchModalOpen,
+              setBatchUsernames,
+            }}
+            state={{
+              batchMessage,
+              batchModalOpen,
+              batchSending,
+              batchUsernames,
+            }}
+          />
 
           {openPanels.length === 0 ? (
             <PlaceholderSegment

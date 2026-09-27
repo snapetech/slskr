@@ -1,5 +1,6 @@
 import 'semantic-ui-less/semantic.less';
 import App from './components/App';
+import ErrorBoundary from './components/Shared/ErrorBoundary';
 import { urlBase } from './config';
 import { registerServiceWorker } from './registerServiceWorker';
 import React from 'react';
@@ -18,7 +19,9 @@ const basename = urlBase && urlBase !== '/' ? urlBase : undefined;
 
 createRoot(document.querySelector('#root')).render(
   <Router basename={basename}>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </Router>,
 );
 

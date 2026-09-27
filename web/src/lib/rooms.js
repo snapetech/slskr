@@ -16,6 +16,9 @@ const requireObjectResponse = (value, resource) => {
   return value;
 };
 
+const getWithOptionalSignal = (path, signal) =>
+  signal ? api.get(path, { signal }) : api.get(path);
+
 export const getAvailable = async () => {
   const response = (await api.get('/rooms/available')).data;
 
@@ -43,21 +46,25 @@ export const getActivity = async () => {
   );
 };
 
-export const getMessages = async ({ roomName, since = null }) => {
+export const getMessages = async ({ roomName, since = null, signal }) => {
   const query =
     since == null ? '' : `?since=${encodeURIComponent(String(since))}`;
   const response = (
-    await api.get(
+    await getWithOptionalSignal(
       `/rooms/joined/${encodeURIComponent(roomName)}/messages${query}`,
+      signal,
     )
   ).data;
 
   return requireArrayResponse(response, 'room messages');
 };
 
-export const getUsers = async ({ roomName }) => {
+export const getUsers = async ({ roomName, signal }) => {
   const response = (
-    await api.get(`/rooms/joined/${encodeURIComponent(roomName)}/users`)
+    await getWithOptionalSignal(
+      `/rooms/joined/${encodeURIComponent(roomName)}/users`,
+      signal,
+    )
   ).data;
 
   return requireArrayResponse(response, 'room users');

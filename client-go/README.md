@@ -109,6 +109,11 @@ func main() {
 Create a WebSocket client with `NewWebSocketClient`, register event and
 connection listeners, and call `Connect`. Unexpected disconnects are retried
 with bounded exponential backoff; subscribed topics are restored automatically.
+Use dotted event types such as `message.received`, `search.result`, and
+`transfer.started`. Each event frame keeps its payload under `data`, and
+subscription frames use `{"type":"subscribe","data":{"topics":[...]}}`.
+`On`, `OnConnectionChange`, and `OnError` each return an idempotent function
+that removes only that listener registration.
 
 ## Error Handling
 
@@ -118,6 +123,14 @@ if err != nil {
 	log.Printf("Error: %v", err)
 }
 ```
+
+HTTP requests are not retried automatically. This is intentional: callers can
+choose a retry policy for safe, idempotent operations without accidentally
+repeating mutations such as search creation or message sends.
+
+HTTP failures are returned as `*slskr.APIError` values. Use `errors.As` to
+inspect the HTTP `Status`, server `Code`, and optional `Details` without
+parsing the existing error text.
 
 ## Context Usage
 

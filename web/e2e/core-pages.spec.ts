@@ -35,20 +35,14 @@ test.describe('core pages', () => {
 
     // Verify we're on the system page
     expect(page.url()).toMatch(/\/system/);
+    await expect(page.getByTestId(T.systemRoot)).toBeVisible({ timeout: 10_000 });
 
-    // If you have a shares tab, try to click it (but don't fail if it doesn't exist)
     const sharesTab = page.getByTestId(T.systemTabShares);
-    if ((await sharesTab.count()) > 0) {
-      try {
-        await sharesTab.click({ timeout: 5_000 });
-        const sharesTable = page.getByTestId(T.systemSharesTable);
-        if ((await sharesTable.count()) > 0) {
-          await expect(sharesTable).toBeVisible({ timeout: 10_000 });
-        }
-      } catch {
-        // Shares tab might not be clickable or table might not exist - that's OK for this test
-      }
-    }
+    await expect(sharesTab).toBeVisible({ timeout: 10_000 });
+    await sharesTab.click();
+    await expect(page.getByTestId(T.systemSharesTable)).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test('downloads_page_loads', async ({ page, request }) => {

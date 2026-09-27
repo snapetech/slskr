@@ -2,6 +2,12 @@ import './Chat.css';
 import * as chat from '../../lib/chat';
 import { createPollingController } from '../../lib/usePolling';
 import { toDisplayError } from '../../lib/errors';
+import {
+  historyCursor,
+  isAbortError,
+  mergeMessageHistory,
+  messageKey,
+} from '../../lib/messageHistory';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import UserCard from '../Shared/UserCard';
 import React, { Component, createRef } from 'react';
@@ -30,6 +36,8 @@ const normalizeConversation = (value) => {
   };
 };
 
+const MAX_CHAT_MESSAGES = 500;
+
 class ChatSession extends Component {
   constructor(props) {
     super(props);
@@ -45,6 +53,10 @@ class ChatSession extends Component {
     this.listRef = createRef();
     this.messageRef = undefined;
     this.pollController = null;
+    this.conversationAbortController = null;
+    this.conversationInFlight = null;
+    this.conversationUsername = null;
+    this.conversationCursor = null;
     this.isMountedFlag = false;
     this.requestIds = {
       conversation: 0,
@@ -82,6 +94,11 @@ class ChatSession extends Component {
     this.pollController = null;
   };
 
+  abortConversationRequest = () => {
+    this.conversationAbortController?.abort();
+    this.conversationAbortController = null;
+  };
+
   componentDidUpdate(previousProps) {
     // If username changed, fetch new conversation
     if (
@@ -89,6 +106,11 @@ class ChatSession extends Component {
       (!previousProps.active && this.props.active)
     ) {
       const usernameChanged = previousProps.username !== this.props.username;
+      if (usernameChanged) {
+        this.requestIds.conversation += 1;
+        this.conversationCursor = null;
+        this.abortConversationRequest();
+      }
       this.setState(usernameChanged ? { message: '' } : {}, () => {
         if (!this.isMountedFlag) return;
         if (this.pollController) {
@@ -115,76 +137,146 @@ class ChatSession extends Component {
     this.isMountedFlag = false;
     this.requestIds.conversation += 1;
     this.requestIds.send += 1;
+    this.conversationCursor = null;
+    this.abortConversationRequest();
     this.stopPolling();
   }
 
-  fetchConversation = async () => {
+  fetchConversation = () => {
     const { username } = this.props;
-    const requestId = ++this.requestIds.conversation;
-    const requestedUsername = username;
-    if (!this.isMountedFlag) return;
+    if (!this.isMountedFlag) return Promise.resolve();
 
     if (!username) {
+      this.requestIds.conversation += 1;
+      this.abortConversationRequest();
       this.setState({ conversation: null, loading: false });
-      return;
+      return Promise.resolve();
     }
 
-    this.setState({ loading: true });
+    if (
+      this.conversationInFlight &&
+      this.conversationUsername === username
+    ) {
+      return this.conversationInFlight;
+    }
 
-    try {
-      const conversation = normalizeConversation(await chat.get({ username }));
-      if (
-        !this.isMountedFlag ||
-        requestId !== this.requestIds.conversation ||
-        this.props.username !== requestedUsername
-      ) {
-        return;
-      }
+    this.abortConversationRequest();
+    const requestId = ++this.requestIds.conversation;
+    const requestedUsername = username;
+    const since =
+      this.conversationCursor !== null && this.state.conversation
+        ? this.conversationCursor
+        : null;
+    const controller = new AbortController();
+    this.conversationAbortController = controller;
+    this.conversationUsername = requestedUsername;
+    let request;
 
-      // Acknowledge unread messages only when the user is looking at this tab.
-      if (this.props.active !== false && conversation?.hasUnAcknowledgedMessages) {
-        try {
-          await chat.acknowledge({ username });
-        } catch (acknowledgeError) {
-          // A failed acknowledgement must not discard a conversation that was
-          // fetched successfully; the next active poll can retry it.
-          console.debug('Failed to acknowledge conversation:', acknowledgeError);
-        }
-      }
+    request = (async () => {
+      this.setState({ loading: true });
 
-      if (
-        !this.isMountedFlag ||
-        requestId !== this.requestIds.conversation ||
-        this.props.username !== requestedUsername
-      ) {
-        return;
-      }
-
-      this.setState({ conversation, error: null, loading: false }, () => {
-        if (!this.isMountedFlag) return;
-        // Scroll to bottom
-        try {
-          if (this.listRef.current?.lastChild) {
-            this.listRef.current.lastChild.scrollIntoView();
-          }
-        } catch {
-          // no-op
-        }
-      });
-    } catch (error) {
-      console.error('Failed to fetch conversation:', error);
-      if (
-        this.isMountedFlag &&
-        requestId === this.requestIds.conversation &&
-        this.props.username === requestedUsername
-      ) {
-        this.setState({
-          conversation: null,
-          error: toDisplayError(error, 'Failed to load conversation'),
-          loading: false,
+      try {
+        let response = await chat.get({
+          ...(since === null ? {} : { since }),
+          signal: controller.signal,
+          username,
         });
+        let usedDelta = since !== null;
+        if (usedDelta && !Array.isArray(response?.messages)) {
+          response = await chat.get({
+            signal: controller.signal,
+            username,
+          });
+          usedDelta = false;
+        }
+        const normalizedResponse = normalizeConversation(response);
+        const incomingMessages = normalizedResponse?.messages || [];
+        const previousMessages = usedDelta
+          ? this.state.conversation?.messages
+          : [];
+        const conversation = normalizedResponse
+          ? {
+              ...normalizedResponse,
+              messages: mergeMessageHistory(
+                previousMessages,
+                incomingMessages,
+                MAX_CHAT_MESSAGES,
+              ),
+            }
+          : null;
+        if (
+          !this.isMountedFlag ||
+          requestId !== this.requestIds.conversation ||
+          this.props.username !== requestedUsername
+        ) {
+          return;
+        }
+        const incomingCursor = historyCursor(incomingMessages);
+        this.conversationCursor =
+          incomingCursor === null
+            ? usedDelta
+              ? since
+              : null
+            : Math.max(since ?? incomingCursor, incomingCursor);
+
+        // Acknowledge unread messages only when the user is looking at this tab.
+        if (this.props.active !== false && conversation?.hasUnAcknowledgedMessages) {
+          try {
+            await chat.acknowledge({ username, signal: controller.signal });
+          } catch (acknowledgeError) {
+            if (isAbortError(acknowledgeError, controller.signal)) return;
+            // A failed acknowledgement must not discard a conversation that was
+            // fetched successfully; the next active poll can retry it.
+            console.debug('Failed to acknowledge conversation:', acknowledgeError);
+          }
+        }
+
+        if (
+          !this.isMountedFlag ||
+          requestId !== this.requestIds.conversation ||
+          this.props.username !== requestedUsername
+        ) {
+          return;
+        }
+
+        this.setState({ conversation, error: null, loading: false }, () => {
+          if (!this.isMountedFlag) return;
+          // Scroll to bottom
+          try {
+            if (this.listRef.current?.lastChild) {
+              this.listRef.current.lastChild.scrollIntoView();
+            }
+          } catch {
+            // no-op
+          }
+        });
+      } catch (error) {
+        if (isAbortError(error, controller.signal)) return;
+        console.error('Failed to fetch conversation:', error);
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.conversation &&
+          this.props.username === requestedUsername
+        ) {
+          this.setState({
+            conversation: null,
+            error: toDisplayError(error, 'Failed to load conversation'),
+            loading: false,
+          });
+        }
+      } finally {
+        if (this.conversationInFlight === request) {
+          this.conversationInFlight = null;
+          this.conversationUsername = null;
+          if (this.conversationAbortController === controller) {
+            this.conversationAbortController = null;
+          }
+        }
       }
-    }
+    })();
+
+    this.conversationInFlight = request;
+    return request;
   };
 
   sendMessage = async (message) => {
@@ -338,7 +430,7 @@ class ChatSession extends Component {
                       {messages.map((message) => (
                         <List.Content
                           className={`chat-message ${message.direction === 'Out' ? 'chat-message-self' : ''}`}
-                          key={`${message.timestamp}+${message.message}`}
+                          key={messageKey(message)}
                         >
                           <span className="chat-message-time">
                             {this.formatTimestamp(message.timestamp)}

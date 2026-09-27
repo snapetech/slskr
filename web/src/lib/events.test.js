@@ -1,9 +1,9 @@
 import api from './api';
-import { list } from './events';
+import { list, raiseEvent } from './events';
 
 vi.mock('./api', () => ({
   __esModule: true,
-  default: { get: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
 }));
 
 describe('event history API helpers', () => {
@@ -46,6 +46,20 @@ describe('event history API helpers', () => {
 
     await expect(list()).rejects.toThrow(
       'Events API returned an invalid event history response',
+    );
+  });
+
+  it('encodes event names and JSON serializes the disambiguator', async () => {
+    const response = { data: { accepted: true } };
+    api.post.mockResolvedValue(response);
+
+    await expect(
+      raiseEvent({ disambiguator: 'source value', type: 'task/started' }),
+    ).resolves.toBe(response);
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/events/task%2Fstarted',
+      '"source value"',
     );
   });
 });

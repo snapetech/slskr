@@ -165,10 +165,7 @@ class WebSocketClient:
         if (
             self._intentional_disconnect
             or self.max_reconnect_attempts <= 0
-            or (
-                self._reconnect_task is not None
-                and not self._reconnect_task.done()
-            )
+            or (self._reconnect_task is not None and not self._reconnect_task.done())
         ):
             return
         self._reconnect_task = asyncio.create_task(self._reconnect_loop())
@@ -292,7 +289,9 @@ class WebSocketClient:
                         self.subscribed_topics.difference_update(topics)
                     else:
                         self.subscribed_topics.update(topics)
-                self._notify_error_listeners(error)
+                self._notify_error_listeners(
+                    error if isinstance(error, Exception) else Exception(str(error))
+                )
 
         task.add_done_callback(finished)
 
@@ -355,7 +354,9 @@ class WebSocketClient:
         for listener in tuple(self.error_listeners):
             self._schedule_listener(listener, error, report_errors=False)
 
-    def _schedule_listener(self, listener: Callable, argument: Any, report_errors: bool):
+    def _schedule_listener(
+        self, listener: Callable, argument: Any, report_errors: bool
+    ):
         try:
             task = asyncio.create_task(self._call_listener(listener, argument))
         except Exception as error:
@@ -373,7 +374,10 @@ class WebSocketClient:
         except Exception as exception:
             error = exception
         if error is not None:
-            self._handle_listener_error(error, report_errors)
+            self._handle_listener_error(
+                error if isinstance(error, Exception) else Exception(str(error)),
+                report_errors,
+            )
 
     def _handle_listener_error(self, error: Exception, report_errors: bool):
         if report_errors:

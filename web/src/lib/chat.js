@@ -37,9 +37,16 @@ const validateConversation = (conversation, label) => {
   return conversation;
 };
 
-export const getAll = async ({ unAcknowledgedOnly = false } = {}) => {
+const getOptions = (signal) => (signal ? { signal } : undefined);
+
+const getWithOptionalSignal = (path, signal) => {
+  const options = getOptions(signal);
+  return options ? api.get(path, options) : api.get(path);
+};
+
+export const getAll = async ({ unAcknowledgedOnly = false, signal } = {}) => {
   const query = unAcknowledgedOnly ? '?unAcknowledgedOnly=true' : '';
-  const data = (await api.get(`/conversations${query}`)).data;
+  const data = (await getWithOptionalSignal(`/conversations${query}`, signal)).data;
   if (!Array.isArray(data)) {
     throw new Error('Chat API returned an invalid conversations response');
   }
@@ -47,24 +54,32 @@ export const getAll = async ({ unAcknowledgedOnly = false } = {}) => {
   return data;
 };
 
-export const hasUnAcknowledgedMessages = async () => {
-  const data = (await api.get('/conversations/activity/unacknowledged')).data;
+export const hasUnAcknowledgedMessages = async ({ signal } = {}) => {
+  const data = (
+    await getWithOptionalSignal('/conversations/activity/unacknowledged', signal)
+  ).data;
   if (typeof data !== 'boolean') {
     throw new Error('Chat API returned an invalid unread activity response');
   }
   return data;
 };
 
-export const get = async ({ username, since = null }) => {
+export const get = async ({ username, since = null, signal }) => {
   const query = since == null ? '' : `?since=${encodeURIComponent(since)}`;
   const data = (
-    await api.get(`/conversations/${encodeURIComponent(username)}${query}`)
+    await getWithOptionalSignal(
+      `/conversations/${encodeURIComponent(username)}${query}`,
+      signal,
+    )
   ).data;
   return validateConversation(data, 'detail');
 };
 
-export const acknowledge = ({ username }) => {
-  return api.put(`/conversations/${encodeURIComponent(username)}`);
+export const acknowledge = ({ username, signal }) => {
+  const options = getOptions(signal);
+  return options
+    ? api.put(`/conversations/${encodeURIComponent(username)}`, undefined, options)
+    : api.put(`/conversations/${encodeURIComponent(username)}`);
 };
 
 export const send = ({ username, message }) => {

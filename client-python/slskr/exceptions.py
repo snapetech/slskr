@@ -6,7 +6,9 @@ Exception classes for slskr API client
 class ApiError(Exception):
     """API error response"""
 
-    def __init__(self, status: int, code: str, message: str = None, details: str = None):
+    def __init__(
+        self, status: int, code: str, message: str = None, details: str = None
+    ):
         self.status = status
         self.code = code
         self.details = details

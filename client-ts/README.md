@@ -12,9 +12,10 @@ by Soulseek or its operators.
 - ✅ WebSocket support for real-time events
 - ✅ Automatic retries with exponential backoff
 - ✅ Comprehensive error handling
-- ✅ Zero external dependencies (except optional `ws` for Node.js)
-- ✅ Works in browser and Node.js
-- ✅ Full test coverage
+- ✅ No runtime dependency for REST calls
+- ✅ Works in browsers through a bundler when `fetch` and `WebSocket` are available
+- ✅ Node.js 18+ support for REST calls
+- ✅ Contract and lifecycle test coverage
 
 ## Installation
 
@@ -24,15 +25,15 @@ npm install @slskr/api-client
 
 ### Browser
 
-```html
-<script src="https://cdn.jsdelivr.net/npm/@slskr/api-client@latest/dist/index.js"></script>
-```
+The package is CommonJS with TypeScript declarations. Use it through your
+bundler; it does not publish a standalone browser `<script>` bundle. The
+browser must provide `fetch` and `WebSocket` for the corresponding features.
 
-### Node.js (with WebSocket support)
+### Node.js
 
-```bash
-npm install @slskr/api-client ws
-```
+Node.js 18+ provides the global `fetch` required by the REST client. The
+`WebSocketClient` additionally requires a runtime-provided global `WebSocket`;
+this package does not load or adapt the optional `ws` peer dependency.
 
 ## Quick Start
 
@@ -284,9 +285,9 @@ const batch = new BatchClient(client);
 // Bulk message send
 const response = await batch
   .builder()
-  .post('/api/messages', {recipient: 'alice', content: 'Hi'})
-  .post('/api/messages', {recipient: 'bob', content: 'Hi'})
-  .post('/api/messages', {recipient: 'charlie', content: 'Hi'})
+  .post('/api/messages', {username: 'alice', body: 'Hi'})
+  .post('/api/messages', {username: 'bob', body: 'Hi'})
+  .post('/api/messages', {username: 'charlie', body: 'Hi'})
   .execute();
 
 console.log(`Sent ${batch.getSuccessful(response).length} messages`);
@@ -369,26 +370,28 @@ const messages: Message[] = await client.listMessages();
 
 ## Browser Support
 
-Works in all modern browsers with `fetch` API support:
+Use the package through a bundler; it does not publish a standalone browser
+`<script>` bundle. The browser must provide `fetch` for REST calls and
+`WebSocket` for event streaming.
 
-```html
-<script src="https://cdn.jsdelivr.net/npm/@slskr/api-client@latest/dist/index.js"></script>
-<script>
-  const client = new SlskrClient({
-    baseUrl: 'http://127.0.0.1:5030',
-    token: 'token'
-  });
+```typescript
+import SlskrClient from '@slskr/api-client';
 
-  client.getStats().then(stats => console.log(stats));
-</script>
+const client = new SlskrClient({
+  baseUrl: 'http://127.0.0.1:5030',
+  token: 'token',
+});
+
+const stats = await client.getStats();
+console.log(stats);
 ```
 
 ## Node.js Support
 
-Works in Node.js (tested on v14+):
+REST calls work in Node.js 18+, which provides the required global `fetch`:
 
 ```javascript
-const { default: SlskrClient } = require('@slskr/api-client');
+const { SlskrClient } = require('@slskr/api-client');
 
 const client = new SlskrClient({
   baseUrl: 'http://127.0.0.1:5030',
@@ -400,6 +403,10 @@ const client = new SlskrClient({
   console.log(stats);
 })();
 ```
+
+`WebSocketClient` additionally requires a runtime-provided global `WebSocket`;
+use a browser or a Node.js release that supplies one. The package does not
+silently load or adapt the optional `ws` peer dependency.
 
 ## Performance
 

@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import * as pods from '../../lib/pods';
 import Pods from './Pods';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -104,6 +104,44 @@ describe('Pods', () => {
     );
     expect(screen.getByText('Messages unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
+  });
+
+  it('aborts an active channel read when the pods route unmounts', async () => {
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'General', name: 'General' }],
+        name: 'Test pod',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockResolvedValue({
+      channels: [{ channelId: 'general', kind: 'General', name: 'General' }],
+      name: 'Test pod',
+      podId: 'pod-1',
+    });
+    pods.getMembers.mockResolvedValue([]);
+    let requestSignal;
+    pods.getMessages.mockImplementation((_podId, _channelId, _since, signal) => {
+      requestSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    });
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <Pods />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(requestSignal).toBeDefined());
+
+    unmount();
+
+    expect(requestSignal.aborted).toBe(true);
   });
 
   it('reports discovery failures instead of hiding the failed lookup', async () => {

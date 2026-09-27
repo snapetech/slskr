@@ -384,14 +384,16 @@ describe('PlayerBar', () => {
     expect(screen.queryByTestId('player-file-folder-Downloads')).not.toBeInTheDocument();
   });
 
-  it('switches the visual tile from album art to the RustyMilk canvas', () => {
+  it('switches the visual tile from album art to the RustyMilk canvas', async () => {
     renderPlayer();
 
     expect(screen.getByTestId('player-album-art')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('player-visual-tile'));
 
-    expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument(),
+    );
     expect(screen.queryByTestId('player-album-art')).not.toBeInTheDocument();
   });
 
@@ -403,7 +405,9 @@ describe('PlayerBar', () => {
     fireEvent.click(tile);
     await waitFor(() =>
       expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('rustymilk-webgl2'));
-    expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument(),
+    );
 
     fireEvent.click(tile);
     await waitFor(() =>

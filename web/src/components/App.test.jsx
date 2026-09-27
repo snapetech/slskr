@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import App, { getStoredNetworkEndpointSnapshot } from './App';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 
 const {
@@ -13,26 +13,24 @@ const {
   getApplicationOptions,
   getApplicationState,
   getSecurityEnabled,
-  getConversations,
-  getJoinedRooms,
-  getRoomMessages,
+  getUnreadActivity,
+  getRoomActivity,
   isLoggedIn,
 } = vi.hoisted(() => ({
   check: vi.fn(),
   connectServer: vi.fn(),
   createApplicationHubConnection: vi.fn(),
   getCollections: vi.fn(),
-  getConversations: vi.fn(),
+  getUnreadActivity: vi.fn(),
   getSecurityEnabled: vi.fn(),
   getApplicationOptions: vi.fn(),
   getApplicationState: vi.fn(),
-  getJoinedRooms: vi.fn(),
-  getRoomMessages: vi.fn(),
+  getRoomActivity: vi.fn(),
   isLoggedIn: vi.fn(),
 }));
 
 vi.mock('../lib/chat', () => ({
-  getAll: getConversations,
+  hasUnAcknowledgedMessages: getUnreadActivity,
 }));
 
 vi.mock('../lib/hubFactory', () => ({
@@ -52,8 +50,7 @@ vi.mock('../lib/options', () => ({
 }));
 
 vi.mock('../lib/rooms', () => ({
-  getJoined: getJoinedRooms,
-  getMessages: getRoomMessages,
+  getActivity: getRoomActivity,
 }));
 
 vi.mock('../lib/session', () => ({
@@ -134,12 +131,11 @@ describe('App', () => {
     createApplicationHubConnection.mockReturnValue(hub);
     getSecurityEnabled.mockResolvedValue(true);
     check.mockResolvedValue(true);
-    getConversations.mockResolvedValue([]);
+    getUnreadActivity.mockResolvedValue(false);
     getApplicationOptions.mockResolvedValue({});
     getApplicationState.mockResolvedValue({});
     getCollections.mockResolvedValue({ data: [] });
-    getJoinedRooms.mockResolvedValue([]);
-    getRoomMessages.mockResolvedValue([]);
+    getRoomActivity.mockResolvedValue({});
     isLoggedIn.mockReturnValue(true);
     connectServer.mockResolvedValue({
       data: {
@@ -160,8 +156,14 @@ describe('App', () => {
   });
 
   afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
     vi.clearAllMocks();
     document.documentElement.className = '';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
     document
       .querySelectorAll('meta[name="slskr-runtime-profile"]')
       .forEach((element) => element.remove());
@@ -374,12 +376,7 @@ describe('App', () => {
   });
 
   it('shows chat activity in the header when conversations have unread messages', async () => {
-    getConversations.mockResolvedValue([
-      {
-        hasUnAcknowledgedMessages: true,
-        username: 'some-user',
-      },
-    ]);
+    getUnreadActivity.mockResolvedValue(true);
 
     render(
       <MemoryRouter initialEntries={['/searches']}>
@@ -388,7 +385,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByTestId('nav-chat-alert')).toBeInTheDocument();
-    expect(getConversations).toHaveBeenCalledWith({ unAcknowledgedOnly: true });
+    expect(getUnreadActivity).toHaveBeenCalledWith();
   });
 
   it('shows room activity in the header when joined rooms have newer incoming messages', async () => {
@@ -396,15 +393,7 @@ describe('App', () => {
       'slskr.rooms.lastSeenActivity',
       JSON.stringify({ chill: Date.parse('2026-04-30T00:00:00Z') }),
     );
-    getJoinedRooms.mockResolvedValue(['chill']);
-    getRoomMessages.mockResolvedValue([
-      {
-        message: 'new one',
-        self: false,
-        timestamp: '2026-04-30T00:01:00Z',
-        username: 'friend',
-      },
-    ]);
+    getRoomActivity.mockResolvedValue({ chill: Date.parse('2026-04-30T00:01:00Z') });
 
     render(
       <MemoryRouter initialEntries={['/searches']}>
@@ -413,6 +402,76 @@ describe('App', () => {
     );
 
     expect(await screen.findByTestId('nav-rooms-alert')).toBeInTheDocument();
+  });
+
+  it('does not poll room activity while the room workspace is open', async () => {
+    render(
+      <MemoryRouter initialEntries={['/rooms']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Messages')).toBeInTheDocument();
+    expect(getRoomActivity).not.toHaveBeenCalled();
+  });
+
+  it('does not query navigation activity inside the messaging workspace', async () => {
+    render(
+      <MemoryRouter initialEntries={['/messages']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('nav-messages')).toBeInTheDocument();
+    expect(getUnreadActivity).not.toHaveBeenCalled();
+    expect(getRoomActivity).not.toHaveBeenCalled();
+  });
+
+  it('pauses navigation activity while hidden and refreshes once when visible', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/searches']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getUnreadActivity).not.toHaveBeenCalled();
+    expect(getRoomActivity).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(getUnreadActivity).not.toHaveBeenCalled();
+    expect(getRoomActivity).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getUnreadActivity).toHaveBeenCalledTimes(1);
+    expect(getRoomActivity).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getUnreadActivity).toHaveBeenCalledTimes(2);
+    expect(getRoomActivity).toHaveBeenCalledTimes(2);
   });
 
   it('shows a dismissible network endpoint notice when ports are reported', async () => {

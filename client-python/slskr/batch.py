@@ -19,7 +19,7 @@ class BatchOperation:
 
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
-        op = {"id": self.id, "method": self.method, "path": self.path}
+        op: Dict[str, Any] = {"id": self.id, "method": self.method, "path": self.path}
         if self.body is not None:
             op["body"] = deepcopy(self.body)
         return op
@@ -44,7 +44,9 @@ class BatchResult:
 
 def clone_operation(operation: BatchOperation) -> BatchOperation:
     """Copy an operation so builders do not retain caller-owned state."""
-    return BatchOperation(operation.id, operation.method, operation.path, operation.body)
+    return BatchOperation(
+        operation.id, operation.method, operation.path, operation.body
+    )
 
 
 class BatchResponse:
@@ -143,7 +145,9 @@ class BatchBuilder:
         request = {"operations": [op.to_dict() for op in self.operations]}
 
         response = await self.client._post("/api/batch", request)
-        if not isinstance(response, dict) or not isinstance(response.get("results"), list):
+        if not isinstance(response, dict) or not isinstance(
+            response.get("results"), list
+        ):
             raise ResponseContractError("batch")
 
         results = []
@@ -161,7 +165,11 @@ class BatchBuilder:
             results.append(BatchResult(result["id"], result["status"], result["body"]))
 
         total_time_ms = response.get("total_time_ms")
-        if isinstance(total_time_ms, bool) or not isinstance(total_time_ms, int) or total_time_ms < 0:
+        if (
+            isinstance(total_time_ms, bool)
+            or not isinstance(total_time_ms, int)
+            or total_time_ms < 0
+        ):
             raise ResponseContractError("batch")
         return BatchResponse(results, total_time_ms)
 

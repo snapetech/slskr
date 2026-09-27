@@ -45,6 +45,12 @@ test.describe('smoke/auth', () => {
 
     await login(page, nodeA);
 
+    await expect(page.getByTestId(T.navSystem)).toBeVisible({ timeout: 20_000 });
+    const token = await page.evaluate(() =>
+      sessionStorage.getItem('slskr-token') || localStorage.getItem('slskr-token'),
+    );
+    expect(token).toBeTruthy();
+
     // Take a screenshot for debugging
     await page.screenshot({
       fullPage: true,
@@ -84,42 +90,8 @@ test.describe('smoke/auth', () => {
       waitUntil: 'networkidle',
     });
 
-    // Wait for React app to initialize and render
-    await page.waitForTimeout(5_000); // Give time for async session check and React rendering
-
-    // The route guard works if we don't see protected content (nav elements)
-    // Check multiple times with waits to handle async rendering
-    for (let index = 0; index < 3; index++) {
-      await page.waitForTimeout(2_000);
-      const hasNavElements =
-        (await page.locator('[data-testid^="nav-"]').count()) > 0;
-      const hasLoginForm =
-        (await page.getByTestId(T.loginUsername).count()) > 0 ||
-        (await page.locator('input[placeholder*="Username" i]').count()) > 0;
-
-      if (hasNavElements) {
-        throw new Error(
-          `Route guard failed - nav elements visible when not authenticated (check ${index + 1})`,
-        );
-      }
-
-      if (hasLoginForm) {
-        // Login form is visible, route guard is working
-        return; // Test passes
-      }
-    }
-
-    // Final check - if no nav elements after all waits, route guard is working
-    const finalNavCheck =
-      (await page.locator('[data-testid^="nav-"]').count()) > 0;
-    if (finalNavCheck) {
-      throw new Error(
-        'Route guard failed - nav elements visible when not authenticated',
-      );
-    }
-
-    // No nav elements = route guard is working (even if login form isn't immediately visible)
-    // This is acceptable - the important thing is that protected content isn't shown
+    await expect(page.getByTestId(T.loginUsername)).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-testid^="nav-"]')).toHaveCount(0);
   });
 
   test('logout', async ({ page, request }) => {
@@ -181,65 +153,13 @@ test.describe('smoke/auth', () => {
         .catch(() => {}),
     ]);
 
-    // Verify we're back at login
-    try {
-      await expect(page.getByTestId(T.loginUsername)).toBeVisible({
-        timeout: 15_000,
-      });
-    } catch {
-      // Fallback: check for login form by placeholder
-      const loginByPlaceholder = page.locator(
-        'input[placeholder*="Username" i]',
-      );
-      const hasLoginForm = (await loginByPlaceholder.count()) > 0;
-      const currentUrl = page.url();
-      const hasNavElements =
-        (await page.locator('[data-testid^="nav-"]').count()) > 0;
-
-      console.log(`[Logout Debug] URL: ${currentUrl}`);
-      console.log(`[Logout Debug] Has login form: ${hasLoginForm}`);
-      console.log(`[Logout Debug] Has nav elements: ${hasNavElements}`);
-
-      if (hasLoginForm) {
-        await expect(loginByPlaceholder).toBeVisible({ timeout: 5_000 });
-        return;
-      }
-
-      if (hasNavElements) {
-        throw new Error(
-          `Logout failed - nav elements still visible after logout. URL: ${currentUrl}`,
-        );
-      }
-
-      // Check if token was cleared
-      const tokenAfterLogout = await page.evaluate(() => {
-        return (
-          sessionStorage.getItem('slskr-token') ||
-          localStorage.getItem('slskr-token')
-        );
-      });
-
-      if (tokenAfterLogout) {
-        throw new Error(
-          `Logout failed - token still in storage. URL: ${currentUrl}`,
-        );
-      }
-
-      // If no login form but token is cleared, wait a bit more for redirect
-      await page.waitForTimeout(2_000);
-      const loginAfterWait = await page
-        .locator('input[placeholder*="Username" i]')
-        .count();
-      if (loginAfterWait > 0) {
-        await expect(
-          page.locator('input[placeholder*="Username" i]'),
-        ).toBeVisible({ timeout: 5_000 });
-        return;
-      }
-
-      throw new Error(
-        `Logout may have failed - no login form found. URL: ${currentUrl}, Token cleared: ${!tokenAfterLogout}`,
-      );
-    }
+    await expect(page.getByTestId(T.loginUsername)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.locator('[data-testid^="nav-"]')).toHaveCount(0);
+    const tokenAfterLogout = await page.evaluate(() =>
+      sessionStorage.getItem('slskr-token') || localStorage.getItem('slskr-token'),
+    );
+    expect(tokenAfterLogout).toBeNull();
   });
 });
