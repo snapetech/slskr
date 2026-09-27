@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "sourceSha": "6fb4d2f6eabe222388366538b5d05cdc455a27a1",
+  "dirtyWorktree": false,
+  "startedUtc": "2026-09-27T23:23:11.044928+00:00",
+  "binarySha256": "2ea407532e28721e42554ab7f55c3920774438a857e427014b5264207d6291fc",
+  "harnessSha256": "23eea3b8ae2db700db0b03b45e13b7530a1e201641ee4f2c0d5b3e03c84da81e",
+  "rustVersion": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "case": "live-share-scan-distributed-SIGTERM-and-crash-restart",
+  "controllerProfile": "native",
+  "fixtureFiles": 20000,
+  "disabledServices": [
+    "dht",
+    "mesh",
+    "overlay",
+    "https"
+  ],
+  "initialShares": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": false
+  },
+  "distributedBeforeShutdown": {
+    "tree": [
+      0,
+      "rf-fixture",
+      null
+    ],
+    "children": [
+      [
+        "child",
+        3
+      ]
+    ]
+  },
+  "observedScanning": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": true
+  },
+  "exitCode": 0,
+  "shutdownSeconds": 0.113475,
+  "distributedSocketClosedAtShutdown": true,
+  "scanRequestOutcome": "http-error",
+  "scanRequestHttpStatus": 503,
+  "durableShareRowsAfterShutdown": 0,
+  "sqliteIntegrity": "ok",
+  "distributedAfterShutdown": {
+    "tree": [
+      0,
+      "rf-fixture",
+      null
+    ],
+    "children": []
+  },
+  "restartedShares": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": false
+  },
+  "distributedAfterRestart": {
+    "tree": [
+      0,
+      "rf-fixture",
+      null
+    ],
+    "children": []
+  },
+  "distributedBeforeCrash": {
+    "tree": [
+      0,
+      "rf-fixture",
+      null
+    ],
+    "children": [
+      [
+        "child",
+        7
+      ]
+    ]
+  },
+  "crashExitCode": -9,
+  "crashRestartShares": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": false
+  },
+  "distributedAfterCrashRestart": {
+    "tree": [
+      0,
+      "rf-fixture",
+      null
+    ],
+    "children": [
+      [
+        "child",
+        7
+      ]
+    ]
+  },
+  "crashRestartSqliteIntegrity": "ok",
+  "restartExitCode": 0,
+  "restartShutdownSeconds": 0.113468,
+  "passed": true
+}
