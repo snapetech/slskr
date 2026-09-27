@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if [[ "${1:-}" != "--skip-package" ]]; then
-  cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
+  cargo package --locked -p slskr-protocol -p slskr-client -p slskr --no-verify --allow-dirty
 fi
 
 python3 - <<'PY'
@@ -135,14 +135,23 @@ all = "warn"
     if source_cargo_config.exists():
         (workspace_root / ".cargo").mkdir()
         shutil.copyfile(source_cargo_config, workspace_root / ".cargo" / "config.toml")
-
     env = os.environ.copy()
     env.setdefault("SLSKR_BUILD_WEB", "")
     env.pop("SLSKR_BUILD_WEB", None)
+    # The extracted verification workspace intentionally contains only the
+    # three packaged runtime crates, so the repository workspace lock cannot
+    # be reused without changing its member graph. Resolve that temporary
+    # graph once, then require the actual check to remain locked.
+    subprocess.check_call(
+        ["cargo", "generate-lockfile", "--manifest-path", str(workspace_root / "Cargo.toml")],
+        cwd=workspace_root,
+        env=env,
+    )
     subprocess.check_call(
         [
             "cargo",
             "check",
+            "--locked",
             "--workspace",
             "--manifest-path",
             str(workspace_root / "Cargo.toml"),

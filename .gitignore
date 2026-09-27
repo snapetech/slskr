@@ -4,6 +4,7 @@
 node_modules/
 dashboard/node_modules/
 dashboard/dist/
+dashboard/coverage/
 web/test-results/
 web/playwright-report/
 **/*.rs.bk

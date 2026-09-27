@@ -1,5 +1,5 @@
-# Artifacts of fetch: files downloaded from remote sources (do not commit).
-# Run meta/fetch_media.sh or scripts/fetch-test-fixtures.sh to populate these.
+# Optional local media supplied for streaming tests (do not commit).
+# The checked-in manifest intentionally declares only deterministic static files.
 meta/_download_list.tsv
 meta/checksums.sha256
 movie/sintel_512kb_stereo.mp4

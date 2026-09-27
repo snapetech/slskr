@@ -18,7 +18,7 @@ section() {
 run_go_tests() {
   section "Go client tests"
   if command -v go >/dev/null 2>&1; then
-    (cd client-go && go test ./...)
+    (cd client-go && go test -mod=readonly ./...)
     return
   fi
 
@@ -30,7 +30,7 @@ run_go_tests() {
       -v "$repo_root/client-go:/src" \
       -w /src \
       golang:1.23 \
-      go test ./...
+      go test -mod=readonly ./...
     return
   fi
 
@@ -59,13 +59,12 @@ run_python_checks() {
   }
   trap cleanup_python_artifacts RETURN
 
-  scripts/check-python-client-quality.sh
-
-  PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q client-python
-
   python3 -m venv "$venv_dir"
   PIP_NO_CACHE_DIR=1 "$venv_dir/bin/python" -m pip install --upgrade pip >/dev/null
   PIP_NO_CACHE_DIR=1 "$venv_dir/bin/python" -m pip install -e "client-python[dev]" >/dev/null
+  PYTHON_BIN="$venv_dir/bin/python" scripts/check-python-client-quality.sh
+
+  PYTHONDONTWRITEBYTECODE=1 "$venv_dir/bin/python" -m compileall -q client-python
   "$venv_dir/bin/python" - <<'PY'
 from slskr import BatchClient, SlskrClient, WebSocketClient
 
@@ -76,6 +75,7 @@ assert WebSocketClient is not None
 PY
   "$venv_dir/bin/python" -m pytest -q client-python/tests
   "$venv_dir/bin/python" -m pip check
+  PYTHON_BIN="$venv_dir/bin/python" scripts/check-python-client-package.sh
 }
 
 run_typescript_checks() {
@@ -91,8 +91,11 @@ run_typescript_checks() {
       npm ci
     fi
     npm test -- --runInBand
+    npm run lint
     npm run build
   )
+  scripts/check-web-audit.sh client-ts
+  scripts/check-typescript-client-package.sh
 }
 
 run_go_tests

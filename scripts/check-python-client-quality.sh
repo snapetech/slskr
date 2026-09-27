@@ -4,6 +4,20 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+python_bin="${PYTHON_BIN:-python3}"
+
+if ! "$python_bin" -c 'import black, flake8, mypy' >/dev/null 2>&1; then
+  quality_venv="$(mktemp -d "${TMPDIR:-/tmp}/slskr-python-quality.XXXXXX")"
+  cleanup_quality_venv() {
+    rm -rf "$quality_venv"
+  }
+  trap cleanup_quality_venv EXIT
+  "$python_bin" -m venv "$quality_venv"
+  PIP_NO_CACHE_DIR=1 "$quality_venv/bin/python" -m pip install --upgrade pip >/dev/null
+  PIP_NO_CACHE_DIR=1 "$quality_venv/bin/python" -m pip install -r client-python/constraints.txt >/dev/null
+  python_bin="$quality_venv/bin/python"
+fi
+
 ledger="docs/dev/bug-burndown-ledger.md"
 status=0
 
@@ -12,7 +26,7 @@ if ! rg -n '^\| BUG-019 .* \| Verified \|$' "$ledger" >/dev/null; then
   status=1
 fi
 
-python3 - <<'PY'
+"$python_bin" - <<'PY'
 import ast
 import pathlib
 import sys
@@ -44,6 +58,21 @@ if errors:
         print(f"  {error}", file=sys.stderr)
     raise SystemExit(1)
 PY
+
+if ! "$python_bin" -m black --check client-python; then
+  printf 'python client quality check failed: Black formatting is not clean\n' >&2
+  status=1
+fi
+
+if ! "$python_bin" -m flake8 --config=client-python/.flake8 client-python; then
+  printf 'python client quality check failed: Flake8 reported violations\n' >&2
+  status=1
+fi
+
+if ! "$python_bin" -m mypy --config-file=client-python/pyproject.toml client-python/slskr; then
+  printf 'python client quality check failed: mypy reported violations\n' >&2
+  status=1
+fi
 
 if [[ "$status" -ne 0 ]]; then
   exit "$status"

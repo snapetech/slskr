@@ -18,19 +18,23 @@ rust:
     - rustup component add clippy rustfmt
     - rustup target add wasm32-unknown-unknown
   script:
-    - scripts/check-rust-build-guard.sh
-    - scripts/test-rust-build-guard.sh
+    - scripts/check-process-memory-guard.sh
+    - scripts/test-process-memory-guard.sh
+    - scripts/check-docs-freshness.sh
+    - scripts/test-check-docs-freshness.sh
+    - scripts/check-plan-freshness.sh
+    - scripts/test-check-plan-freshness.sh
     - scripts/check-rust-format.sh
-    - scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
-    - scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
-    - scripts/with-build-guard.sh cargo test --workspace
+    - cargo clippy --locked --workspace --all-targets -- -D warnings
+    - cargo check --locked -p slskr-web --target wasm32-unknown-unknown
+    - cargo test --locked --workspace
 
 go:client:
   stage: test
   image: golang:1.23-bookworm
   script:
     - cd client-go
-    - go test ./...
+    - go test -mod=readonly ./...
 
 node:web:
   stage: test
@@ -62,8 +66,9 @@ node:dashboard:
   script:
     - npm --prefix dashboard run type-check
     - npm --prefix dashboard run lint
-    - npm --prefix dashboard test
+    - npm --prefix dashboard run test:coverage
     - npm --prefix dashboard run build
+    - npm --prefix dashboard run test:bundle-budget
 
 node:client-ts:
   stage: test
@@ -156,19 +161,5 @@ github:sync-secrets:
           echo "skipped optional $ghname; OpenBao key $bkey is not present"
         fi
       done
-  rules:
-    - if: '$CI_COMMIT_TAG'
-
-github:release:
-  extends: .github_publication_defaults
-  stage: promote
-  image:
-    name: ghcr.io/cli/cli:2.63.2
-    entrypoint: [""]
-  needs: ["github:mirror", "github:sync-secrets"]
-  script:
-    - test -n "$GITHUB_TOKEN"
-    - test -n "$GITHUB_REPOSITORY"
-    - gh release create "$CI_COMMIT_TAG" --repo "$GITHUB_REPOSITORY" --title "$CI_COMMIT_TAG" --notes "Released from GitLab pipeline $CI_PIPELINE_URL" --verify-tag
   rules:
     - if: '$CI_COMMIT_TAG'

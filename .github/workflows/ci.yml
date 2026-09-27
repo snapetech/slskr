@@ -71,10 +71,15 @@ jobs:
       - run: scripts/check-public-posture.sh
       - run: scripts/validate-changelog.sh
       - run: python3 scripts/test_release_notes.py
+      - run: python3 -m unittest -v scripts.test_compare_benchmark scripts.test_profile_sqlite
+      - run: scripts/check-docs-freshness.sh
+      - run: scripts/test-check-docs-freshness.sh
+      - run: scripts/check-plan-freshness.sh
+      - run: scripts/test-check-plan-freshness.sh
       - run: scripts/check-rust-format.sh
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo check -p slskr-web --target wasm32-unknown-unknown
-      - run: cargo test --workspace
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo check --locked -p slskr-web --target wasm32-unknown-unknown
+      - run: cargo test --locked --workspace
       - run: cargo audit
       - run: scripts/run-security-scans.sh
       - run: scripts/check-client-sdk-gates.sh
@@ -82,19 +87,18 @@ jobs:
       - run: bash scripts/check-web-audit.sh
       - run: npm --prefix web run lint
       - run: npm --prefix web test
+      - run: npm --prefix web run test:api-lifecycle-coverage
       - run: npm --prefix web run build
+      - run: npm --prefix web run test:bundle-budget
       - run: node web/scripts/verify-build-output.mjs
       - run: node web/scripts/smoke-subpath-build.mjs
       - run: npm --prefix dashboard ci
       - run: bash scripts/check-web-audit.sh dashboard
       - run: npm --prefix dashboard run type-check
       - run: npm --prefix dashboard run lint
-      - run: npm --prefix dashboard test
+      - run: npm --prefix dashboard run test:coverage
       - run: npm --prefix dashboard run build
-      - run: npm --prefix client-ts ci --ignore-scripts
-      - run: bash scripts/check-web-audit.sh client-ts
-      - run: npm --prefix client-ts run lint
-      - run: npm --prefix client-ts run build
+      - run: npm --prefix dashboard run test:bundle-budget
 
   linux-aarch64:
     name: Linux AArch64
@@ -116,11 +120,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
       - name: Check native GNU build
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
       - name: Run native GNU tests
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
       - name: Check static musl build
-        run: cargo check -p slskr --target aarch64-unknown-linux-musl
+        run: cargo check --locked -p slskr --target aarch64-unknown-linux-musl
 
   platform-builds:
     name: Platform ${{ matrix.name }}
@@ -233,7 +237,7 @@ jobs:
       - name: Run native workspace tests
         if: matrix.native_tests
         shell: bash
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
       - name: Build production web assets
         shell: bash
         run: |
@@ -330,6 +334,7 @@ jobs:
           scripts/check-workflow-release-policy.sh
           scripts/check-package-artifact-matrix.sh
           scripts/check-aur-packaging-checksums.sh
+          scripts/check-aur-package-smoke.sh
           scripts/check-release-version-metadata.sh
           scripts/check-kubernetes-public-posture.sh
       - name: Lint deployment charts

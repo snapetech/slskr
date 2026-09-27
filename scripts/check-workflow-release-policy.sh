@@ -241,6 +241,18 @@ if ! rg -n -F 'release-v<semver>' docs/release.md >/dev/null; then
   status=1
 fi
 
+for expected in \
+  'ref: ${{ inputs.tag }}' \
+  'SHA256SUMS.txt' \
+  'Get-FileHash' \
+  'https://github.com/$env:GITHUB_REPOSITORY/releases/download/' \
+  'Expand-Archive'; do
+  if ! rg -n -F -- "$expected" .github/workflows/publish-chocolatey.yml >/dev/null; then
+    printf 'workflow release policy check failed: Chocolatey release contract token missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
 if ! rg -n -F '`macos-15-intel`' docs/release.md >/dev/null; then
   printf 'workflow release policy check failed: release docs must document the current macOS Intel runner\n' >&2
   status=1

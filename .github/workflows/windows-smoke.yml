@@ -8,8 +8,6 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "web/**"
-      - "dashboard/**"
-      - "client-ts/**"
       - ".github/workflows/windows-smoke.yml"
 
 permissions:
@@ -65,11 +63,11 @@ jobs:
 
       - name: Rust tests
         shell: bash
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: WASM check
         shell: bash
-        run: cargo check -p slskr-web --target wasm32-unknown-unknown
+        run: cargo check --locked -p slskr-web --target wasm32-unknown-unknown
 
       - name: Web build
         run: |

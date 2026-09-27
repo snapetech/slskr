@@ -10,15 +10,6 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-if command -v curl >/dev/null 2>&1; then
-  dl_kind="curl"
-elif command -v wget >/dev/null 2>&1; then
-  dl_kind="wget"
-else
-  echo "ERROR: need curl or wget"
-  exit 1
-fi
-
 python3 - "$manifest" <<'PY' >"$root_dir/meta/_download_list.tsv"
 import json, sys
 mf = json.load(open(sys.argv[1], "r", encoding="utf-8"))
@@ -29,6 +20,21 @@ for a in mf.get("assets", []):
 for url, path in rows:
     print(url + "\t" + path)
 PY
+
+if [[ ! -s "$root_dir/meta/_download_list.tsv" ]]; then
+  rm -f "$root_dir/meta/_download_list.tsv"
+  echo "No downloadable assets are declared; static fixtures remain unchanged."
+  exit 0
+fi
+
+if command -v curl >/dev/null 2>&1; then
+  dl_kind="curl"
+elif command -v wget >/dev/null 2>&1; then
+  dl_kind="wget"
+else
+  echo "ERROR: need curl or wget"
+  exit 1
+fi
 
 while IFS=$'\t' read -r url relpath; do
   out="$target_root/$relpath"
@@ -48,4 +54,3 @@ done <"$root_dir/meta/_download_list.tsv"
 
 python3 "$root_dir/meta/write_checksums.py"
 echo "Done. Checksums written to meta/checksums.sha256"
-

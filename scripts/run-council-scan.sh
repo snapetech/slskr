@@ -20,6 +20,8 @@ scan_rg() {
 
 printf '# Council Scan Candidate Counts\n\n'
 printf 'Generated from local source patterns. Counts are candidate lines, not confirmed bugs.\n\n'
+printf 'Scan date: %s\n' "$(date +%Y-%m-%d)"
+printf 'Source commit: %s\n\n' "$(git rev-parse HEAD)"
 printf '| Candidate Class | Count |\n'
 printf '| --- | ---: |\n'
 scan_rg 'Constructor/mutable collection candidates' \

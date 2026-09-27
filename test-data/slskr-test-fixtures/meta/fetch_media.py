@@ -35,15 +35,17 @@ def download(url: str, out_path: Path, retries: int = 3) -> None:
 
 def main() -> int:
     mf = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    downloads = []
     for asset in mf.get("assets", []):
         for d in asset.get("download_via_script", []):
-            url = d["url"]
-            rel = d["path"]
-            out = ROOT / rel
-            download(url, out)
+            downloads.append((d["url"], d["path"]))
+    if not downloads:
+        print("OK: no downloadable assets are declared; static fixtures remain unchanged.")
+        return 0
+    for url, rel in downloads:
+        download(url, ROOT / rel)
     print("OK: downloads complete. Run meta/write_checksums.py to (re)generate checksums.")
     return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -76,6 +76,12 @@ if [[ -z "$version" ]]; then
 fi
 safe_version="$(printf '%s' "$version" | tr '/ :' '---')"
 
+source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct HEAD)}"
+if ! [[ "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be a non-negative Unix timestamp" >&2
+  exit 2
+fi
+
 if [[ -z "$target" ]]; then
   target="$(rustc -Vv | awk '/^host:/ { print $2 }')"
 fi
@@ -102,7 +108,7 @@ if [[ \
   exit 1
 fi
 
-cargo_args=(build --release -p slskr)
+cargo_args=(build --locked --release -p slskr)
 if [[ -n "$target" ]]; then
   cargo_args+=(--target "$target")
 fi
@@ -141,24 +147,50 @@ SLSKR_CONFIG=/path/to/config.toml or environment variables. Start from
 docs/slskr.config.example.toml.
 EOF
 
+SOURCE_DATE_EPOCH="$source_date_epoch" STAGE_DIR="$stage_dir" python3 - <<'PY'
+import os
+import pathlib
+
+epoch = int(os.environ["SOURCE_DATE_EPOCH"])
+stage = pathlib.Path(os.environ["STAGE_DIR"])
+for path in stage.rglob("*"):
+    try:
+        os.utime(path, (epoch, epoch), follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+PY
+
 mkdir -p "$dist_dir"
 if [[ "$target" == *windows* ]]; then
   archive="$dist_dir/$root_name.zip"
-  ARCHIVE="$archive" ROOT_NAME="$root_name" DIST_DIR="$dist_dir" python - <<'PY'
+  ARCHIVE="$archive" ROOT_NAME="$root_name" DIST_DIR="$dist_dir" SOURCE_DATE_EPOCH="$source_date_epoch" python3 - <<'PY'
+import datetime
 import os
 import pathlib
 import zipfile
 
 archive = pathlib.Path(os.environ["ARCHIVE"])
 root = pathlib.Path(os.environ["DIST_DIR"]) / os.environ["ROOT_NAME"]
+epoch = max(int(os.environ["SOURCE_DATE_EPOCH"]), 315532800)
+timestamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).replace(tzinfo=None)
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    for path in root.rglob("*"):
-        if path.is_file():
-            zf.write(path, path.relative_to(root.parent).as_posix())
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.relative_to(root.parent).as_posix()
+        info = zipfile.ZipInfo(name, timestamp)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.create_system = 3
+        info.external_attr = 0o100644 << 16
+        zf.writestr(info, path.read_bytes())
 PY
 else
   archive="$dist_dir/$root_name.tar.gz"
-  tar -C "$dist_dir" -czf "$archive" "$root_name"
+  tar --sort=name \
+    --mtime="@${source_date_epoch}" \
+    --owner=0 --group=0 --numeric-owner \
+    -C "$dist_dir" -cf - "$root_name" \
+    | gzip -n -9 > "$archive"
 fi
 
 write_sha256_file "$archive" > "$archive.sha256"
