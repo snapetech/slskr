@@ -5721,3 +5721,8 @@ directory. The full-controller and legacy-route test target compiles, and six
 source-owner policy guards, module hygiene, shell hygiene, and formatting pass.
 The segments still share one Rust module through `include!`, so test ownership
 is not yet isolated; RF-024 remains in progress.
+
+`focused_controller_tests.rs` is now three included segments of at most 2,543
+lines. The pre-format extraction reconstructed all 252,983 original bytes.
+Its relative fixture references were adjusted, the runtime boundary guard and
+formatter pass, and the default daemon library suite passes all 642 tests.
