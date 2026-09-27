@@ -408,33 +408,38 @@ const SHARED_MESH_CLASSIFICATION_ATTEMPTS: usize = 5;
 const SHARED_MESH_CLASSIFICATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 const TLS_HANDSHAKE_CONTENT_TYPE: u8 = 0x16;
 const TLS_MAJOR_VERSION: u8 = 0x03;
+const TLS_CLIENT_HELLO_TYPE: u8 = 0x01;
+const TLS_CLIENT_HELLO_PREFIX_LEN: usize = 6;
+const MAX_TLS_RECORD_LEN: usize = 16 * 1024 + 2048;
 
 /// Classify a stream for the current upstream shared TCP endpoint.
 ///
-/// A mesh overlay connection starts with a TLS record header (`0x16, 0x03`).
-/// Other traffic is passed to the framed Soulseek demux. The peek is
-/// intentionally conservative: a partial TLS header is rejected after the
-/// bounded retry window, while non-TLS traffic is never guessed as mesh
-/// traffic.
+/// A mesh overlay connection starts with a bounded TLS ClientHello record.
+/// A two-byte `0x16, 0x03` prefix also occurs in valid Soulseek frame lengths,
+/// so classification waits for the full TLS record and handshake prefix.
+/// The peek does not consume bytes from either protocol.
 pub async fn demux_shared_mesh_incoming(
     stream: TcpStream,
 ) -> Result<SharedIncomingConnection<TcpStream>, ClientError> {
-    let mut prefix = [0_u8; 2];
+    let mut prefix = [0_u8; TLS_CLIENT_HELLO_PREFIX_LEN];
     for attempt in 0..SHARED_MESH_CLASSIFICATION_ATTEMPTS {
         let peeked = stream.peek(&mut prefix).await?;
-        if peeked >= prefix.len() {
-            if prefix[0] == TLS_HANDSHAKE_CONTENT_TYPE && prefix[1] == TLS_MAJOR_VERSION {
-                return Ok(SharedIncomingConnection::MeshOverlay(stream));
-            }
-            break;
-        }
         if peeked == 0 {
             break;
         }
-        // Soulseek's tagged connection kinds are one byte long. Only a
-        // leading TLS content byte is ambiguous and needs a bounded wait for
-        // the version byte.
-        if prefix[0] != TLS_HANDSHAKE_CONTENT_TYPE {
+        if prefix[0] != TLS_HANDSHAKE_CONTENT_TYPE
+            || (peeked >= 2 && prefix[1] != TLS_MAJOR_VERSION)
+            || (peeked >= 3 && !(1..=4).contains(&prefix[2]))
+        {
+            break;
+        }
+
+        if peeked >= prefix.len() {
+            let record_len = u16::from_be_bytes([prefix[3], prefix[4]]) as usize;
+            if (4..=MAX_TLS_RECORD_LEN).contains(&record_len) && prefix[5] == TLS_CLIENT_HELLO_TYPE
+            {
+                return Ok(SharedIncomingConnection::MeshOverlay(stream));
+            }
             break;
         }
         if attempt + 1 < SHARED_MESH_CLASSIFICATION_ATTEMPTS {

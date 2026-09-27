@@ -353,7 +353,10 @@ async fn shared_mesh_listener_routes_tls_without_consuming_record_bytes() {
     let address = listener.local_addr().unwrap();
     let client_task = tokio::spawn(async move {
         let mut stream = TcpStream::connect(address).await.unwrap();
-        stream.write_all(&[0x16, 0x03]).await.unwrap();
+        stream
+            .write_all(&[0x16, 0x03, 0x01, 0x00, 0x04, 0x01])
+            .await
+            .unwrap();
         stream
     });
 
@@ -362,9 +365,9 @@ async fn shared_mesh_listener_routes_tls_without_consuming_record_bytes() {
     let SharedIncomingConnection::MeshOverlay(mut stream) = incoming else {
         panic!("expected mesh overlay connection");
     };
-    let mut prefix = [0_u8; 2];
+    let mut prefix = [0_u8; 6];
     stream.read_exact(&mut prefix).await.unwrap();
-    assert_eq!(prefix, [0x16, 0x03]);
+    assert_eq!(prefix, [0x16, 0x03, 0x01, 0x00, 0x04, 0x01]);
     drop(stream);
     client_task.await.unwrap();
 }
@@ -394,6 +397,38 @@ async fn shared_mesh_listener_preserves_soulseek_demux() {
             ..
         })
     ));
+    client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_mesh_listener_accepts_plain_frame_with_tls_like_first_two_bytes() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let username = "p".repeat(776);
+    let expected_username = username.clone();
+    let client_task = tokio::spawn(async move {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let init = InitMessage::PeerInit {
+            username,
+            connection_type: "P".to_owned(),
+            token: 0,
+        };
+        let frame = init.encode().unwrap();
+        assert_eq!(&frame.encode().unwrap()[..2], &[0x16, 0x03]);
+        write_init_frame(&mut stream, &frame).await.unwrap();
+    });
+
+    let (incoming, _) = listener.accept_shared_mesh().await.unwrap();
+    let SharedIncomingConnection::Soulseek(IncomingConnection::PeerInit {
+        username,
+        kind: ConnectionKind::PeerMessages,
+        obfuscated: false,
+        ..
+    }) = incoming
+    else {
+        panic!("expected plain peer init on the shared listener");
+    };
+    assert_eq!(username, expected_username);
     client_task.await.unwrap();
 }
 
