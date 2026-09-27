@@ -13,6 +13,7 @@ from pathlib import Path
 import signal
 import socket
 import sqlite3
+import struct
 import subprocess
 import tempfile
 import time
@@ -45,7 +46,7 @@ def main() -> None:
         "binarySha256": file_digest(binary),
         "harnessSha256": file_digest(Path(__file__)),
         "rustVersion": subprocess.check_output(["rustc", "--version"], text=True).strip(),
-        "case": "live-share-scan-SIGTERM-overlap-and-restart",
+        "case": "live-share-scan-distributed-SIGTERM-and-crash-restart",
         "controllerProfile": "native",
         "fixtureFiles": args.fixture_files,
         "disabledServices": ["dht", "mesh", "overlay", "https"],
@@ -67,15 +68,18 @@ def main() -> None:
             "[mesh_gateway]\nenabled = false\n"
         )
         env = {key: value for key, value in os.environ.items() if not key.startswith(("SLSKR_", "SLSKD_"))}
-        with socket.socket() as reservation:
-            reservation.bind(("127.0.0.1", 0))
-            http_port = reservation.getsockname()[1]
+        with socket.socket() as http_reservation, socket.socket() as peer_reservation:
+            http_reservation.bind(("127.0.0.1", 0))
+            peer_reservation.bind(("127.0.0.1", 0))
+            http_port = http_reservation.getsockname()[1]
+            peer_port = peer_reservation.getsockname()[1]
         env.update(
             SLSKR_CONFIG=str(config), SLSKR_STATE_DIR=str(root / "state"),
             SLSKR_HTTP_BIND=f"127.0.0.1:{http_port}", SLSKR_AUTH_DISABLED="true",
-            SLSKD_NO_HTTPS="true", SLSKR_LISTENER_BIND="127.0.0.1:0",
+            SLSKD_NO_HTTPS="true", SLSKR_LISTENER_BIND=f"127.0.0.1:{peer_port}",
             SLSKR_SHARE_DIRS=str(shares), SLSKR_SHARES_PROBE_MEDIA_ATTRIBUTES="false",
             SLSKR_CONTROLLER_PROFILE="native", SLSKR_PERSISTENCE_ENABLED="true",
+            SLSKD_SLSK_USERNAME="rf-fixture",
         )
         command = [str(binary), "serve", "--no-connect", "--no-share-scan", "--no-logo", "--no-version-check"]
         base = f"http://127.0.0.1:{http_port}"
@@ -106,10 +110,64 @@ def main() -> None:
                 proc.kill()
                 proc.wait(timeout=5)
 
+        def distributed_snapshot() -> dict:
+            with sqlite3.connect(root / "state/slskr.db") as db:
+                db.execute("BEGIN")
+                tree = db.execute("select branch_level, branch_root, parent_username from distributed_tree_state where id = 1").fetchone()
+                children = db.execute("select username, depth from distributed_children order by username").fetchall()
+                return {"tree": list(tree) if tree else None, "children": [list(row) for row in children]}
+
+        def recv_exact(peer: socket.socket, length: int) -> bytes:
+            result = bytearray()
+            while len(result) < length:
+                chunk = peer.recv(length - len(result))
+                if not chunk:
+                    raise RuntimeError("distributed fixture socket closed during initialization")
+                result.extend(chunk)
+            return bytes(result)
+
+        def distributed_child(depth: int) -> tuple[socket.socket, dict]:
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    peer = socket.create_connection(("127.0.0.1", peer_port), timeout=5)
+                    break
+                except ConnectionRefusedError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(.02)
+            try:
+                def string(value: bytes) -> bytes:
+                    return struct.pack("<I", len(value)) + value
+
+                init = b"\x01" + string(b"child") + string(b"D") + struct.pack("<I", 0)
+                peer.sendall(struct.pack("<I", len(init)) + init)
+                for code in (4, 5):
+                    length = struct.unpack("<I", recv_exact(peer, 4))[0]
+                    if not 1 <= length <= 8192:
+                        raise RuntimeError("invalid distributed fixture frame length")
+                    frame = recv_exact(peer, length)
+                    if frame[0] != code:
+                        raise RuntimeError("unexpected distributed branch initialization")
+                payload = b"\x07" + struct.pack("<I", depth)
+                peer.sendall(struct.pack("<I", len(payload)) + payload)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    snapshot = distributed_snapshot()
+                    if snapshot["children"] == [["child", depth]]:
+                        return peer, snapshot
+                    time.sleep(.002)
+                raise RuntimeError("distributed child depth did not persist")
+            except BaseException:
+                peer.close()
+                raise
+
+        peer = None
         with (root / "daemon.log").open("w") as log:
             proc = subprocess.Popen(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
             try:
                 record["initialShares"] = ready(proc)["shares"]
+                peer, record["distributedBeforeShutdown"] = distributed_child(3)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     pending = executor.submit(request, "/api/shares", "PUT")
                     deadline = time.monotonic() + 5
@@ -125,6 +183,7 @@ def main() -> None:
                     else:
                         raise RuntimeError("active scan was not observed")
                     record["exitCode"], record["shutdownSeconds"] = stop(proc)
+                    record["distributedSocketClosedAtShutdown"] = peer.recv(1) == b""
                     try:
                         pending.result(timeout=6)
                         record["scanRequestOutcome"] = "returned"
@@ -142,14 +201,47 @@ def main() -> None:
                     record["sqliteIntegrity"] = db.execute("pragma integrity_check").fetchone()[0]
                 if record["durableShareRowsAfterShutdown"] != 0 or record["sqliteIntegrity"] != "ok":
                     raise RuntimeError("shutdown published a partial or invalid durable share index")
+                record["distributedAfterShutdown"] = distributed_snapshot()
+                expected_shutdown = {"tree": [0, "rf-fixture", None], "children": []}
+                if record["distributedAfterShutdown"] != expected_shutdown:
+                    raise RuntimeError(f"shutdown did not persist the final disconnected snapshot: {record['distributedAfterShutdown']!r}")
+                if not record["distributedSocketClosedAtShutdown"]:
+                    raise RuntimeError("shutdown left the distributed socket open")
             finally:
                 cleanup(proc)
+                if peer is not None:
+                    peer.close()
+                    peer = None
         with (root / "restart.log").open("w") as log:
             proc = subprocess.Popen(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
             try:
                 record["restartedShares"] = ready(proc)["shares"]
                 if record["restartedShares"]["files"] != 0:
                     raise RuntimeError("restart restored a partial share index")
+                record["distributedAfterRestart"] = distributed_snapshot()
+                if record["distributedAfterRestart"] != record["distributedAfterShutdown"]:
+                    raise RuntimeError("restart changed the retained distributed snapshot")
+                peer, record["distributedBeforeCrash"] = distributed_child(7)
+                proc.kill()
+                record["crashExitCode"] = proc.wait(timeout=5)
+                if record["crashExitCode"] != -signal.SIGKILL:
+                    raise RuntimeError("forced crash did not use SIGKILL")
+            finally:
+                cleanup(proc)
+                if peer is not None:
+                    peer.close()
+                    peer = None
+        with (root / "crash-restart.log").open("w") as log:
+            proc = subprocess.Popen(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
+            try:
+                record["crashRestartShares"] = ready(proc)["shares"]
+                record["distributedAfterCrashRestart"] = distributed_snapshot()
+                if record["distributedAfterCrashRestart"] != record["distributedBeforeCrash"]:
+                    raise RuntimeError("crash/restart lost the committed distributed snapshot")
+                with sqlite3.connect(root / "state/slskr.db") as db:
+                    record["crashRestartSqliteIntegrity"] = db.execute("pragma integrity_check").fetchone()[0]
+                if record["crashRestartSqliteIntegrity"] != "ok" or record["crashRestartShares"]["files"] != 0:
+                    raise RuntimeError("crash/restart restored corrupt or partial state")
                 record["restartExitCode"], record["restartShutdownSeconds"] = stop(proc)
                 if record["restartExitCode"] != 0:
                     raise RuntimeError("restarted daemon did not exit cleanly")
