@@ -601,3 +601,87 @@ async fn managed_shutdown_closes_distributed_child_and_persists_latest_depth() {
     fs::remove_dir_all(root).unwrap();
     let _ = fs::remove_dir_all(&state.config.state_dir);
 }
+
+#[tokio::test]
+async fn peer_listener_shutdown_joins_stalled_handshakes_and_handlers() {
+    use slskr_client::protocol::init::InitMessage;
+    use tokio::io::AsyncReadExt;
+
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default()
+            .with("SLSKD_NO_CONNECT", "true")
+            .with("SLSKR_LISTENER_BIND", "127.0.0.1:0")
+            .with("SLSKD_SLSK_OBFUSCATION_LISTEN_PORT", "0"),
+    );
+    state
+        .advanced_networking
+        .write()
+        .await
+        .security
+        .network_guard
+        .enabled = true;
+    let capacity = state.incoming_connections.available_permits();
+    let (regular_tx, regular_rx) = mpsc::channel(1);
+    let (obfuscated_tx, obfuscated_rx) = mpsc::channel(1);
+    crate::spawn_configured_listeners(Arc::clone(&state), regular_rx, obfuscated_rx, true);
+    let address = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(address) = state.listeners.read().await.regular_local_addr.clone() {
+                break address;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("listener binds");
+    let mut stalled = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let mut peer = tokio::net::TcpStream::connect(&address).await.unwrap();
+    slskr_client::io::write_init_frame(
+        &mut peer,
+        &InitMessage::PeerInit {
+            username: "shutdown-peer".to_owned(),
+            connection_type: "P".to_owned(),
+            token: 0,
+        }
+        .encode()
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if state.incoming_connections.available_permits() == capacity - 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("peer handler registers");
+    assert_eq!(
+        state
+            .incoming_connection_ips
+            .lock()
+            .unwrap()
+            .values()
+            .sum::<usize>(),
+        1
+    );
+    state.shutdown_managed_tasks().await;
+    let mut byte = [0u8; 1];
+    for stream in [&mut stalled, &mut peer] {
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), stream.read(&mut byte))
+                .await
+                .expect("shutdown closes socket")
+                .unwrap(),
+            0
+        );
+    }
+    assert_eq!(state.incoming_connections.available_permits(), capacity);
+    assert!(state.incoming_connection_ips.lock().unwrap().is_empty());
+    drop((regular_tx, obfuscated_tx));
+    let state_dir = state.config.state_dir.clone();
+    drop(state);
+    fs::remove_dir_all(state_dir).expect("remove isolated listener fixture");
+}

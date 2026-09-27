@@ -5921,3 +5921,15 @@ of different lengths; another checks that an unambiguous unknown initialization
 retains its payload and subsequent bytes. The listener still uses the existing
 shared port. This closes the fallback stream-boundary defect; the broader
 legacy plain/obfuscated ambiguity remains open under RF-001.
+
+## RF-006 Peer Listener Task Ownership (2026-09-27)
+
+The listener's accepted initialization workers and peer handlers still used
+detached tasks. Both now register with managed shutdown. A network-guard lease
+releases admission counts when a handler completes, fails before dispatch, or
+is canceled; connection permits remain owned by the handler. The regression
+opens one stalled handshake and one initialized peer on the same shared
+listener, then checks managed shutdown closes both sockets, returns capacity,
+and clears the per-IP guard counts. All 648 daemon library tests pass,
+including this real TCP shutdown regression. Broader clean-runner service
+coverage remains open under RF-006.

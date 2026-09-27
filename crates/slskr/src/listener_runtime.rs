@@ -122,11 +122,15 @@ async fn process_listener_incoming(
             return;
         }
     }
+    let network_guard_lease = IncomingNetworkGuardLease {
+        state: Arc::clone(state),
+        ip: remote_addr.ip(),
+        enabled: network_guard.enabled,
+    };
     let incoming =
         match configure_incoming_soulseek_socket(incoming, &state.config.soulseek_connection) {
             Ok(incoming) => incoming,
             Err(error) => {
-                release_incoming_network_guard(state, remote_addr.ip(), network_guard.enabled);
                 update_listeners(state, |snapshot| {
                     snapshot.errors += 1;
                     snapshot.last_error = Some(error);
@@ -159,7 +163,6 @@ async fn process_listener_incoming(
     })
     .await;
     let Ok(permit) = Arc::clone(&state.incoming_connections).try_acquire_owned() else {
-        release_incoming_network_guard(state, remote_addr.ip(), network_guard.enabled);
         update_listeners(state, |snapshot| {
             snapshot.errors += 1;
             snapshot.last_error =
@@ -169,10 +172,10 @@ async fn process_listener_incoming(
         return;
     };
     let task_state = Arc::clone(state);
-    tokio::spawn(async move {
+    state.spawn_managed_task(async move {
+        let _network_guard_lease = network_guard_lease;
         let _permit = permit;
-        handle_owned_incoming(Arc::clone(&task_state), incoming, remote_addr).await;
-        release_incoming_network_guard(&task_state, remote_addr.ip(), network_guard.enabled);
+        handle_owned_incoming(task_state, incoming, remote_addr).await;
     });
 }
 
@@ -185,6 +188,18 @@ fn incoming_connection_is_obfuscated(incoming: &IncomingConnection<TcpStream>) -
                 ..
             }
     )
+}
+
+struct IncomingNetworkGuardLease {
+    state: Arc<AppState>,
+    ip: IpAddr,
+    enabled: bool,
+}
+
+impl Drop for IncomingNetworkGuardLease {
+    fn drop(&mut self) {
+        release_incoming_network_guard(&self.state, self.ip, self.enabled);
+    }
 }
 
 fn release_incoming_network_guard(state: &AppState, ip: IpAddr, enabled: bool) {
@@ -301,7 +316,7 @@ async fn run_listener_manager(
                                 continue;
                             };
                             let task_state = Arc::clone(&state);
-                            tokio::spawn(async move {
+                            state.spawn_managed_task(async move {
                                 let _handshake_permit = handshake_permit;
                                 if shared_mesh_tcp {
                                     process_shared_mesh_connection(task_state, stream, remote_addr)
