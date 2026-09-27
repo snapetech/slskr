@@ -147,19 +147,6 @@ SLSKR_CONFIG=/path/to/config.toml or environment variables. Start from
 docs/slskr.config.example.toml.
 EOF
 
-SOURCE_DATE_EPOCH="$source_date_epoch" STAGE_DIR="$stage_dir" python3 - <<'PY'
-import os
-import pathlib
-
-epoch = int(os.environ["SOURCE_DATE_EPOCH"])
-stage = pathlib.Path(os.environ["STAGE_DIR"])
-for path in stage.rglob("*"):
-    try:
-        os.utime(path, (epoch, epoch), follow_symlinks=False)
-    except FileNotFoundError:
-        pass
-PY
-
 mkdir -p "$dist_dir"
 if [[ "$target" == *windows* ]]; then
   archive="$dist_dir/$root_name.zip"
