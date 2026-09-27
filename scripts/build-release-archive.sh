@@ -186,11 +186,44 @@ with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
 PY
 else
   archive="$dist_dir/$root_name.tar.gz"
-  tar --sort=name \
-    --mtime="@${source_date_epoch}" \
-    --owner=0 --group=0 --numeric-owner \
-    -C "$dist_dir" -cf - "$root_name" \
-    | gzip -n -9 > "$archive"
+  ARCHIVE="$archive" ROOT_NAME="$root_name" DIST_DIR="$dist_dir" \
+    BINARY_NAME="$binary_name" SOURCE_DATE_EPOCH="$source_date_epoch" python3 - <<'PY'
+import gzip
+import os
+import pathlib
+import stat
+import tarfile
+
+archive = pathlib.Path(os.environ["ARCHIVE"])
+root = pathlib.Path(os.environ["DIST_DIR"]) / os.environ["ROOT_NAME"]
+binary = root / os.environ["BINARY_NAME"]
+epoch = int(os.environ["SOURCE_DATE_EPOCH"])
+with archive.open("wb") as output:
+    with gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0, compresslevel=9) as gz:
+        with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tf:
+            for path in [root, *sorted(root.rglob("*"))]:
+                metadata = path.lstat()
+                info = tarfile.TarInfo(path.relative_to(root.parent).as_posix())
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = epoch
+                if stat.S_ISDIR(metadata.st_mode):
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o755
+                    tf.addfile(info)
+                elif stat.S_ISLNK(metadata.st_mode):
+                    info.type = tarfile.SYMTYPE
+                    info.mode = 0o777
+                    info.linkname = os.readlink(path)
+                    tf.addfile(info)
+                elif stat.S_ISREG(metadata.st_mode):
+                    info.mode = 0o755 if path == binary else 0o644
+                    info.size = metadata.st_size
+                    with path.open("rb") as content:
+                        tf.addfile(info, content)
+                else:
+                    raise RuntimeError(f"unsupported release archive entry: {path}")
+PY
 fi
 
 write_sha256_file "$archive" > "$archive.sha256"
