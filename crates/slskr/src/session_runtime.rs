@@ -824,7 +824,7 @@ pub(super) async fn handle_session_command(
         }
         SessionCommand::ProbePeerCapability(username) => {
             let task_state = Arc::clone(state);
-            tokio::spawn(async move {
+            state.spawn_managed_task(async move {
                 if let Err(error) = probe_peer_capability(&task_state, &username).await {
                     eprintln!(
                         "peer capability probe failed for {}: {error}",
@@ -2703,7 +2703,9 @@ pub(super) fn spawn_session_manager(
 }
 
 fn spawn_wishlist_smart_fallback(state: Arc<AppState>, token: u32) {
-    tokio::spawn(async move {
+    let task_state = Arc::clone(&state);
+    state.spawn_managed_task(async move {
+        let state = task_state;
         // Current upstream gives the initial Soulseek query a short response
         // window before trying one bounded query with suppressed terms removed.
         // Keep this independent of the server-advertised wishlist interval so
@@ -2942,6 +2944,16 @@ pub(super) async fn handle_incoming_soulseek_pod_message(
     true
 }
 
+struct IncomingSearchQueueLease(Arc<AppState>);
+
+impl Drop for IncomingSearchQueueLease {
+    fn drop(&mut self) {
+        self.0
+            .incoming_search_queue_depth
+            .fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 pub(super) async fn schedule_incoming_search_response(
     state: Arc<AppState>,
     username: String,
@@ -2963,7 +2975,10 @@ pub(super) async fn schedule_incoming_search_response(
             .fetch_sub(1, Ordering::AcqRel);
         return;
     }
-    tokio::spawn(async move {
+    let task_state = Arc::clone(&state);
+    let queue_lease = IncomingSearchQueueLease(Arc::clone(&state));
+    state.spawn_managed_task(async move {
+        let state = task_state;
         let gate = Arc::clone(&state.incoming_searches);
         let result = async {
             let _permit = gate
@@ -3000,9 +3015,7 @@ pub(super) async fn schedule_incoming_search_response(
             Ok(())
         }
         .await;
-        state
-            .incoming_search_queue_depth
-            .fetch_sub(1, Ordering::AcqRel);
+        drop(queue_lease);
         if let Err(error) = result {
             record_daemon_log(
                 &state,

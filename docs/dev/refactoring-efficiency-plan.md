@@ -5933,3 +5933,13 @@ listener, then checks managed shutdown closes both sockets, returns capacity,
 and clears the per-IP guard counts. All 648 daemon library tests pass,
 including this real TCP shutdown regression. Broader clean-runner service
 coverage remains open under RF-006.
+
+## RF-006 Session Worker Ownership (2026-09-27)
+
+Peer capability probes, the five-second wishlist fallback, and incoming search
+responses now use managed task ownership. A queue lease releases incoming
+search admission counts even if shutdown cancels a worker waiting for a permit
+or rejects its future before polling. The focused regression holds every
+search permit, schedules work, joins shutdown, and verifies both queued and
+subsequent rejected work leave a zero queue count. All 649 daemon library
+tests pass. Other service coverage remains open under RF-006.

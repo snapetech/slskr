@@ -685,3 +685,51 @@ async fn peer_listener_shutdown_joins_stalled_handshakes_and_handlers() {
     drop(state);
     fs::remove_dir_all(state_dir).expect("remove isolated listener fixture");
 }
+
+#[tokio::test]
+async fn incoming_search_shutdown_reclaims_queued_and_rejected_work() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let capacity = state.incoming_searches.available_permits();
+    let held_capacity = Arc::clone(&state.incoming_searches)
+        .acquire_many_owned(capacity as u32)
+        .await
+        .unwrap();
+    crate::session_runtime::schedule_incoming_search_response(
+        Arc::clone(&state),
+        "peer".to_owned(),
+        1,
+        "Test".to_owned(),
+    )
+    .await;
+    assert_eq!(
+        state
+            .incoming_search_queue_depth
+            .load(crate::Ordering::Acquire),
+        1
+    );
+    state.shutdown_managed_tasks().await;
+    assert_eq!(
+        state
+            .incoming_search_queue_depth
+            .load(crate::Ordering::Acquire),
+        0
+    );
+    crate::session_runtime::schedule_incoming_search_response(
+        Arc::clone(&state),
+        "peer".to_owned(),
+        2,
+        "Test".to_owned(),
+    )
+    .await;
+    assert_eq!(
+        state
+            .incoming_search_queue_depth
+            .load(crate::Ordering::Acquire),
+        0
+    );
+    drop(held_capacity);
+    assert_eq!(state.incoming_searches.available_permits(), capacity);
+    let state_dir = state.config.state_dir.clone();
+    drop(state);
+    fs::remove_dir_all(state_dir).expect("remove isolated search fixture");
+}
