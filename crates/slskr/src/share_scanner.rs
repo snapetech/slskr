@@ -108,6 +108,10 @@ fn media_attributes(
     .collect()
 }
 
+fn saturating_media_u32(value: u64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
 fn probe_wav_attributes(bytes: &[u8]) -> Vec<FileAttribute> {
     if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Vec::new();
@@ -140,7 +144,7 @@ fn probe_wav_attributes(bytes: &[u8]) -> Vec<FileAttribute> {
     let duration = byte_rate
         .filter(|rate| *rate > 0)
         .zip(data_bytes)
-        .map(|(rate, size)| (size / u64::from(rate)).max(1) as u32);
+        .map(|(rate, size)| saturating_media_u32((size / u64::from(rate)).max(1)));
     let bitrate = byte_rate.map(|rate| rate.saturating_mul(8) / 1_000);
     media_attributes(bitrate, duration, Some(false), sample_rate, bit_depth)
 }
@@ -166,11 +170,11 @@ fn probe_flac_attributes(bytes: &[u8], file_size: u64) -> Vec<FileAttribute> {
             let sample_rate = ((packed >> 44) & 0x0f_ffff) as u32;
             let bit_depth = (((packed >> 36) & 0x1f) + 1) as u32;
             let total_samples = packed & 0x0f_ffff_ffff;
-            let duration =
-                (sample_rate > 0).then(|| (total_samples / u64::from(sample_rate)).max(1) as u32);
-            let bitrate = duration
-                .filter(|seconds| *seconds > 0)
-                .map(|seconds| (file_size.saturating_mul(8) / u64::from(seconds) / 1_000) as u32);
+            let duration = (sample_rate > 0)
+                .then(|| saturating_media_u32((total_samples / u64::from(sample_rate)).max(1)));
+            let bitrate = duration.filter(|seconds| *seconds > 0).map(|seconds| {
+                saturating_media_u32(file_size.saturating_mul(8) / u64::from(seconds) / 1_000)
+            });
             return media_attributes(
                 bitrate,
                 duration,
@@ -222,7 +226,8 @@ fn probe_mp3_attributes(bytes: &[u8], file_size: u64) -> Vec<FileAttribute> {
             2 => base_sample_rate / 2,
             _ => base_sample_rate / 4,
         };
-        let duration = (file_size.saturating_mul(8) / u64::from(bitrate) / 1_000).max(1) as u32;
+        let duration =
+            saturating_media_u32((file_size.saturating_mul(8) / u64::from(bitrate) / 1_000).max(1));
         return media_attributes(
             Some(bitrate),
             Some(duration),
@@ -232,6 +237,41 @@ fn probe_mp3_attributes(bytes: &[u8], file_size: u64) -> Vec<FileAttribute> {
         );
     }
     Vec::new()
+}
+
+#[cfg(test)]
+mod media_attribute_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_flac_duration_and_mp3_duration_do_not_wrap() {
+        let mut flac = vec![0; 42];
+        flac[..4].copy_from_slice(b"fLaC");
+        flac[4] = 0x80;
+        flac[7] = 34;
+        let streaminfo = (1_u64 << 44) | (15_u64 << 36) | ((1_u64 << 36) - 1);
+        flac[18..26].copy_from_slice(&streaminfo.to_be_bytes());
+        let flac_attributes = probe_flac_attributes(&flac, u64::MAX);
+        assert_eq!(
+            flac_attributes
+                .iter()
+                .find(|attribute| attribute.code == 1)
+                .unwrap()
+                .value,
+            u32::MAX
+        );
+
+        let mp3_attributes = probe_mp3_attributes(&[0xff, 0xfb, 0x90, 0x00], u64::MAX);
+        assert_eq!(
+            mp3_attributes
+                .iter()
+                .find(|attribute| attribute.code == 1)
+                .unwrap()
+                .value,
+            u32::MAX
+        );
+        assert_eq!(saturating_media_u32(u64::MAX), u32::MAX);
+    }
 }
 
 #[derive(Clone, Debug)]
