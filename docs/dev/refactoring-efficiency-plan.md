@@ -140,7 +140,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-026 | `docs/dev/bug-burndown-ledger.md` marks several SDK/docs items verified while the current checks do not exercise the cited behavior. | Audit closure is not evidence-backed. | The ledger now names the executable checks for BUG-020, BUG-030, and BUG-039; docs freshness, SDK example contracts, the aggregate SDK gate, and the remediation baseline pass. Hosted/live compatibility rows remain explicitly separate. | Verified locally; hosted/live evidence separate |
 | RF-032 | `docs/full-network-test-plan.md` mixed a historical all-pass result with a newer missing-artifact plan; `REMEDIATION.md` was a stale snapshot that said daemon tests were excluded even though CI runs them. | Operators could not tell current release evidence from archived history. | The network plan labels dated results historical and points operators to current release/live gates; REMEDIATION is explicitly historical with active-plan links. A scoped local-link and referenced-script audit found no broken current paths; absent script names appear only as proposed work. The server-code count is corrected to the 103-code validated inventory, and docs freshness passes. | Verified locally; fresh live certification remains separate |
 | RF-033 | Council counts had drifted across `docs/dev/council-scan-inventory.md`, `.council/latest-candidate-counts.md`, and the active backlog; benchmark comparison/profile tests were not invoked; frontend configs lacked coverage thresholds. | Audit numbers drift and executable performance/coverage checks are absent. | The generated report now stamps date/commit provenance; active-backlog, inventory-closure, and council-freshness gates validate synchronized copies. Dashboard V8 coverage remains ratcheted in CI/release. CI and release now run the seven benchmark comparison/SQLite profiler unit tests and a focused Web API/session/event-lifecycle coverage gate at 84% statements, 75% branches, 72% functions, and 86% lines; the focused 50-test run passes at 85.54%, 78.13%, 73.91%, and 87.38%. | Verified locally |
-| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS hosted archives passed, while Windows hosted confirmation and shared CI artifacts remain open. | In progress, local deterministic proof |
+| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS and Linux hosted archives passed, and Windows archive construction, verification, and packaged-binary smoke passed at `339e6812`; shared CI artifact matrix proof remains open. | In progress, local deterministic proof |
 | RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Retain clean-runner/actionlint evidence before external closure. | Verified locally, external runner open |
 | RF-036 | `crates/slskr-protocol/src/server.rs` repeated server-code variants, inventory metadata, numeric conversion, and direction-specific matches. | Adding a protocol code can update one table and miss another. | A declarative macro owns the variants, numeric values, inventory order, names, and numeric decoding. The 103-code two-direction test inventory classifies every code as typed or opaque and fails if dispatch drifts. All 25 server protocol tests pass. | Verified locally |
 | RF-037 | `crates/slskr-client/src/overlay.rs` combines framing, handshake DTOs, validation, service DTOs, and request lifecycle in about 2,200 lines. | Unrelated changes share one review/compile boundary. | Framing, protocol messages/validation, and TLS/client lifecycle now have separate private modules; `overlay` preserves the public re-exports. The complete locked client package test suite passes. | Verified locally |
@@ -5793,6 +5793,12 @@ Semgrep reported zero findings from 710 rules across 2,160 files; Trivy, Rust,
 Web, dashboard, and the complete frozen options matrix passed. The later
 single-port TLS classification change has its focused listener proof below.
 
+Hosted Windows archive construction, archive verification, and the packaged
+binary smoke all passed at `339e6812` in GitHub CI run
+[36354468661](https://github.com/snapetech/slskr/actions/runs/36354468661).
+The macOS and all Linux platform jobs also passed at that revision. The overall
+workflow and downstream package-surface job remain pending at this checkpoint.
+
 ## RF-034 Shared Web Asset Build (2026-09-27)
 
 The seven platform CI jobs previously ran `npm ci` and built the same production
@@ -5824,3 +5830,16 @@ routing, without consuming either protocol's bytes. A regression sends the
 colliding plain frame through the real TCP listener, and all 30 listener tests
 pass. This fixes that classification error on the single shared port. RF-001
 still retains the legacy plain/obfuscated framing ambiguity recorded above.
+
+## RF-006/RF-007 Live Shutdown Overlap Harness (2026-09-27)
+
+`scripts/run-rf-shutdown-overlap.py` creates bounded real filesystem fixtures,
+starts an isolated native daemon with persistence, observes an active share
+scan through the API, sends SIGTERM, and reopens the same state. Its local run
+passes: the in-flight HTTP scan returns 503, both processes exit zero, SQLite
+integrity remains `ok`, and neither the durable store nor restart exposes a
+partial index. DHT, mesh, overlay, and HTTPS are disabled only in the temporary
+fixture, so this proves the HTTP/share-scan overlap rather than every managed
+service. The harness bounds startup, requests, and shutdown, kills failed child
+processes, removes fixtures, and records source/binary/harness metadata. A clean
+retained run and clean-runner service coverage are still required for closure.
