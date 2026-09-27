@@ -146,7 +146,7 @@ async fn watched_private_message_auto_response_updates_actual_outbound_behavior(
     let mut session = ServerSession::new(ServerConnection::new(server));
     let mut fixture = ServerConnection::new(client.unwrap());
 
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         &state,
         &mut session,
         &ServerMessage::MessageUserResponse(PrivateMessage {
@@ -2431,7 +2431,7 @@ async fn configured_api_token_protects_api_routes_impl() {
         user_persistence_lock: tokio::sync::Mutex::new(()),
         event_persistence_lock: tokio::sync::Mutex::new(()),
         mesh: RwLock::new(super::MeshState::new()),
-        capability_signing_key: super::new_capability_signing_key()
+        capability_signing_key: crate::controller_capabilities::new_capability_signing_key()
             .expect("capability signing key"),
         content_discovery: RwLock::new(super::content_discovery::ContentDiscoveryStore::in_memory()),
         realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),
@@ -2776,7 +2776,7 @@ async fn configured_api_token_protects_api_routes_impl() {
         user_persistence_lock: tokio::sync::Mutex::new(()),
         event_persistence_lock: tokio::sync::Mutex::new(()),
         mesh: RwLock::new(super::MeshState::new()),
-        capability_signing_key: super::new_capability_signing_key()
+        capability_signing_key: crate::controller_capabilities::new_capability_signing_key()
             .expect("capability signing key"),
         content_discovery: RwLock::new(super::content_discovery::ContentDiscoveryStore::in_memory()),
         realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),

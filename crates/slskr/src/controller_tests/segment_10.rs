@@ -1467,7 +1467,7 @@ async fn controller_api_differential_joined_room_server_snapshot_populates_the_r
     let mut session = ServerSession::new(ServerConnection::new(server));
     let _fixture = ServerConnection::new(client.expect("client fixture"));
 
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         &state,
         &mut session,
         &ServerMessage::JoinedRoom(JoinedRoom {
@@ -1637,7 +1637,7 @@ async fn controller_api_differential_soulseek_user_interests_route_returns_remot
         slskr_client::stream::ServerConnection::new(server),
     );
     let _client = slskr_client::stream::ServerConnection::new(client.unwrap());
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         &state,
         &mut session,
         &ServerMessage::UserInterests(UserInterests {
@@ -1665,7 +1665,7 @@ async fn controller_api_differential_soulseek_user_interests_route_returns_remot
         liked: vec!["new-track".to_owned()],
         hated: Vec::new(),
     };
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         &state,
         &mut session,
         &ServerMessage::UserInterests(replacement),
@@ -1729,8 +1729,8 @@ async fn inbound_private_message_replays_update_one_record_and_retain_replay_fla
             was_replayed: replayed,
         })
     };
-    super::project_server_message(&state, &mut session, &message(false)).await;
-    super::project_server_message(&state, &mut session, &message(true)).await;
+    crate::session_runtime::project_server_message(&state, &mut session, &message(false)).await;
+    crate::session_runtime::project_server_message(&state, &mut session, &message(true)).await;
     let messages = state.messages.read().await;
     assert_eq!(messages.records.len(), 1);
     assert!(messages.records[0].was_replayed);

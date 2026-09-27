@@ -574,7 +574,7 @@ async fn incoming_public_search_sends_response_over_peer_wire() {
         slskr_client::stream::ServerConnection::new(session_server),
     );
 
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         &state,
         &mut session,
         &super::ServerMessage::FileSearchIncoming {
@@ -3630,7 +3630,7 @@ fn test_state_with_env_parts_full(
         user_persistence_lock: tokio::sync::Mutex::new(()),
         event_persistence_lock: tokio::sync::Mutex::new(()),
         mesh: RwLock::new(super::MeshState::new()),
-        capability_signing_key: super::new_capability_signing_key()
+        capability_signing_key: crate::controller_capabilities::new_capability_signing_key()
             .expect("capability signing key"),
         content_discovery: RwLock::new(super::content_discovery::ContentDiscoveryStore::in_memory()),
         realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),

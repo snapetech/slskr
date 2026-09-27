@@ -4279,7 +4279,7 @@ fn quarantine_signed_verdict_json(
         "juror": juror,
         "verdict": verdict,
     });
-    let payload_hash = super::quarantine_verdict_payload_hash(&value);
+    let payload_hash = crate::quarantine_controller::quarantine_verdict_payload_hash(&value);
     value["signature"] = serde_json::json!({
         "signer": juror,
         "payloadHash": payload_hash,

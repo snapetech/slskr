@@ -18,18 +18,18 @@ trap cleanup_format_tmp_dir EXIT INT TERM
 
 format_base="${SLSKR_RUST_FORMAT_BASE:-}"
 if [[ -n "$format_base" ]]; then
-  mapfile -t rust_files < <(git diff --name-only "$format_base" HEAD -- 'crates/**/*.rs' | sort -u)
+  mapfile -t rust_files < <(git diff --diff-filter=d --name-only "$format_base" HEAD -- 'crates/**/*.rs' | sort -u)
 elif git diff --quiet HEAD -- && git diff --cached --quiet; then
   if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-    mapfile -t rust_files < <(git diff --name-only HEAD^ HEAD -- 'crates/**/*.rs' | sort -u)
+    mapfile -t rust_files < <(git diff --diff-filter=d --name-only HEAD^ HEAD -- 'crates/**/*.rs' | sort -u)
   else
     rust_files=()
   fi
 else
   mapfile -t rust_files < <(
     {
-      git diff --name-only HEAD -- 'crates/**/*.rs'
-      git diff --cached --name-only -- 'crates/**/*.rs'
+      git diff --diff-filter=d --name-only HEAD -- 'crates/**/*.rs'
+      git diff --diff-filter=d --cached --name-only -- 'crates/**/*.rs'
       git ls-files --others --exclude-standard -- 'crates/**/*.rs'
     } | sort -u
   )

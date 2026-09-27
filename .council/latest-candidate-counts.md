@@ -3,7 +3,7 @@
 Generated from local source patterns. Counts are candidate lines, not confirmed bugs.
 
 Scan date: 2026-09-27
-Source digest: 49dc9c1e1e9ab88ce4e5fd3ea453f66a68be69c80db91fd37d4380f8d4f26a66
+Source digest: e867491bfd0309f8eac4916493c650d15ae1ee42edf6b6e4cf5810bb42295605
 
 | Candidate Class | Count |
 | --- | ---: |

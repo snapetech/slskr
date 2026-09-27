@@ -3533,8 +3533,8 @@ impl ActivityPubSignatureFixture {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
         let env_guard = ACTIVITYPUB_ENV_LOCK.lock().await;
-        let signing_key =
-            super::new_capability_signing_key().expect("generate fixture Ed25519 signing key");
+        let signing_key = crate::controller_capabilities::new_capability_signing_key()
+            .expect("generate fixture Ed25519 signing key");
         const ED25519_SPKI_PREFIX: [u8; 12] = [
             0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
         ];

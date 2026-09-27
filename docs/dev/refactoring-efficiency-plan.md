@@ -5874,3 +5874,29 @@ committed depth-7 snapshot then survives SIGKILL and another restart, with both
 distributed tables matching and SQLite integrity `ok`. This closes RF-003's
 retained live shutdown/crash requirement. RF-006 still needs clean-runner
 coverage for the other managed services.
+
+## RF-024 Focused Controller Test Ownership (2026-09-27)
+
+The three flat focused-test includes now form eight named Rust test modules
+with a shared fixture module. The extraction audit accounts for all 255,275
+original bytes and all 91 test functions; the pre-edit files and audit remain
+under `target/rf-focused-controller-before-modules/` and
+`target/rf-focused-controller-module-audit.json`. The subprocess durability
+test now selects its nested module path. Bounded controller fixtures reference
+their actual capability, session, mesh, bridge, and quarantine owners rather
+than feature-gated root aliases. The bounded authorization runner emitted
+7,790 passing rows. All 647 default daemon library tests, strict all-targets Clippy, and the
+full-controller/legacy all-targets compile pass on the final extraction.
+The formatter excludes deleted files when checking a module move. RF-024
+remains open for the larger full-controller include segments. This work is
+internal-only and preserves the production listener's single-port design.
+
+## RF Validation Harness HTTP Ownership (2026-09-27)
+
+Hosted Semgrep at `a7bba2d8` flagged dynamic urllib use in the isolated live
+shutdown fixture. The fixture now uses an explicit loopback HTTP connection
+with a five-second timeout and closes it in a `finally` block. The live
+shutdown/distributed crash-restart proof still passes with this adapter.
+The existing retained artifacts keep their original source and harness hashes;
+a later hosted run must confirm the scanner result for the replacement.
+This is an internal-only validation-tool change.

@@ -261,7 +261,7 @@ def config_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 SECURITY_AUTHORIZATION_TEST = (
-    "focused_controller_tests::security_authorization_matrix_matches_declared_policy_for_every_frozen_route"
+    "focused_controller_tests::controller_contracts::security_authorization_matrix_matches_declared_policy_for_every_frozen_route"
 )
 
 

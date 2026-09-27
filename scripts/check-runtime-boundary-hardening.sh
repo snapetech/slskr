@@ -87,7 +87,7 @@ source_files=(
   crates/slskr/src/route_dispatch_group_7_network_admin.rs
   crates/slskr/src/route_request_entry.rs
   crates/slskr/src/focused_controller_tests.rs
-  crates/slskr/src/focused_controller_tests/segment_*.rs
+  crates/slskr/src/focused_controller_tests/*.rs
   crates/slskr/src/contact_state.rs
   crates/slskr/src/collection_store.rs
   crates/slskr/src/controller_feature_state.rs

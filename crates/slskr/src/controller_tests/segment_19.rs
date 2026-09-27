@@ -4652,8 +4652,8 @@ async fn controller_api_differential_options_and_conversations_projection() {
                 was_replayed: replayed,
             })
         };
-        super::project_server_message(&state, &mut session, &message(false)).await;
-        super::project_server_message(&state, &mut session, &message(true)).await;
+        crate::session_runtime::project_server_message(&state, &mut session, &message(false)).await;
+        crate::session_runtime::project_server_message(&state, &mut session, &message(true)).await;
         let response = super::route_http_request(
             "GET",
             "/api/v0/conversations/differential-peer",

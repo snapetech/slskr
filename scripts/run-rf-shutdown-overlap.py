@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import datetime
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -17,8 +18,12 @@ import struct
 import subprocess
 import tempfile
 import time
-import urllib.error
-import urllib.request
+
+
+class FixtureHttpError(Exception):
+    def __init__(self, status: int):
+        super().__init__(f"fixture API returned HTTP {status}")
+        self.status = status
 
 
 def file_digest(path: Path) -> str:
@@ -82,12 +87,17 @@ def main() -> None:
             SLSKD_SLSK_USERNAME="rf-fixture",
         )
         command = [str(binary), "serve", "--no-connect", "--no-share-scan", "--no-logo", "--no-version-check"]
-        base = f"http://127.0.0.1:{http_port}"
-
         def request(path: str, method: str = "GET") -> bytes:
-            req = urllib.request.Request(base + path, data=b"" if method == "PUT" else None, method=method)
-            with urllib.request.urlopen(req, timeout=5) as response:
-                return response.read()
+            connection = http.client.HTTPConnection("127.0.0.1", http_port, timeout=5)
+            try:
+                connection.request(method, path, body=b"" if method == "PUT" else None)
+                response = connection.getresponse()
+                payload = response.read()
+                if response.status >= 400:
+                    raise FixtureHttpError(response.status)
+                return payload
+            finally:
+                connection.close()
 
         def ready(proc: subprocess.Popen) -> dict:
             deadline = time.monotonic() + 20
@@ -96,7 +106,7 @@ def main() -> None:
                     raise RuntimeError("daemon exited before readiness")
                 try:
                     return json.loads(request("/api/v0/application"))
-                except urllib.error.URLError:
+                except (OSError, http.client.HTTPException):
                     time.sleep(.02)
             raise RuntimeError("daemon readiness timeout")
 
@@ -187,10 +197,12 @@ def main() -> None:
                     try:
                         pending.result(timeout=6)
                         record["scanRequestOutcome"] = "returned"
-                    except urllib.error.HTTPError as error:
+                    except FixtureHttpError as error:
                         record["scanRequestOutcome"] = "http-error"
-                        record["scanRequestHttpStatus"] = error.code
-                    except (urllib.error.URLError, ConnectionError) as error:
+                        record["scanRequestHttpStatus"] = error.status
+                        if error.status != 503:
+                            raise
+                    except (OSError, http.client.HTTPException) as error:
                         record["scanRequestOutcome"] = type(error).__name__
                 if record["exitCode"] != 0:
                     raise RuntimeError("daemon did not exit cleanly during the scan")

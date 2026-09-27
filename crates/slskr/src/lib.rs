@@ -413,11 +413,6 @@ use self::collection_store::{
 use self::contact_state::{
     ContactStore, ContactUpdateError, persist_contact_checked, persist_contact_delete_checked,
 };
-#[cfg(any(
-    test,
-    feature = "full-controller-tests",
-))]
-use self::controller_capabilities::new_capability_signing_key;
 use self::controller_capabilities::{
     load_or_create_capability_signing_key, local_capability_descriptor,
     local_profile_peer_id, profile_friend_code,
@@ -624,7 +619,7 @@ use self::managed_tasks::ManagedTaskRegistry;
 use self::mediacore_controller::{mediacore_extended_response, mediacore_mutation_response};
 use self::mesh_dht_runtime::{detect_nat_type, spawn_mesh_dht_publisher, STUN_SERVERS};
 #[cfg(feature = "full-controller-tests")]
-use self::mesh_dht_runtime::{STUN_MAGIC_COOKIE, parse_stun_mapped_address, stun_probe};
+use self::mesh_dht_runtime::{parse_stun_mapped_address, stun_probe};
 use self::mesh_gateway_controller::{
     mesh_gateway_auth_failure, mesh_gateway_disabled_response, mesh_http_service_response,
     mesh_http_services_response,
@@ -731,8 +726,6 @@ pub(crate) use self::private_message_auto_responses::MAX_PRIVATE_MESSAGE_AUTO_RE
 use self::private_message_auto_responses::{
     PrivateMessageAutoResponseTracker, is_private_message_auto_response_candidate,
 };
-#[cfg(feature = "full-controller-tests")]
-use self::quarantine_controller::quarantine_verdict_payload_hash;
 use self::quarantine_controller::{
     quarantine_build_audit_entry, quarantine_dynamic_get_response, quarantine_mutation_response,
 };
@@ -811,7 +804,7 @@ use self::session_runtime::{
     bridge_soulseek_room_message_to_pods, handle_incoming_soulseek_pod_message,
 };
 #[cfg(feature = "full-controller-tests")]
-use self::session_runtime::{connect_session, handle_session_command, project_server_message};
+use self::session_runtime::{connect_session, handle_session_command};
 use self::session_runtime::{
     is_remote_queue_response, persist_room_join_checked, persist_room_leave_checked,
     record_pod_room_mirror_failure, record_room_dispatch_failure, send_active_interest_command,

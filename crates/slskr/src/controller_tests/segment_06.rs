@@ -3448,10 +3448,11 @@ async fn soulfind_bridge_wire_frames_match_target_parser_contract() {
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-        let (message_type, payload) = super::bridge_read_frame(&mut stream)
-            .await
-            .expect("read bridge frame")
-            .expect("bridge client frame");
+        let (message_type, payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .expect("read bridge frame")
+                .expect("bridge client frame");
         assert_eq!(message_type, super::BRIDGE_LOGIN);
         let mut cursor = 0;
         assert_eq!(
@@ -3462,7 +3463,7 @@ async fn soulfind_bridge_wire_frames_match_target_parser_contract() {
             super::bridge_read_string(&payload, &mut cursor).as_deref(),
             Some("secret")
         );
-        super::bridge_write_frame(
+        crate::soulfind_bridge_runtime::bridge_write_frame(
             &mut stream,
             super::BRIDGE_LOGIN_RESPONSE,
             &super::bridge_login_response(true, "Login successful"),
@@ -3485,7 +3486,7 @@ async fn soulfind_bridge_wire_frames_match_target_parser_contract() {
         .unwrap();
     client.write_all(&login).await.unwrap();
 
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read login response")
         .expect("login response frame");
@@ -3679,7 +3680,7 @@ async fn send_mesh_sync_fixture_message(
     let body = message
         .encode_private_message()
         .expect("encode mesh-sync request");
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         state,
         session,
         &slskr_client::protocol::server::ServerMessage::MessageUserResponse(
@@ -3721,7 +3722,7 @@ async fn send_mesh_sync_fixture_without_response(
     let body = message
         .encode_private_message()
         .expect("encode mesh-sync response fixture");
-    super::project_server_message(
+    crate::session_runtime::project_server_message(
         state,
         session,
         &slskr_client::protocol::server::ServerMessage::MessageUserResponse(
@@ -4062,9 +4063,11 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
     let server_payload = payload.clone();
     let server = tokio::spawn(async move {
         let (mut first, _) = listener.accept().await.expect("accept first bridge client");
-        let request =
-            tokio::time::timeout(Duration::from_secs(1), super::bridge_read_frame(&mut first))
-                .await;
+        let request = tokio::time::timeout(
+            Duration::from_secs(1),
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut first),
+        )
+        .await;
         if !matches!(
             request,
             Ok(Ok(Some((actual_type, actual_payload))))
@@ -4079,9 +4082,13 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
             .accept()
             .await
             .expect("accept reconnected bridge client");
-        super::bridge_write_frame(&mut second, message_type, &server_payload)
-            .await
-            .is_ok()
+        crate::soulfind_bridge_runtime::bridge_write_frame(
+            &mut second,
+            message_type,
+            &server_payload,
+        )
+        .await
+        .is_ok()
     });
 
     let mut first_client = match tokio::net::TcpStream::connect(address).await {
@@ -4092,7 +4099,7 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
             return false;
         }
     };
-    if super::bridge_write_frame(&mut first_client, message_type, &[0xA1])
+    if crate::soulfind_bridge_runtime::bridge_write_frame(&mut first_client, message_type, &[0xA1])
         .await
         .is_err()
     {
@@ -4102,7 +4109,7 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
     }
     let timed_out = tokio::time::timeout(
         Duration::from_millis(25),
-        super::bridge_read_frame(&mut first_client),
+        crate::soulfind_bridge_runtime::bridge_read_frame(&mut first_client),
     )
     .await
     .is_err();
@@ -4118,7 +4125,7 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
     };
     let reconnected = match tokio::time::timeout(
         Duration::from_secs(1),
-        super::bridge_read_frame(&mut second_client),
+        crate::soulfind_bridge_runtime::bridge_read_frame(&mut second_client),
     )
     .await
     {
@@ -4168,16 +4175,17 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.expect("accept bridge differential");
 
-        let (message_type, payload) = super::bridge_read_frame(&mut stream)
-            .await
-            .expect("read login request")
-            .expect("login request frame");
+        let (message_type, payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .expect("read login request")
+                .expect("login request frame");
         let mut expected = Vec::new();
         oracle_string(&mut expected, "legacy-client");
         oracle_string(&mut expected, "secret");
         assert_eq!(message_type, super::BRIDGE_LOGIN);
         assert_eq!(payload, expected);
-        super::bridge_write_frame(
+        crate::soulfind_bridge_runtime::bridge_write_frame(
             &mut stream,
             super::BRIDGE_LOGIN_RESPONSE,
             &super::bridge_login_response(true, "Login successful"),
@@ -4185,10 +4193,11 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
         .await
         .expect("write login response");
 
-        let (message_type, payload) = super::bridge_read_frame(&mut stream)
-            .await
-            .expect("read search request")
-            .expect("search request frame");
+        let (message_type, payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .expect("read search request")
+                .expect("search request frame");
         let mut expected = Vec::new();
         oracle_string(&mut expected, "ambient");
         expected.extend_from_slice(&41_i32.to_le_bytes());
@@ -4202,21 +4211,26 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
         response.extend_from_slice(&4_096_i64.to_le_bytes());
         response.extend_from_slice(&0_i32.to_le_bytes());
         oracle_string(&mut response, "flac");
-        super::bridge_write_frame(&mut stream, super::BRIDGE_SEARCH_RESPONSE, &response)
-            .await
-            .expect("write search response");
+        crate::soulfind_bridge_runtime::bridge_write_frame(
+            &mut stream,
+            super::BRIDGE_SEARCH_RESPONSE,
+            &response,
+        )
+        .await
+        .expect("write search response");
 
-        let (message_type, payload) = super::bridge_read_frame(&mut stream)
-            .await
-            .expect("read download request")
-            .expect("download request frame");
+        let (message_type, payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .expect("read download request")
+                .expect("download request frame");
         let mut expected = Vec::new();
         oracle_string(&mut expected, "peer");
         oracle_string(&mut expected, "Ambient/Track.flac");
         expected.extend_from_slice(&42_i32.to_le_bytes());
         assert_eq!(message_type, super::BRIDGE_DOWNLOAD_REQUEST);
         assert_eq!(payload, expected);
-        super::bridge_write_frame(
+        crate::soulfind_bridge_runtime::bridge_write_frame(
             &mut stream,
             super::BRIDGE_DOWNLOAD_RESPONSE,
             &super::bridge_download_wire_response(true, "transfer-id", 42),
@@ -4224,19 +4238,24 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
         .await
         .expect("write download response");
 
-        let (message_type, payload) = super::bridge_read_frame(&mut stream)
-            .await
-            .expect("read room list request")
-            .expect("room list request frame");
+        let (message_type, payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .expect("read room list request")
+                .expect("room list request frame");
         assert_eq!(message_type, super::BRIDGE_ROOM_LIST_REQUEST);
         assert!(payload.is_empty());
         let mut response = Vec::new();
         response.extend_from_slice(&1_i32.to_le_bytes());
         oracle_string(&mut response, "ambient");
         response.extend_from_slice(&7_i32.to_le_bytes());
-        super::bridge_write_frame(&mut stream, super::BRIDGE_ROOM_LIST_RESPONSE, &response)
-            .await
-            .expect("write room list response");
+        crate::soulfind_bridge_runtime::bridge_write_frame(
+            &mut stream,
+            super::BRIDGE_ROOM_LIST_RESPONSE,
+            &response,
+        )
+        .await
+        .expect("write room list response");
     });
 
     let mut client = tokio::net::TcpStream::connect(address)
@@ -4263,10 +4282,10 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     let mut login = Vec::new();
     oracle_string(&mut login, "legacy-client");
     oracle_string(&mut login, "secret");
-    super::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
+    crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
         .await
         .expect("send login request");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read login response")
         .expect("login response frame");
@@ -4280,10 +4299,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     let mut search = Vec::new();
     oracle_string(&mut search, "ambient");
     search.extend_from_slice(&41_i32.to_le_bytes());
-    super::bridge_write_frame(&mut client, super::BRIDGE_SEARCH_REQUEST, &search)
-        .await
-        .expect("send search request");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_SEARCH_REQUEST,
+        &search,
+    )
+    .await
+    .expect("send search request");
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read search response")
         .expect("search response frame");
@@ -4304,10 +4327,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     oracle_string(&mut download, "peer");
     oracle_string(&mut download, "Ambient/Track.flac");
     download.extend_from_slice(&42_i32.to_le_bytes());
-    super::bridge_write_frame(&mut client, super::BRIDGE_DOWNLOAD_REQUEST, &download)
-        .await
-        .expect("send download request");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_DOWNLOAD_REQUEST,
+        &download,
+    )
+    .await
+    .expect("send download request");
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read download response")
         .expect("download response frame");
@@ -4319,10 +4346,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_round_trips() {
     record!("DownloadRequest", "5");
     record!("DownloadResponse", "6");
 
-    super::bridge_write_frame(&mut client, super::BRIDGE_ROOM_LIST_REQUEST, &[])
-        .await
-        .expect("send room list request");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_ROOM_LIST_REQUEST,
+        &[],
+    )
+    .await
+    .expect("send room list request");
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read room list response")
         .expect("room list response frame");
@@ -4428,7 +4459,9 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_raw_frames() {
                 .accept()
                 .await
                 .expect("accept truncated bridge frame client");
-            super::bridge_read_frame(&mut stream).await.is_err()
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .is_err()
         });
         let mut client = tokio::net::TcpStream::connect(address)
             .await
@@ -4461,7 +4494,9 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_raw_frames() {
                 .accept()
                 .await
                 .expect("accept oversized bridge frame client");
-            super::bridge_read_frame(&mut stream).await.is_err()
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream)
+                .await
+                .is_err()
         });
         let mut client = tokio::net::TcpStream::connect(address)
             .await
@@ -4491,7 +4526,8 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_raw_frames() {
                 .accept()
                 .await
                 .expect("accept unknown bridge frame client");
-            super::bridge_read_frame(&mut stream).await == Ok(Some((999, vec![0xCC])))
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream).await
+                == Ok(Some((999, vec![0xCC])))
         });
         let mut client = tokio::net::TcpStream::connect(address)
             .await
@@ -4542,13 +4578,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_raw_frames() {
         .expect("connect raw bridge frame client");
     let mut rows = Vec::new();
     for (name, message_type, payload) in CASES {
-        super::bridge_write_frame(&mut client, message_type, payload)
+        crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, message_type, payload)
             .await
             .expect("write raw bridge request frame");
-        let (actual_type, actual_payload) = super::bridge_read_frame(&mut client)
-            .await
-            .expect("read raw bridge response frame")
-            .expect("raw bridge response frame");
+        let (actual_type, actual_payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
+                .await
+                .expect("read raw bridge response frame")
+                .expect("raw bridge response frame");
         assert_eq!(actual_type, message_type, "raw bridge response type");
         assert_eq!(actual_payload, payload, "raw bridge response payload");
         rows.push(serde_json::json!({
@@ -4697,10 +4734,10 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
     let mut login = Vec::new();
     super::bridge_write_string(&mut login, "legacy-client");
     super::bridge_write_string(&mut login, "ignored-with-auth-disabled");
-    super::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
+    crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
         .await
         .expect("send bridge dispatch login");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read bridge dispatch login response")
         .expect("bridge dispatch login response frame");
@@ -4712,10 +4749,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
     let mut search = Vec::new();
     super::bridge_write_string(&mut search, "ambient");
     super::bridge_write_i32(&mut search, 41);
-    super::bridge_write_frame(&mut client, super::BRIDGE_SEARCH_REQUEST, &search)
-        .await
-        .expect("send bridge dispatch search");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_SEARCH_REQUEST,
+        &search,
+    )
+    .await
+    .expect("send bridge dispatch search");
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read bridge dispatch search response")
         .expect("bridge dispatch search response frame");
@@ -4732,10 +4773,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
     super::bridge_write_string(&mut download, "peer");
     super::bridge_write_string(&mut download, "Ambient/Track.flac");
     super::bridge_write_i32(&mut download, 42);
-    super::bridge_write_frame(&mut client, super::BRIDGE_DOWNLOAD_REQUEST, &download)
-        .await
-        .expect("send bridge dispatch download");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_DOWNLOAD_REQUEST,
+        &download,
+    )
+    .await
+    .expect("send bridge dispatch download");
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read bridge dispatch download response")
         .expect("bridge dispatch download response frame");
@@ -4751,10 +4796,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
     );
     let download_pass = download_pass && queued_download;
 
-    super::bridge_write_frame(&mut client, super::BRIDGE_ROOM_LIST_REQUEST, &[])
-        .await
-        .expect("send bridge dispatch room list");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_ROOM_LIST_REQUEST,
+        &[],
+    )
+    .await
+    .expect("send bridge dispatch room list");
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read bridge dispatch room list response")
         .expect("bridge dispatch room list response frame");
@@ -4775,13 +4824,14 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_dispatch() {
         ("PeerInfo", 14),
         ("FileTransfer", 15),
     ] {
-        super::bridge_write_frame(&mut client, value, &[0x01, 0x02, 0x03])
+        crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, value, &[0x01, 0x02, 0x03])
             .await
             .expect("send unsupported bridge message type");
-        let (message_type, payload) = super::bridge_read_frame(&mut client)
-            .await
-            .expect("read unsupported bridge error")
-            .expect("unsupported bridge error frame");
+        let (message_type, payload) =
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
+                .await
+                .expect("read unsupported bridge error")
+                .expect("unsupported bridge error frame");
         let mut cursor = 1;
         let unsupported_pass = message_type == super::BRIDGE_LOGIN_RESPONSE
             && payload.first() == Some(&0)
@@ -4868,10 +4918,10 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_malformed_frame
     let mut client = tokio::net::TcpStream::connect(address)
         .await
         .expect("connect malformed login client");
-    super::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &[])
+    crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &[])
         .await
         .expect("send malformed login");
-    let (message_type, payload) = super::bridge_read_frame(&mut client)
+    let (message_type, payload) = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read malformed login response")
         .expect("malformed login response frame");
@@ -4901,19 +4951,23 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_malformed_frame
     let mut login = Vec::new();
     super::bridge_write_string(&mut login, "legacy-client");
     super::bridge_write_string(&mut login, "ignored");
-    super::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
+    crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
         .await
         .expect("send valid login before malformed search");
-    let _ = super::bridge_read_frame(&mut client)
+    let _ = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read valid login response");
-    super::bridge_write_frame(&mut client, super::BRIDGE_SEARCH_REQUEST, &[])
-        .await
-        .expect("send malformed search");
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_SEARCH_REQUEST,
+        &[],
+    )
+    .await
+    .expect("send malformed search");
     let search_pass = matches!(
         tokio::time::timeout(
             Duration::from_secs(1),
-            super::bridge_read_frame(&mut client)
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         )
         .await,
         Ok(Ok(None))
@@ -4940,19 +4994,23 @@ async fn protocol_behaviors_differential_virtual_soulfind_bridge_malformed_frame
     let mut login = Vec::new();
     super::bridge_write_string(&mut login, "legacy-client");
     super::bridge_write_string(&mut login, "ignored");
-    super::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
+    crate::soulfind_bridge_runtime::bridge_write_frame(&mut client, super::BRIDGE_LOGIN, &login)
         .await
         .expect("send valid login before malformed download");
-    let _ = super::bridge_read_frame(&mut client)
+    let _ = crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         .await
         .expect("read valid login response");
-    super::bridge_write_frame(&mut client, super::BRIDGE_DOWNLOAD_REQUEST, &[])
-        .await
-        .expect("send malformed download");
+    crate::soulfind_bridge_runtime::bridge_write_frame(
+        &mut client,
+        super::BRIDGE_DOWNLOAD_REQUEST,
+        &[],
+    )
+    .await
+    .expect("send malformed download");
     let download_pass = matches!(
         tokio::time::timeout(
             Duration::from_secs(1),
-            super::bridge_read_frame(&mut client)
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut client)
         )
         .await,
         Ok(Ok(None))
@@ -4985,7 +5043,7 @@ async fn bridge_rejects_oversized_wire_frames() {
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         assert_eq!(
-            super::bridge_read_frame(&mut stream).await,
+            crate::soulfind_bridge_runtime::bridge_read_frame(&mut stream).await,
             Err("invalid bridge message length")
         );
     });
@@ -5011,7 +5069,11 @@ async fn bridge_frame_reads_have_a_deadline() {
             .accept()
             .await
             .expect("accept bridge timeout client");
-        super::bridge_read_frame_with_timeout(&mut stream, Duration::from_millis(20)).await
+        crate::soulfind_bridge_runtime::bridge_read_frame_with_timeout(
+            &mut stream,
+            Duration::from_millis(20),
+        )
+        .await
     });
     let mut client = tokio::net::TcpStream::connect(address)
         .await

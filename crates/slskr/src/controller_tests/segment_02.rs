@@ -3843,8 +3843,8 @@ fn build_stun_success_response(transaction_id: [u8; 12], mapped: SocketAddr) -> 
     let SocketAddr::V4(mapped) = mapped else {
         panic!("STUN test fixture requires an IPv4 mapped address");
     };
-    let xor_port = mapped.port() ^ ((super::STUN_MAGIC_COOKIE >> 16) as u16);
-    let xor_address = u32::from(*mapped.ip()) ^ super::STUN_MAGIC_COOKIE;
+    let xor_port = mapped.port() ^ ((crate::mesh_dht_runtime::STUN_MAGIC_COOKIE >> 16) as u16);
+    let xor_address = u32::from(*mapped.ip()) ^ crate::mesh_dht_runtime::STUN_MAGIC_COOKIE;
     let mut attribute = Vec::with_capacity(8);
     attribute.push(0x00);
     attribute.push(0x01);
@@ -3854,7 +3854,7 @@ fn build_stun_success_response(transaction_id: [u8; 12], mapped: SocketAddr) -> 
     let mut response = Vec::with_capacity(32);
     response.extend_from_slice(&0x0101_u16.to_be_bytes());
     response.extend_from_slice(&(attribute.len() as u16 + 4).to_be_bytes());
-    response.extend_from_slice(&super::STUN_MAGIC_COOKIE.to_be_bytes());
+    response.extend_from_slice(&crate::mesh_dht_runtime::STUN_MAGIC_COOKIE.to_be_bytes());
     response.extend_from_slice(&transaction_id);
     response.extend_from_slice(&0x0020_u16.to_be_bytes());
     response.extend_from_slice(&(attribute.len() as u16).to_be_bytes());
