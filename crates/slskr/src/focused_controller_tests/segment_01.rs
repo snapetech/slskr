@@ -2505,11 +2505,12 @@ async fn transfer_mutation_rollback_preserves_newer_rows() {
             .expect("update staged transfer before rollback");
         entry
     };
-    assert!(
-        super::remove_transfer_entries_if_unchanged(&state, &[stale_expected.clone()])
-            .await
-            .is_empty()
-    );
+    assert!(super::remove_transfer_entries_if_unchanged(
+        &state,
+        std::slice::from_ref(&stale_expected)
+    )
+    .await
+    .is_empty());
     assert!(state
         .transfers
         .read()
