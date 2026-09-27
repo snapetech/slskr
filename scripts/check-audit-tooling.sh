@@ -18,7 +18,8 @@ if [[ ! -x "$transport_deriver" || ! -x "$transport_capability_deriver" || ! -x 
 fi
 
 scripts/with-process-memory-guard.sh python3 -m py_compile \
-  scripts/audit-parity-manifest.py "$transport_deriver" "$transport_capability_deriver" "$transport_test" \
+  scripts/audit-parity-manifest.py scripts/parity_not_applicable.py \
+  "$transport_deriver" "$transport_capability_deriver" "$transport_test" \
   "$lifecycle_runner" "$lifecycle_test"
 scripts/with-process-memory-guard.sh python3 "$transport_test"
 scripts/with-process-memory-guard.sh python3 "$lifecycle_test"

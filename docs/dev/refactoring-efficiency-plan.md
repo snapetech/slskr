@@ -5733,3 +5733,10 @@ reconstructed all 457,048 original bytes. Shell syntax/hygiene checks include
 the new parts, and the isolated `options` scenario passed for both frozen
 slskd and slskdN targets. The rest of the differential scenario matrix awaits
 the final release gate.
+
+The 6,063-line parity audit Python entry point is now 3,759 lines. Its seven
+frozen-source exception constants/functions moved into the 2,336-line
+`scripts/parity_not_applicable.py` module, with each extracted AST item checked
+byte-for-byte against the committed source. Audit tooling, CLI import, and diff
+checks pass. This is an actual module boundary; the Rust test segment splits
+above remain flat-scope interim work.
