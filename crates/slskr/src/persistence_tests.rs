@@ -1430,6 +1430,37 @@ async fn test_distributed_tree_state_operations() {
 }
 
 #[tokio::test]
+async fn distributed_state_load_rejects_out_of_range_depths() {
+    let db = DatabaseManager::in_memory().await.unwrap();
+    db.save_distributed_state(1, "root", None, &[("child".to_owned(), 1)])
+        .await
+        .unwrap();
+
+    for invalid in ["-1", "4294967296"] {
+        db.execute_raw_for_test(&format!(
+            "UPDATE distributed_tree_state SET branch_level = {invalid} WHERE id = 1"
+        ))
+        .await
+        .unwrap();
+        assert!(db.load_distributed_tree_state().await.is_err());
+        assert!(db.load_distributed_state().await.is_err());
+    }
+
+    db.execute_raw_for_test("UPDATE distributed_tree_state SET branch_level = 1 WHERE id = 1")
+        .await
+        .unwrap();
+    for invalid in ["-1", "4294967296"] {
+        db.execute_raw_for_test(&format!(
+            "UPDATE distributed_children SET depth = {invalid} WHERE username = 'child'"
+        ))
+        .await
+        .unwrap();
+        assert!(db.load_distributed_children().await.is_err());
+        assert!(db.load_distributed_state().await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn distributed_children_replacement_rolls_back_across_batches() {
     let db = DatabaseManager::in_memory().await.unwrap();
     let original = vec![("old-child-1".to_owned(), 1), ("old-child-2".to_owned(), 2)];
