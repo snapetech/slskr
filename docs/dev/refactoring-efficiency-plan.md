@@ -6051,3 +6051,15 @@ owns that single build and its tracked-dist/package verification. The full
 Go/Python/TypeScript SDK gate passes in 22.2 seconds with a 452.8 MiB peak and
 zero swap. Together with the earlier deterministic TAR/ZIP/SBOM evidence, this
 closes RF-034. The latest source tip still has its own queued hosted CI run.
+
+## RF-024 Controller Segment 07 Owner Completion (2026-09-28 UTC)
+
+The remaining segment 07 functions now live in five named contract owners
+(native routes, collection authorization, controller surfaces, quarantine, and
+listening parties) and one shared quarantine-verdict fixture module. The two
+API group 1 entry points retain feature-gated exports. Exact pre-format
+reconstruction accounts for all 79,986 bytes and all 16 functions; snapshots
+and the per-owner audit remain under
+`target/rf-controller-segment-07-before-owners/`. The old include is removed.
+The full-controller/legacy all-targets compile and bounded API group 1 runner
+pass. This is internal-only; RF-024 remains open for the other 28 includes.

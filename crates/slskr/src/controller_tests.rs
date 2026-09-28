@@ -3,6 +3,42 @@
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-1"
 ))]
+#[path = "controller_tests/native_route_contracts.rs"]
+mod native_route_contracts;
+#[cfg(any(
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-1"
+))]
+use self::native_route_contracts::{
+    controller_api_differential_compatibility_aliases_reach_state_backed_routes,
+    controller_api_differential_native_capability_and_library_health_contracts,
+};
+
+#[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/collection_authorization_contracts.rs"]
+mod collection_authorization_contracts;
+
+#[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/controller_surface_contracts.rs"]
+mod controller_surface_contracts;
+
+#[path = "controller_tests/quarantine_verdict_fixture.rs"]
+mod quarantine_verdict_fixture;
+use self::quarantine_verdict_fixture::quarantine_signed_verdict_json;
+
+#[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/quarantine_contracts.rs"]
+mod quarantine_contracts;
+
+#[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/listening_party_contracts.rs"]
+mod listening_party_contracts;
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-1"
+))]
 #[path = "controller_tests/mesh_contracts.rs"]
 mod mesh_contracts;
 #[cfg(any(
@@ -36,7 +72,6 @@ include!("controller_tests/segment_03.rs");
 include!("controller_tests/segment_04.rs");
 include!("controller_tests/segment_05.rs");
 include!("controller_tests/segment_06.rs");
-include!("controller_tests/segment_07.rs");
 include!("controller_tests/segment_08.rs");
 include!("controller_tests/segment_09.rs");
 include!("controller_tests/segment_10.rs");
