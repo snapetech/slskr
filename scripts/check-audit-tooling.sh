@@ -27,6 +27,7 @@ python3 scripts/test-parity-owner-boundaries.py
 python3 scripts/test-parity-webui-evidence.py
 python3 scripts/test-reproducibility-metadata.py
 python3 scripts/test-shared-tcp-shutdown-proof.py
+python3 scripts/test-fetch-media.py
 python3 scripts/test-react-nightly-audit.py
 python3 scripts/test-rf-delayed-filesystem-proof.py
 python3 scripts/test-chocolatey-workflow-checksum.py

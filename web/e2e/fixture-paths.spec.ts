@@ -7,6 +7,7 @@ import {
   ensureFixtures,
   getRepoRootFromCwd,
   hasDownloadedMediaFixtures,
+  hasMediaFixture,
 } from './fixtures/ensure-fixtures';
 
 const media = [
@@ -60,6 +61,9 @@ test('repository and fixture discovery work from root, web, and nested E2E direc
 test('missing, empty, and directory media paths are unavailable', async () => {
   const { root, fixtures } = await fixtureRoot();
   try {
+    expect(hasDownloadedMediaFixtures(fixtures)).toBe(false);
+    await writeFile(path.join(fixtures, 'movie/sintel_512kb_stereo.mp4'), 'presence-only movie stub');
+    expect(hasMediaFixture('movie/sintel_512kb_stereo.mp4', fixtures)).toBe(true);
     expect(hasDownloadedMediaFixtures(fixtures)).toBe(false);
     await presentMedia(fixtures);
     expect(hasDownloadedMediaFixtures(fixtures)).toBe(true);

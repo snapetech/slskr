@@ -113,16 +113,21 @@ export function hasDownloadedMediaFixtures(
   fixturesDir: string = 'test-data/slskr-test-fixtures',
   cwd: string = process.cwd(),
 ): boolean {
-  const fullFixturesPath = getFullFixturesPath(fixturesDir, cwd);
+  return OPTIONAL_MEDIA_FILES.every((mediaFile) => hasMediaFixture(mediaFile, fixturesDir, cwd));
+}
 
-  return OPTIONAL_MEDIA_FILES.every((mediaFile) => {
-    try {
-      const stat = statSync(path.join(fullFixturesPath, mediaFile));
-      return stat.isFile() && stat.size > 0;
-    } catch {
-      return false;
-    }
-  });
+export function hasMediaFixture(
+  mediaFile: string,
+  fixturesDir: string = 'test-data/slskr-test-fixtures',
+  cwd: string = process.cwd(),
+): boolean {
+  const fullFixturesPath = getFullFixturesPath(fixturesDir, cwd);
+  try {
+    const stat = statSync(path.join(fullFixturesPath, mediaFile));
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

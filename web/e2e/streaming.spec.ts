@@ -1,5 +1,5 @@
 import { NODES, shouldLaunchNodes } from './env';
-import { hasDownloadedMediaFixtures } from './fixtures/ensure-fixtures';
+import { hasMediaFixture } from './fixtures/ensure-fixtures';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
 import {
   announceShareGrant,
@@ -13,10 +13,10 @@ import {
 import { T } from './selectors';
 import { expect, test } from '@playwright/test';
 
-const hasDownloadedMedia = hasDownloadedMediaFixtures();
+const hasDownloadedMedia = hasMediaFixture('movie/sintel_512kb_stereo.mp4');
 
 test.describe('streaming', () => {
-  test.skip(!hasDownloadedMedia, 'Streaming E2E requires downloaded media fixtures');
+  test.skip(!hasDownloadedMedia, 'Streaming E2E requires the pinned Sintel movie fixture');
 
   let harness: MultiPeerHarness | null = null;
   const groupName = 'E2E Crew';

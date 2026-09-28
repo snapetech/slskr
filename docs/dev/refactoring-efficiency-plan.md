@@ -7331,3 +7331,29 @@ are backed up under ignored `target/rf-e2e-single-port-source-backup`.
 This checkpoint does not claim cancellation of shared build commands or
 complete RF-006/RF-066 acceptance. Those ownership and playback checks remain
 part of the continuing program.
+
+## RF-066 Verified Optional Media Downloads (2026-09-28 UTC)
+
+The optional manifest now declares the genuine Sintel stereo movie and Open
+Goldberg Aria recording, with license/attribution/source metadata, exact byte
+counts, and SHA-256 pins. Independently published source sizes and SHA-1 hashes
+were checked before curating the SHA-256 pins. Both assets were subsequently
+downloaded through the hardened helper and verified again before installation.
+FFprobe identifies real H.264/AAC movie streams and a Vorbis audio stream.
+No binary is committed; the seven tracked static files retain their hashes.
+
+The Python downloader enforces manifest/count/byte budgets, safe relative paths
+without symlinks, HTTPS including redirects, 64 KiB reads, socket timeouts,
+and a per-file deadline. It writes to a temporary file, checks expected size
+and hash, and installs atomically; failed partials are removed. Invalid existing
+caches are preserved and rejected. Fetching never regenerates observed hashes.
+The shell entry point invokes this single implementation. Static corruption
+tests now copy only the seven manifest files, avoiding optional media copies.
+
+Eight offline downloader regressions, six Playwright utility checks, static
+manifest/corruption checks, and the full audit-tooling gate pass. Evidence and
+source hashes are retained in
+`benchmarks/artifacts/20260928-rf-pinned-media-fetch.json`. Movie sharing and
+streaming gates now require Sintel alone, matching their actual dependency.
+The real nine-case sharing/streaming run is pending at this checkpoint;
+RF-066 remains open until its actual acceptance evidence is complete.
