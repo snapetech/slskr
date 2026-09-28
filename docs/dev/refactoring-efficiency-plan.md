@@ -7187,3 +7187,31 @@ strict daemon Clippy and full-controller/legacy all-targets compilation pass.
 The full daemon suite includes the existing real FTP protocol fixtures.
 Source/log hashes, admission limits, and scope are retained in
 `benchmarks/artifacts/20260928-rf-ftp-upload-admission.json`.
+
+## RF-006 Event Webhook Delivery Ownership (2026-09-28 UTC)
+
+The remaining direct webhook spawns were real production delivery paths,
+not test code. Both ordinary event delivery and compatibility delivery now
+use daemon task admission under their existing delivery permits. Closed
+admission drops the unstarted worker, returns its permit, and ordinary
+webhook delivery persists a failed outcome and delivery statistics; the
+compatibility path records rejected admission in the daemon log. Existing
+webhook DNS/TLS/SSRF, retry, and concurrency boundaries remain in place.
+
+The rejection regression covers both a full delivery pool and a closed task
+registry against the in-memory database, verifying failed status, error
+reason, persisted statistics, and permit recovery without sending a request.
+The previous webhook test suite is preserved in a separate test owner; its
+original source is backed up under ignored `target/rf-webhook-source-backup`.
+Runtime guards reject detached webhook workers. Cancellation outcome
+reconciliation for a delivery already running, relay registration cleanup,
+and remaining RF-006 hosted service coverage are separate work. No native
+peer listener or transport port is added.
+
+An additional regression sends an actual request to an isolated stalled HTTP
+fixture through an owned compatibility delivery worker, then joins daemon
+registry shutdown and verifies socket closure and returned delivery capacity.
+Validation: 697 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and scope are retained in
+`benchmarks/artifacts/20260928-rf-webhook-delivery-ownership.json`.

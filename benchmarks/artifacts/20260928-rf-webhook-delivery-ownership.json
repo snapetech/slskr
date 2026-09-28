@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local Cargo suite and stalled HTTP worker cancellation; not deployed delivery reconciliation proof",
+  "sourceSha": "61db99a1cbfceb35411ac511e630459e4bb3c958",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/webhooks.rs": "7ae75dc9359ef8be7d7bf79236168f562d0231891c18c9e5d55cfafe162a5867",
+    "crates/slskr/src/webhooks_tests.rs": "76c8fa9b473d664e78e2fd724d5dd5bc28734b3d4dcbd91fd429b399518e2acf",
+    "scripts/check-runtime-boundary-hardening.sh": "9db7764858c5d91e10b5bf71af56d651fced10e3cfee9e78a1630fcb633524ab"
+  },
+  "logsSha256": {
+    "target/rf-webhook-ownership-daemon-tests.log": "139dd9e86d15cf4c8a956a2437a41932824ca2ee11131d1153206304f02de419",
+    "target/rf-webhook-ownership-clippy.log": "1e394f8de12820c9c722731d8969fabba66741fabddf28143a796d441e45308d",
+    "target/rf-webhook-ownership-full-controller.log": "c7f47e1bb4485a53b0f8717ce3c3f82eb2a60a3e9088e445707f34e0197cc3dc"
+  },
+  "tests": {
+    "daemonPassed": 697,
+    "defaultIgnoredMountFixture": 1,
+    "closedAdmissionPersistsFailureAndReleasesPermit": true,
+    "stalledHttpCancellationClosesSocketAndReleasesPermit": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  },
+  "limitations": [
+    "Already-started cancelled delivery outcome reconciliation remains separate",
+    "Relay registration cancellation cleanup and fresh hosted service evidence remain open"
+  ]
+}

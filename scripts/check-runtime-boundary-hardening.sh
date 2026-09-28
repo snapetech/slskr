@@ -601,6 +601,7 @@ if rg -n 'tokio::(task::)?spawn\(' \
   crates/slskr/src/route_dispatch_group_3_admin_controls.rs \
   crates/slskr/src/transfer_completion.rs \
   crates/slskr/src/virtual_soulfind_v2_controller.rs \
+  crates/slskr/src/webhooks.rs \
   crates/slskr/src/scripts.rs; then
   printf 'runtime boundary hardening failed: detached administrative worker\n' >&2
   exit 1
