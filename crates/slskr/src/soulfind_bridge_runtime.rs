@@ -223,6 +223,95 @@ pub(super) fn spawn_bridge_server(state: Arc<AppState>) {
     });
 }
 
+struct BridgeClientCompletion(Option<tokio::sync::oneshot::Sender<()>>);
+
+impl Drop for BridgeClientCompletion {
+    fn drop(&mut self) {
+        if let Some(completion) = self.0.take() {
+            let _ = completion.send(());
+        }
+    }
+}
+
+pub(super) struct BridgeClientTasks {
+    stop: tokio::sync::watch::Sender<bool>,
+    pending: Vec<(String, tokio::sync::oneshot::Receiver<()>)>,
+}
+
+impl BridgeClientTasks {
+    pub(super) fn new() -> Self {
+        let (stop, _) = tokio::sync::watch::channel(false);
+        Self {
+            stop,
+            pending: Vec::new(),
+        }
+    }
+
+    pub(super) fn spawn(
+        &mut self,
+        state: &Arc<AppState>,
+        client_id: String,
+        stream: TcpStream,
+    ) -> bool {
+        let mut stop = self.stop.subscribe();
+        let (finished, completion) = tokio::sync::oneshot::channel();
+        let completion_guard = BridgeClientCompletion(Some(finished));
+        let task_state = Arc::clone(state);
+        let task_id = client_id.clone();
+        let admitted = state.managed_background_tasks.try_spawn(async move {
+            let _completion = completion_guard;
+            tokio::select! {
+                biased;
+                _ = async { let _ = stop.wait_for(|stopped| *stopped).await; } => {},
+                _ = bridge_handle_client(task_id.clone(), stream, Arc::clone(&task_state)) => {},
+            }
+            bridge_remove_client(&task_state, &task_id).await;
+        });
+        if admitted {
+            self.pending.push((client_id, completion));
+        }
+        admitted
+    }
+
+    async fn reap(&mut self, state: &AppState) {
+        let mut finished = Vec::new();
+        self.pending.retain_mut(|(client_id, completion)| {
+            if matches!(
+                completion.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ) {
+                true
+            } else {
+                finished.push(client_id.clone());
+                false
+            }
+        });
+        for client_id in finished {
+            bridge_remove_client(state, &client_id).await;
+        }
+    }
+
+    pub(super) async fn shutdown(self, state: &AppState) {
+        let _ = self.stop.send(true);
+        let joined = time::timeout(MANAGED_BACKGROUND_SHUTDOWN_TIMEOUT, async {
+            for (client_id, completion) in self.pending {
+                let _ = completion.await;
+                bridge_remove_client(state, &client_id).await;
+            }
+        })
+        .await;
+        if joined.is_err() {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "bridge",
+                "Soulfind bridge client shutdown exceeded its deadline".to_owned(),
+            )
+            .await;
+        }
+    }
+}
+
 async fn run_bridge_server(state: Arc<AppState>) {
     let bridge = state.config.media_services.virtual_soulfind.bridge.clone();
     if !bridge.bind_address.is_loopback()
@@ -265,7 +354,9 @@ async fn run_bridge_server(state: Arc<AppState>) {
     )
     .await;
 
+    let mut clients = BridgeClientTasks::new();
     loop {
+        clients.reap(&state).await;
         if !state.runtime.read().await.bridge_running {
             break;
         }
@@ -307,11 +398,12 @@ async fn run_bridge_server(state: Arc<AppState>) {
             }),
         );
         drop(runtime);
-        let client_state = Arc::clone(&state);
-        tokio::spawn(async move {
-            bridge_handle_client(client_id, stream, client_state).await;
-        });
+        if !clients.spawn(&state, client_id.clone(), stream) {
+            bridge_remove_client(&state, &client_id).await;
+            break;
+        }
     }
+    clients.shutdown(&state).await;
 
     mutate_runtime_compat_state_in_memory(&state, |runtime| {
         runtime.set_bridge_running(false, bridge.enabled);

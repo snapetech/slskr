@@ -814,3 +814,109 @@ async fn incoming_search_shutdown_reclaims_queued_and_rejected_work() {
     drop(state);
     fs::remove_dir_all(state_dir).expect("remove isolated search fixture");
 }
+
+async fn bridge_client_socket_pair() -> (tokio::net::TcpStream, tokio::net::TcpStream) {
+    use tokio::net::{TcpListener, TcpStream};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (client, accepted) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(TcpStream::connect(address), listener.accept())
+    })
+    .await
+    .expect("bounded bridge fixture connection");
+    (client.unwrap(), accepted.unwrap().0)
+}
+
+async fn assert_bridge_client_closed(client: &mut tokio::net::TcpStream) {
+    use tokio::io::AsyncReadExt;
+    let mut byte = [0];
+    let result = tokio::time::timeout(Duration::from_secs(5), client.read(&mut byte))
+        .await
+        .expect("bridge client socket closes before deadline");
+    match result {
+        Ok(0) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::NotConnected
+            ) => {}
+        other => panic!("bridge client remained readable after shutdown: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn bridge_listener_stop_cancels_and_joins_stalled_client_handlers() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let (mut client, accepted) = bridge_client_socket_pair().await;
+    state.runtime.write().await.bridge_active_clients.insert(
+        "stalled".to_owned(),
+        serde_json::json!({"clientId": "stalled"}),
+    );
+    let mut clients = crate::soulfind_bridge_runtime::BridgeClientTasks::new();
+    assert!(clients.spawn(&state, "stalled".to_owned(), accepted));
+    tokio::task::yield_now().await;
+    clients.shutdown(&state).await;
+    assert!(state.runtime.read().await.bridge_active_clients.is_empty());
+    assert_bridge_client_closed(&mut client).await;
+    state.shutdown_managed_tasks().await;
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
+async fn daemon_shutdown_joins_bridge_clients_and_clears_runtime_records() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let (mut client, accepted) = bridge_client_socket_pair().await;
+    {
+        let mut runtime = state.runtime.write().await;
+        runtime.bridge_running = true;
+        runtime.bridge_active_clients.insert(
+            "stalled".to_owned(),
+            serde_json::json!({"clientId": "stalled"}),
+        );
+    }
+    let mut clients = crate::soulfind_bridge_runtime::BridgeClientTasks::new();
+    assert!(clients.spawn(&state, "stalled".to_owned(), accepted));
+    tokio::task::yield_now().await;
+    state.shutdown_managed_tasks().await;
+    {
+        let runtime = state.runtime.read().await;
+        assert!(!runtime.bridge_running);
+        assert!(runtime.bridge_active_clients.is_empty());
+    }
+    assert_bridge_client_closed(&mut client).await;
+    clients.shutdown(&state).await;
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
+async fn bridge_client_admission_after_daemon_shutdown_closes_the_socket() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    state.shutdown_managed_tasks().await;
+    let (mut client, accepted) = bridge_client_socket_pair().await;
+    let mut clients = crate::soulfind_bridge_runtime::BridgeClientTasks::new();
+    assert!(!clients.spawn(&state, "late".to_owned(), accepted));
+    assert_bridge_client_closed(&mut client).await;
+    assert!(state.runtime.read().await.bridge_active_clients.is_empty());
+    clients.shutdown(&state).await;
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
+async fn dropped_bridge_listener_owner_cancels_stalled_clients() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let (mut client, accepted) = bridge_client_socket_pair().await;
+    state.runtime.write().await.bridge_active_clients.insert(
+        "stalled".to_owned(),
+        serde_json::json!({"clientId": "stalled"}),
+    );
+    let mut clients = crate::soulfind_bridge_runtime::BridgeClientTasks::new();
+    assert!(clients.spawn(&state, "stalled".to_owned(), accepted));
+    tokio::task::yield_now().await;
+    drop(clients);
+    assert_bridge_client_closed(&mut client).await;
+    assert!(state.runtime.read().await.bridge_active_clients.is_empty());
+    state.shutdown_managed_tasks().await;
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}

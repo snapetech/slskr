@@ -349,6 +349,14 @@ impl AppState {
 
     pub(super) async fn shutdown_managed_tasks(&self) {
         self.managed_background_tasks.shutdown().await;
+        {
+            let mut runtime = self.runtime.write().await;
+            runtime.bridge_active_clients.clear();
+            runtime.set_bridge_running(
+                false,
+                self.config.media_services.virtual_soulfind.bridge.enabled,
+            );
+        }
         self.multisource.write().await.fail_unfinished(
             "daemon shut down before the swarm completed",
             unix_timestamp(),

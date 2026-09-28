@@ -6521,3 +6521,22 @@ retains the frozen revision, output hashes, selection policy, and gate logs.
 RF-024 source ownership is structurally complete; hosted validation remains
 open. The remaining RF program tasks retain their separate lifecycle and
 live/deployed evidence requirements.
+
+## RF-006 Managed Bridge Client Ownership (2026-09-28 UTC)
+
+Removed the Soulfind bridge's detached accepted-client spawn. Every accepted
+handler now enters the managed task registry. The listener owns a cancellation
+channel and bounded completion tracking, reaps completed/panicked handlers,
+and cancels/joins pending clients on listener stop. Dropping the listener
+owner also closes cancellation, so client I/O does not outlive its owner.
+Closed registry admission drops the rejected socket and removes its record.
+After managed daemon shutdown joins the registered handlers, ephemeral bridge
+client records and the running flag are cleared. No listener port was added.
+
+`benchmarks/artifacts/20260928-rf-managed-bridge-client-shutdown.json`
+retains source and gate hashes. Four deadline-bounded socket regressions prove
+listener stop, listener-owner drop, joined daemon cleanup, and rejected late
+admission. All 660 default daemon tests, strict all-targets Clippy, and the
+full-controller/legacy-route all-targets feature compile pass. The operator
+fragment records the lifecycle correction. Broader RF-006 clean-runner proof
+for the remaining managed services remains open.
