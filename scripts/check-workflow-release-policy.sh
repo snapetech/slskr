@@ -80,6 +80,7 @@ for expected in \
   'target/slskd-api-smoke/compatibility-summary.txt' \
   'Credentialed public live interop' \
   'SLSKR_LIVE_INTEROP_ENV: ${{ secrets.SLSKR_LIVE_INTEROP_ENV }}' \
+  'cargo build --locked -p slskr' \
   'scripts/run-live-interop-matrix.sh' \
   'target/live-interop/*.tsv' \
   'credentialed-live-interop.tsv'; do

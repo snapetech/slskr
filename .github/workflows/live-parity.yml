@@ -76,6 +76,8 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
         run: dirname "$(rustup which cargo)" >> "$GITHUB_PATH"
+      - name: Build daemon for live interoperability
+        run: cargo build --locked -p slskr
       - name: Prepare live credentials
         id: live-creds
         shell: bash
