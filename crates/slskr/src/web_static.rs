@@ -393,38 +393,6 @@ pub(super) async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     Ok(Some(bytes.len()))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn csp_nonce_is_exposed_without_disclosing_runtime_profile() {
-        let html = inject_web_runtime_metadata(
-            b"<html><head></head><body></body></html>".to_vec(),
-            Path::new("index.html"),
-            crate::config::ControllerProfile::Native,
-            false,
-            Some("test-nonce"),
-        );
-        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
-
-        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
-        assert!(!html.contains("slskr-runtime-profile"));
-
-        let html = inject_web_runtime_metadata(
-            b"<html><head></head><body></body></html>".to_vec(),
-            Path::new("index.html"),
-            crate::config::ControllerProfile::Native,
-            true,
-            Some("test-nonce"),
-        );
-        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
-
-        assert!(html.contains("<meta name=\"slskr-runtime-profile\" content=\"native\">"));
-        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
-    }
-}
-
 pub(super) fn fallback_dashboard_html() -> String {
     r#"<!doctype html>
 <html lang="en">
@@ -1470,4 +1438,36 @@ pub(super) fn fallback_dashboard_html() -> String {
             "__VERSION__",
             &format!("{CLIENT_MAJOR_VERSION}.{CLIENT_MINOR_VERSION}"),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csp_nonce_is_exposed_without_disclosing_runtime_profile() {
+        let html = inject_web_runtime_metadata(
+            b"<html><head></head><body></body></html>".to_vec(),
+            Path::new("index.html"),
+            crate::config::ControllerProfile::Native,
+            false,
+            Some("test-nonce"),
+        );
+        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
+
+        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
+        assert!(!html.contains("slskr-runtime-profile"));
+
+        let html = inject_web_runtime_metadata(
+            b"<html><head></head><body></body></html>".to_vec(),
+            Path::new("index.html"),
+            crate::config::ControllerProfile::Native,
+            true,
+            Some("test-nonce"),
+        );
+        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
+
+        assert!(html.contains("<meta name=\"slskr-runtime-profile\" content=\"native\">"));
+        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
+    }
 }
