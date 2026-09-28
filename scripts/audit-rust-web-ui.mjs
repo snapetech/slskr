@@ -46,7 +46,7 @@ const apiRequestCountBudgets = new Map([
   ['/searches', 14],
   ['/discovery-graph', 13],
   ['/playlist-intake', 19],
-  ['/wishlist', 10],
+  ['/wishlist', 11], // Includes the search action and its follow-up list refresh.
   ['/downloads', 14],
   ['/uploads', 14],
   ['/messages', 13],
