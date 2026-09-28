@@ -23,6 +23,11 @@ uses a detached blocking child wait after this change. Its separate direct-child
 registry retains the four-process semaphore, periodically reaps exited children,
 and closes admission before killing and waiting for owned children at shutdown.
 
-RF-006 remains open. Completing the table does not certify that these remaining
-workers are joined on daemon shutdown, and a byte or traversal bound does not
-establish a deadline for mounted filesystem I/O.
+After managed async shutdown returns, the daemon now calls Tokio's
+`Runtime::shutdown_timeout` with a five-second deadline. A focused regression
+holds a real `spawn_blocking` closure, confirms runtime teardown returns at its
+deadline, then releases the worker and observes it complete. This bounds normal
+runtime teardown; it does not cancel or join a filesystem syscall stuck in an
+uninterruptible kernel state. Such a worker may continue until the operating
+system call returns. RF-006 remains open for fresh hosted/service-overlap proof,
+and this limitation is not represented as a completed join guarantee.
