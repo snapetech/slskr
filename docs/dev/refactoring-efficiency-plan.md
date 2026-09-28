@@ -7215,3 +7215,34 @@ Validation: 697 daemon tests pass with one default-ignored mount fixture;
 strict daemon Clippy and full-controller/legacy all-targets compilation pass.
 Source/log hashes and scope are retained in
 `benchmarks/artifacts/20260928-rf-webhook-delivery-ownership.json`.
+
+## RF-006 Reserved Relay Connection Cleanup (2026-09-28 UTC)
+
+Relay connections now reserve cleanup capacity before issuing a challenge.
+There are at most 256 outstanding reservations/queued cleanup requests per
+daemon. A dropped connection synchronously removes its global hub sender and
+uses its reserved queue slot to request protocol deregistration, including
+registered-agent/request/waiter removal. No cancellation path spawns a new
+task or needs to acquire the asynchronous protocol lock. Normal connection
+completion deregisters directly and releases the reservation.
+
+One managed cleanup worker processes requests and holds a weak reference to
+daemon state, avoiding a reference cycle while waiting for work. Full
+reservation capacity applies backpressure. Shutdown closes reservation
+admission before joined worker cancellation, then explicitly clears live
+protocol connections and requests, covering queued cleanup that cannot run
+once the worker is cancelled. Completed share-upload history is retained.
+Original sources are backed up under ignored `target/rf-relay-cleanup-source-backup`.
+
+Regressions cover authenticated agent removal after a contended protocol lock,
+immediate hub sender removal, the 256-reservation limit, blocked admission
+wakeup at shutdown, active registration removal and late reservation rejection,
+retained completed share-upload history, and cancellation of a pending relay
+WebSocket reader alongside event/SignalR readers. No native peer transport
+port is added. Already-started webhook delivery outcome reconciliation and
+fresh hosted service evidence remain separate RF-006 work.
+
+Validation: 701 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes, reservation limit, and cancellation scope are retained in
+`benchmarks/artifacts/20260928-rf-relay-connection-cleanup.json`.

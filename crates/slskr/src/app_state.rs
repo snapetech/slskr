@@ -83,6 +83,7 @@ pub(super) struct AppState {
     pub(super) download_batch_requests: Arc<Semaphore>,
     pub(super) websocket_connections: Arc<Semaphore>,
     pub(super) ftp_uploads: ftp::FtpUploadQueue,
+    pub(super) relay_cleanup: relay::ConnectionCleanup,
     pub(super) external_visualizer_processes: Arc<Semaphore>,
     pub(super) songid_run_slots: Arc<Semaphore>,
     pub(super) songid_jobs: Option<mpsc::Sender<SongIdJob>>,
@@ -350,7 +351,9 @@ impl AppState {
 
     pub(super) async fn shutdown_managed_tasks(&self) {
         self.ftp_uploads.close();
+        self.relay_cleanup.close();
         self.managed_background_tasks.shutdown().await;
+        self.relay.write().await.protocol.shutdown_connections();
         self.port_forwarding.shutdown().await;
         if let Some(gateway) = self.private_gateway.as_ref() {
             gateway.clear_runtime_connections().await;

@@ -28,3 +28,6 @@ mod websocket_ownership;
 
 #[path = "focused_controller_tests/ftp_admission.rs"]
 mod ftp_admission;
+
+#[path = "focused_controller_tests/relay_cleanup.rs"]
+mod relay_cleanup;

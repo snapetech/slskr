@@ -26,6 +26,10 @@ use sqlx_sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+#[path = "relay_connection_cleanup.rs"]
+mod connection_cleanup;
+pub(crate) use connection_cleanup::ConnectionCleanup;
+
 use crate::config::{ControllerProfile, RelaySettings};
 
 const CHALLENGE_TTL_SECONDS: u64 = 10;
@@ -870,6 +874,44 @@ impl RuntimeState {
         }
         self.pending_share_uploads
             .retain(|_, request| request.connection_id != connection_id);
+    }
+
+    /// Remove live connection/request state while retaining durable uploads.
+    pub(crate) fn shutdown_connections(&mut self) {
+        let ids = self
+            .challenges
+            .keys()
+            .cloned()
+            .chain(
+                self.registered_agents
+                    .values()
+                    .map(|agent| agent.connection_id.clone()),
+            )
+            .chain(
+                self.pending_downloads
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .chain(
+                self.pending_file_info
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .chain(
+                self.pending_file_uploads
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .chain(
+                self.pending_share_uploads
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .collect::<std::collections::BTreeSet<_>>();
+        for id in ids {
+            unregister_hub_connection(&id);
+            self.deregister_connection(&id);
+        }
     }
 
     pub(crate) fn issue_share_upload_token(
@@ -2161,6 +2203,33 @@ mod tests {
         assert!(state
             .completed_share_uploads
             .contains_key(&format!("token-{MAX_RELAY_SHARE_UPLOAD_RECORDS:04}")));
+    }
+
+    #[test]
+    fn shutdown_connections_preserves_completed_share_uploads() {
+        let mut state = RuntimeState::new();
+        state.issue_challenge("stopped-connection", 100);
+        state.registered_agents.insert(
+            "stopped-agent".to_owned(),
+            AgentRegistration {
+                connection_id: "stopped-connection".to_owned(),
+                remote_ip: "127.0.0.1".parse().unwrap(),
+            },
+        );
+        state.completed_share_uploads.insert(
+            "durable-upload".to_owned(),
+            CompletedShareUpload {
+                agent_name: "stopped-agent".to_owned(),
+                share_count: 0,
+                shares: Vec::new(),
+                database_path: PathBuf::from("share.db"),
+                completed_at: 100,
+            },
+        );
+        state.shutdown_connections();
+        assert!(state.challenges.is_empty());
+        assert!(state.registered_agents.is_empty());
+        assert!(state.completed_share_uploads.contains_key("durable-upload"));
     }
 
     #[test]

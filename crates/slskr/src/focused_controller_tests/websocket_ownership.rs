@@ -50,13 +50,18 @@ fn signalr_handshake() -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn cancelled_event_and_signalr_connections_drop_pending_readers() {
-    for signalr in [false, true] {
+async fn cancelled_event_signalr_and_relay_connections_drop_pending_readers() {
+    for protocol in [0, 1, 2] {
         let (state, _receiver) = test_state_with_env(MapEnv::default());
+        if protocol == 2 {
+            let mut settings = state.advanced_networking.write().await;
+            settings.relay.enabled = true;
+            settings.relay.mode = "controller".to_owned();
+        }
         let ready = Arc::new(AtomicBool::new(false));
         let dropped = Arc::new(AtomicBool::new(false));
         let reader = PendingReader {
-            bytes: if signalr {
+            bytes: if protocol != 0 {
                 signalr_handshake()
             } else {
                 Vec::new()
@@ -73,7 +78,9 @@ async fn cancelled_event_and_signalr_connections_drop_pending_readers() {
         }
         let mut task = OwnedConnection(tokio::spawn(async move {
             let mut writer = tokio::io::sink();
-            if signalr {
+            if protocol == 2 {
+                crate::relay_ws::serve(reader, &mut writer, task_state, None).await
+            } else if protocol == 1 {
                 crate::signalr_ws::serve(reader, &mut writer, task_state, "application").await
             } else {
                 crate::events_ws::stream_events(

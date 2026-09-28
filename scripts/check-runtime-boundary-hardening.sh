@@ -640,6 +640,23 @@ if state.index('self.ftp_uploads.close()') > state.index('self.managed_backgroun
     raise SystemExit('runtime boundary hardening failed: FTP admission must close before joining workers')
 PYFTP
 
+python3 - <<'PYRELAY'
+from pathlib import Path
+cleanup = Path('crates/slskr/src/relay_connection_cleanup.rs').read_text()
+for anchor in ('MAX_PENDING_CLEANUPS: usize = 256', 'reserve_owned()',
+               'permit.send(', 'impl Drop for ConnectionLease', 'Arc::downgrade(state)',
+               'managed_background_tasks.try_spawn('):
+    if anchor not in cleanup:
+        raise SystemExit(f'runtime boundary hardening failed: missing relay cleanup owner {anchor}')
+if 'tokio::spawn(' in cleanup or 'tokio::task::spawn(' in cleanup:
+    raise SystemExit('runtime boundary hardening failed: detached relay cleanup worker')
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('self.relay_cleanup.close()') > state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: relay cleanup admission must close before shutdown')
+if 'protocol.shutdown_connections()' not in state:
+    raise SystemExit('runtime boundary hardening failed: relay registrations must clear after shutdown')
+PYRELAY
+
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'
 from pathlib import Path

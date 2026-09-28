@@ -70,6 +70,10 @@ where
     }
 
     let connection_id = format!("relay-{}", Uuid::new_v4().simple());
+    let mut connection_lease = state
+        .relay_cleanup
+        .reserve(&state, connection_id.clone())
+        .await?;
     let now = crate::unix_timestamp();
     let challenge = state
         .relay
@@ -165,6 +169,7 @@ where
         .await
         .protocol
         .deregister_connection(&connection_id);
+    connection_lease.completed();
     serve_result
 }
 
