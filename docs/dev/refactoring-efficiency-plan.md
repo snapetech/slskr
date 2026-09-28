@@ -7061,3 +7061,27 @@ proof pass. Source hashes, test/check outcomes, and the retained live result
 are in `benchmarks/artifacts/20260928-rf-forwarding-and-service-ownership.json`.
 FTP concurrency policy, script descendant-process cleanup, remaining service
 ownership, and fresh hosted service proof remain open; this is not RF-006 closure.
+
+## RF-006 Unix Script Descendant Cancellation (2026-09-28 UTC)
+
+Integration scripts now establish a separate Unix process group before spawn.
+An owned guard kills the group when cancellation, timeout, or output collection
+failure drops the running worker. The guard drops before the Tokio child, and
+is disarmed immediately when waiting reaps the leader, avoiding subsequent
+signaling through a reusable numeric process ID. Invalid, zero, and init IDs
+are rejected. Existing output and concurrency limits remain in place.
+
+A Linux regression runs a real shell with a live sleep child and verifies no
+live descendant survives either timeout or explicit task cancellation. Its
+failure cleanup holds a kernel pidfd, so assertion failure cannot accidentally
+signal a subsequently reused PID. The original script tests are preserved in
+a separate test owner; the pre-change source remains backed up under ignored
+`target/rf-script-process-source-backup`. This covers descendants remaining in
+the owned Unix process group; Windows process-tree cleanup and deliberately
+detached jobs after a normally completed script are not covered. Broader
+service inventory and FTP concurrency policy remain RF-006 work.
+
+Validation: 686 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Hashes and scope are retained in
+`benchmarks/artifacts/20260928-rf-script-process-group-ownership.json`.

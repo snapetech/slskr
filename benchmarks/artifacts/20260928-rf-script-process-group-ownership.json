@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local daemon suite and Linux shell descendants; not Windows process-tree proof",
+  "sourceSha": "a43155dec423a13ba038ee256683fe453bca37b3",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/scripts.rs": "fdf84733bb39c79fb92e848159d6466c3d8a696188fa00d25c3dab71b23edf0c",
+    "crates/slskr/src/scripts_tests.rs": "fa71a78d3f8d3dbac026ed55fbdff493ad6f4bb12c60b79f3cd1c75147d5e23e",
+    "crates/slskr/src/script_process_group.rs": "7de5026a9f12fa06d1360ffedea9b7db5e89b24bdcefbf61a773321bdf58d469"
+  },
+  "logsSha256": {
+    "target/rf-script-process-daemon-tests.log": "bd0d7fb52752a8ed15e328b2586ccef8e9df5275f60b161199acc004eb80e345",
+    "target/rf-script-process-clippy.log": "24ab72e6238d8e40f8b6d5da89b7e67e6b50c80647fb8093c000c2d812896a88",
+    "target/rf-script-process-full-controller.log": "34b747321c7bd6549101480cb354c748753b3adedf24b25edf2e5541a512dd9f"
+  },
+  "tests": {
+    "daemonPassed": 686,
+    "defaultIgnoredMountFixture": 1,
+    "actualLinuxDescendantTimeoutAndCancellation": true,
+    "invalidGroupIdsRejected": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  },
+  "limitations": [
+    "Descendants that remain in the owned Unix group only",
+    "Windows process-tree cleanup remains open",
+    "No cleanup claimed for deliberately detached jobs after normal script completion"
+  ]
+}
