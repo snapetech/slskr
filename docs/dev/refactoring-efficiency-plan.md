@@ -7432,3 +7432,33 @@ The full job/step receipt, metadata, and both actual proofs are retained in
 the later CLI, FTP, webhook, relay, and fixture-discovery changes at that commit;
 subsequent harness/media/profile/MIME changes still need their own hosted result.
 The remaining production lifecycle-command inventory is separate work.
+
+## RF-006 Joined Lifecycle Command Owner (2026-09-28 UTC)
+
+The crate root still spawned a detached task to delay shutdown/restart commands.
+That path now lives in `lifecycle_controller.rs` and enters the daemon's managed
+registry. The existing 100 ms HTTP response-flush delay, command channel, and
+bounded best-effort Soulseek disconnect behavior are preserved. Joined shutdown
+releases delayed or channel-blocked senders; closed admission drops later work.
+The crate root contains no raw `tokio::spawn` after this extraction.
+
+Two regressions verify normal delayed command delivery, canceled delay, a full
+command queue, released sender ownership, and rejected scheduling after registry
+shutdown. Validation passes 707 daemon tests (one ignored mount fixture), strict
+Clippy, full-controller/legacy all-targets compilation, module hygiene, and the
+runtime ownership guard. Three real all-enabled single-peer-port shutdown cycles
+pass with actual DHT/control-QUIC/data-QUIC activity, client closure, and socket
+reuse. Source hashes and the actual proof are retained in
+`benchmarks/artifacts/20260928-rf-lifecycle-command-owner.json`.
+Original root/lifecycle test sources remain in Git and the ignored
+`target/rf-lifecycle-command-source-backup`. Complete blocking-work inventory and
+fresh hosted completion remain separate RF-006 acceptance work.
+
+## RF-010 Hosted AUR Smoke False Positive (2026-09-28 UTC)
+
+The clean `cf37f4bd` package log contains an AUR success marker, but inspection
+found that the Docker fallback invokes `bash -s` with a heredoc without keeping
+stdin open (`docker run -i`). The script can therefore be skipped while the
+container exits successfully. That marker is not accepted as a real makepkg
+receipt; RF-010 remains open pending corrected container execution, working
+directory verification, and an actual fresh clean-runner result.

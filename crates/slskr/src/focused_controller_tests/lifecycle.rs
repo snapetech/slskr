@@ -1,6 +1,51 @@
 use super::fixtures::*;
 
 #[tokio::test]
+async fn lifecycle_command_delay_is_owned_and_rejects_after_shutdown() {
+    let (mut state, _session) = test_state_with_env(MapEnv::default());
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+    Arc::get_mut(&mut state).unwrap().lifecycle_commands = Some(sender.clone());
+    crate::schedule_lifecycle_command(&state, crate::LifecycleCommand::Restart);
+    assert_eq!(sender.strong_count(), 3);
+    state.shutdown_managed_tasks().await;
+    assert_eq!(sender.strong_count(), 2);
+    assert!(receiver.try_recv().is_err());
+    crate::schedule_lifecycle_command(&state, crate::LifecycleCommand::Shutdown);
+    assert_eq!(sender.strong_count(), 2);
+    assert!(receiver.try_recv().is_err());
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
+async fn lifecycle_command_preserves_flush_delay_and_joins_a_blocked_sender() {
+    let (mut state, _session) = test_state_with_env(MapEnv::default());
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+    Arc::get_mut(&mut state).unwrap().lifecycle_commands = Some(sender.clone());
+    crate::schedule_lifecycle_command(&state, crate::LifecycleCommand::Restart);
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+            .await
+            .unwrap(),
+        Some(crate::LifecycleCommand::Restart)
+    );
+    sender
+        .send(crate::LifecycleCommand::Shutdown)
+        .await
+        .unwrap();
+    crate::schedule_lifecycle_command(&state, crate::LifecycleCommand::Restart);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    state.shutdown_managed_tasks().await;
+    assert_eq!(sender.strong_count(), 2);
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        crate::LifecycleCommand::Shutdown
+    );
+    assert!(receiver.try_recv().is_err());
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
 async fn asynchronous_swarm_routes_reject_admission_after_shutdown() {
     for profile in ["slskd", "slskdn"] {
         let (state, _receiver) =

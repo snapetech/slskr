@@ -118,6 +118,7 @@ source_files=(
   crates/slskr/src/library_store.rs
   crates/slskr/src/local_file_hash.rs
   crates/slskr/src/managed_tasks.rs
+  crates/slskr/src/lifecycle_controller.rs
   crates/slskr/src/rate_limit.rs
   crates/slskr/src/oauth_state.rs
   crates/slskr/src/preview_stream_state.rs
@@ -669,6 +670,19 @@ schema = Path('crates/slskr/src/persistence.rs').read_text()
 if 'idx_webhook_logs_queued' not in schema:
     raise SystemExit('runtime boundary hardening failed: missing queued webhook reconciliation index')
 PYWEBHOOK
+
+# Delayed lifecycle commands share joined daemon ownership.
+python3 - <<'PYLIFECYCLE'
+from pathlib import Path
+root = Path('crates/slskr/src/lib.rs').read_text()
+owner = Path('crates/slskr/src/lifecycle_controller.rs').read_text()
+if 'fn schedule_lifecycle_command(' in root or 'tokio::spawn(' in root:
+    raise SystemExit('runtime boundary hardening failed: detached lifecycle command in crate root')
+if 'state.managed_background_tasks.try_spawn(' not in owner or 'tokio::spawn(' in owner:
+    raise SystemExit('runtime boundary hardening failed: unowned lifecycle command')
+if 'Duration::from_millis(100)' not in owner:
+    raise SystemExit('runtime boundary hardening failed: missing lifecycle response-flush delay')
+PYLIFECYCLE
 
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'

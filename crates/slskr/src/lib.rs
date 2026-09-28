@@ -72,6 +72,7 @@ mod local_file_hash;
 )]
 mod logging;
 mod managed_blacklist_runtime;
+mod lifecycle_controller;
 mod managed_tasks;
 mod mediacore_controller;
 mod mesh_dht;
@@ -615,6 +616,10 @@ use self::listening_party_stream_state::{
 };
 use self::local_file_hash::sha256_local_file_cached;
 use self::managed_blacklist_runtime::ManagedBlacklistRuntime;
+use self::lifecycle_controller::{
+    GRACEFUL_SHUTDOWN_DISCONNECT_TIMEOUT, LifecycleCommand, initiate_graceful_shutdown,
+    schedule_lifecycle_command,
+};
 use self::managed_tasks::ManagedTaskRegistry;
 use self::mediacore_controller::{mediacore_extended_response, mediacore_mutation_response};
 use self::mesh_dht_runtime::{detect_nat_type, spawn_mesh_dht_publisher, STUN_SERVERS};
@@ -1897,42 +1902,6 @@ fn controller_options_validation_failure_response(state: &AppState) -> Option<Ht
     })
 }
 
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LifecycleCommand {
-    Shutdown,
-    Restart,
-}
-
-const GRACEFUL_SHUTDOWN_DISCONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-
-fn schedule_lifecycle_command(state: &AppState, command: LifecycleCommand) {
-    let Some(sender) = state.lifecycle_commands.clone() else {
-        return;
-    };
-    tokio::spawn(async move {
-        // Let the HTTP response flush before the accept loop tears down the runtime.
-        time::sleep(Duration::from_millis(100)).await;
-        let _ = sender.send(command).await;
-    });
-}
-
-/// Disconnects from the Soulseek server (best-effort) before scheduling
-/// process shutdown, matching the oracle's `StopAsync` teardown
-/// (`Client.Disconnect("Shutting down", ...)`) rather than exiting with the
-/// session left connected.
-async fn initiate_graceful_shutdown(state: &AppState) {
-    cancel_active_share_scan(state);
-    // A full session command queue must not prevent the process from honoring
-    // SIGTERM/SIGINT. The lifecycle command still closes the listeners after
-    // the bounded best-effort disconnect window.
-    let _ = time::timeout(
-        GRACEFUL_SHUTDOWN_DISCONNECT_TIMEOUT,
-        send_session_command(state, SessionCommand::Disconnect),
-    )
-    .await;
-    schedule_lifecycle_command(state, LifecycleCommand::Shutdown);
-}
 
 #[cfg(any(test, feature = "bounded-differential"))]
 #[allow(dead_code)]
