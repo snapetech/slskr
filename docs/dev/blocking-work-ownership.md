@@ -9,13 +9,14 @@ blocking closure, cancellation of its requesting future cannot stop that closure
 | --- | --- | --- |
 | `file_transfer_runtime_owners/audio_metadata.rs` | Prefix hash reads at most 32 KiB; technical metadata reads at most 1 MiB. | Both handles are awaited by metadata enrichment. Blocking filesystem operations can outlive a canceled enrichment future. |
 | `private_gateway_owners/gateway_services.rs` | Authenticated, confined local-file range; validated size and bounded range allocation. | Handle is awaited by the call handler. Already running filesystem I/O is not canceled by handler cancellation. |
+| `share_backfill_controller.rs` | Authenticated share range; indexed file size and offset are checked; each blocking seek/read is capped at 46,000 bytes. | Handle is awaited by the MeshContent handler, and gateway connection admission bounds concurrent callers. Cancellation cannot stop an already-running filesystem syscall. |
 | `mesh_sync.rs` | Confined local-file chunk with validated offset, length, and indexed size. | Handle is awaited by the chunk handler. Request cancellation does not establish a join of running filesystem I/O. |
 | `share_index_runtime.rs` | Directory/entry/pending-descriptor bounds; shared cancellation flag. | Worker checks cooperative cancellation. Mounted delayed I/O and shutdown during a running worker still need acceptance proof. |
 | `controller_feature_state.rs` | At most 4,096 records and 8 MiB persisted feature state; serialized mutation turn. | Worker deliberately retains the turn through publication after request cancellation, preventing stale writes. Shutdown completion of running workers remains unproved. |
 | `database_maintenance.rs` | Retention recursively scans configured download trees and avoids symlinks. | Worker is awaited but has no cooperative cancellation or total traversal budget. Shutdown during large or stalled filesystem traversal remains open. |
 | `preview_stream_controller.rs` / `core_dump_process.rs` | At most one application dump worker; admission is held through blocking completion after request cancellation. Linux gcore retains its 60-second deadline, owned process group, child reap, ptrace cleanup and partial-output guard. | Returned temporary stream output has a last-consumer cleanup owner, including an unconsumed worker result. The running filesystem worker is not joined by the daemon managed registry; shutdown can still wait for the remaining child deadline or mounted file I/O. |
 
-There are eight production call sites: two audio metadata workers and one in each
+There are nine production call sites: two audio metadata workers and one in each
 other listed owner. The remaining `spawn_blocking` in focused transfer tests is
 fixture work. Neither production nor the opt-in legacy visualizer dispatcher
 uses a detached blocking child wait after this change. Its separate direct-child
