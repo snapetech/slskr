@@ -7085,3 +7085,15 @@ Validation: 686 daemon tests pass with one default-ignored mount fixture;
 strict daemon Clippy and full-controller/legacy all-targets compilation pass.
 Hashes and scope are retained in
 `benchmarks/artifacts/20260928-rf-script-process-group-ownership.json`.
+
+## RF-028 Hosted Checksum Fixture Startup Deadline (2026-09-28 UTC)
+
+The completed Rust job `108820375569` in CI run `36388979601` failed in audit
+tooling before Cargo: the first PowerShell checksum fixture exceeded its
+10-second subprocess deadline. The remaining seven fixtures completed, and
+all eight actual PowerShell fixtures pass locally. The fixture deadline is
+now 60 seconds, retaining `subprocess.run` timeout kill/wait cleanup and all
+checksum assertions. The audit-tooling gate passes. This is internal test
+harness work; the production checksum verifier and package behavior are
+unchanged. Fresh hosted CI completion remains required, and this failed run
+is not counted as successful shared-QUIC evidence.

@@ -13,6 +13,9 @@ WORKFLOW = ROOT / '.github/workflows/publish-chocolatey.yml'
 NAME = 'slskr-v0.2.40-x86_64-pc-windows-msvc.zip'
 PAYLOAD = b'isolated checksum regression fixture\n'
 SHA = hashlib.sha256(PAYLOAD).hexdigest()
+# Hosted Linux PowerShell cold startup exceeded the old ten-second bound.
+# Retain a deadline and subprocess.run's kill/wait cleanup on expiration.
+POWERSHELL_TIMEOUT_SECONDS = 60
 
 
 def verifier():
@@ -34,7 +37,8 @@ class ChecksumTests(unittest.TestCase):
             script = root / 'verify.ps1'
             script.write_text(verifier())
             result = subprocess.run(['pwsh', '-NoLogo', '-NoProfile', '-File', str(script)],
-                                    cwd=root, capture_output=True, text=True, timeout=10)
+                                    cwd=root, capture_output=True, text=True,
+                                    timeout=POWERSHELL_TIMEOUT_SECONDS)
             if succeeds:
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('Verified SHA256', result.stdout)
