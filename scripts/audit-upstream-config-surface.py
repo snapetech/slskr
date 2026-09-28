@@ -1627,7 +1627,12 @@ def slskr_inventory(root: Path) -> dict[str, object]:
 
     source_root = root / "crates/slskr/src"
     source = "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted(source_root.glob("*.rs"))
+        path.read_text(encoding="utf-8")
+        for path in sorted(source_root.rglob("*.rs"))
+        if not any(
+            part == "tests" or part.endswith("_tests")
+            for part in path.relative_to(source_root).with_suffix("").parts
+        )
     )
     environment = sorted(
         set(re.findall(r'"((?:SLSKR|SLSKD|SLSK)_[A-Z0-9_]+)"', source))

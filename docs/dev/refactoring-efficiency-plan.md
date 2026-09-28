@@ -6434,3 +6434,22 @@ lines. Its current live-backfill source guard still targets the historical
 `lib.rs` location and fails before producing a manifest; repair that guard
 against the real backfill owner before extracting the audit domains. RF-024
 remains open for that script and the remaining evidence requirements.
+
+## RF-024 Parity Audit Source-Owner Guard Repair (2026-09-28 UTC)
+
+The frozen config inventory now scans nested Rust implementation owners and
+excludes named test suites, so test literals cannot replace missing owned
+configuration settings. All 436 mapped frozen configuration leaves pass.
+The live backfill source guard reads `hash_backfill_runtime.rs` and verifies
+its daemon module registration while retaining remote-route, transfer-token,
+and parsed-hash checks. Six boundary regressions prove positive wiring and
+rejection of disconnected/missing owners, registry decoys, removed token and
+route checks, and configuration test decoys. Audit tooling and process-memory
+policy checks pass. The operator fragment captures these audit behavior fixes.
+
+`benchmarks/artifacts/20260928-rf-parity-source-owner-guards.json` retains the
+frozen source revisions and validation hashes. The normal reused-evidence
+manifest remains blocked by absent `target/react-webui-audit/audit.json`.
+A separate extraction-equivalence fixture disables differential execution and
+browser proof, preserving needs-proof states; it is not live parity evidence.
+RF-024 and the missing UI/evidence tasks remain open.

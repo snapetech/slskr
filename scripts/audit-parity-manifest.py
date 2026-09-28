@@ -2139,9 +2139,11 @@ def validate_live_interop_mapping_contracts(root: Path) -> None:
     promoting that row.
     """
     runner = root / "scripts/run-slskdn-cross-client-interop.sh"
-    rust_source = root / "crates/slskr/src/lib.rs"
+    rust_source = root / "crates/slskr/src/hash_backfill_runtime.rs"
+    module_registry = root / "crates/slskr/src/lib.rs"
     runner_source = runner.read_text(encoding="utf-8") if runner.is_file() else ""
     rust_text = rust_source.read_text(encoding="utf-8") if rust_source.is_file() else ""
+    registry_text = module_registry.read_text(encoding="utf-8") if module_registry.is_file() else ""
     required_runner_tokens = (
         '"http://127.0.0.1:$slskr_http_port/api/v0/backfill/file"',
         'record_check protocol-slskr-backfill-slskdn ok',
@@ -2156,6 +2158,8 @@ def validate_live_interop_mapping_contracts(root: Path) -> None:
         raise ValueError(
             "live backfill mapping no longer has an exact remote route/hash assertion"
         )
+    if "mod hash_backfill_runtime;" not in registry_text:
+        raise ValueError("live backfill implementation owner is absent from the daemon registry")
     if not all(token in rust_text for token in required_rust_tokens):
         raise ValueError(
             "live backfill mapping no longer has an exact remote FLAC-header implementation"
