@@ -6385,3 +6385,24 @@ Clippy, and the full-controller/legacy-route all-targets feature compile pass.
 Runtime boundary checks include all new owners. Hygiene caps the registry
 at 150 lines and owners at 1,200 lines. This checkpoint is internal-only.
 Three tracked Rust files remain above 2,500 lines; RF-024 remains open.
+
+## RF-024 Private Gateway Transport And Policy Owners (2026-09-28 UTC)
+
+Replaced the 3,524-line private gateway with a 144-line registry and eleven
+real owners for gateway models/transport/services, QUIC proxy admission and
+relay I/O, service policy, mesh content projections, pod request models, peer
+authentication, identity files, and contracts. The largest owner is 999 lines.
+Existing shared TCP admission, certificate handling, replay protection, relay
+limits, and public gateway type bindings remain intact. No dedicated port
+was added.
+
+`benchmarks/artifacts/20260928-rf-private-gateway-owner-extraction.json`
+accounts for all 131592 original bytes and 119 items, with exact
+reconstruction after reversing scope relocations. All 119 functions/methods
+and 25 gateway contract tests remain present. The test module wrapper moves
+to the registry while its original body and dependency scopes are preserved.
+All 656 default daemon tests, strict all-targets Clippy, and the full-controller/
+legacy-route all-targets feature compile pass. Hygiene caps the registry at
+150 lines and owners at 1,200 lines. This checkpoint is internal-only. Two
+tracked Rust files and the parity audit script remain above 2,500 lines;
+RF-024 remains open.

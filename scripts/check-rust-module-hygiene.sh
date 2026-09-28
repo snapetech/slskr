@@ -50,7 +50,8 @@ for name, budget in [("config.rs", 400), ("config_file.rs", 300)]:
         violations.append(f"{name}: aggregate and registry exceed the {budget}-line budget")
     if re.search(r"\binclude!\s*\(", registry.read_text()):
         violations.append(f"{name}: flat configuration includes are forbidden")
-for registry_name, directory in [("session_runtime.rs", "session_runtime_owners")]:
+for registry_name, directory in [("session_runtime.rs", "session_runtime_owners"),
+                                     ("private_gateway.rs", "private_gateway_owners")]:
     registry = root / registry_name
     if len(registry.read_bytes().splitlines()) > 150:
         violations.append(f"{registry}: runtime registry exceeds 150 lines")
