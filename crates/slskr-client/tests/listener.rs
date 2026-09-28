@@ -234,6 +234,72 @@ async fn shared_demux_rejects_dual_valid_init_prefix() {
 }
 
 #[tokio::test]
+async fn shared_demux_rejects_nested_collision_before_reading_body() {
+    let message = InitMessage::PeerInit {
+        username: "a".repeat(248),
+        connection_type: "F".to_owned(),
+        token: 0,
+    };
+    let inner = message.encode().unwrap().encode().unwrap();
+    let nested = InitFrame::new(inner[0], inner[1..].to_vec());
+    let wire = encode_rotated(&nested.encode().unwrap(), 5);
+    assert!(matches!(
+        InitMessage::decode(InitFrame::decode(&wire[..9]).unwrap()).unwrap(),
+        InitMessage::PierceFirewall { .. }
+    ));
+
+    // The same complete wire is a supported nested obfuscated file init.
+    let (mut writer, reader) = duplex(512);
+    writer.write_all(&wire).await.unwrap();
+    assert!(matches!(
+        demux_obfuscated_incoming(reader).await.unwrap(),
+        IncomingConnection::PeerInit {
+            token: 0,
+            kind: ConnectionKind::FileTransfer,
+            obfuscated: true,
+            ..
+        }
+    ));
+
+    // Keep the sender open: reject at nine bytes, without waiting for a body.
+    let (mut writer, reader) = duplex(64);
+    writer.write_all(&wire[..9]).await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(reader))
+        .await
+        .expect("ambiguous header must not wait for its body");
+    assert!(matches!(result, Err(ClientError::AmbiguousInitFrame)));
+}
+
+#[tokio::test]
+async fn shared_demux_preserves_unambiguous_nested_file_init_and_following_bytes() {
+    let message = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "F".to_owned(),
+        token: 42,
+    };
+    let inner = message.encode().unwrap().encode().unwrap();
+    let nested = InitFrame::new(inner[0], inner[1..].to_vec());
+    let wire = encode_rotated(&nested.encode().unwrap(), 0x8000_0000);
+    let (mut writer, reader) = duplex(512);
+    writer.write_all(&wire).await.unwrap();
+    writer.write_all(b"sentinel").await.unwrap();
+    let IncomingConnection::PeerInit {
+        token,
+        mut stream,
+        kind: ConnectionKind::FileTransfer,
+        obfuscated: true,
+        ..
+    } = demux_shared_incoming(reader).await.unwrap()
+    else {
+        panic!("expected nested obfuscated file init");
+    };
+    assert_eq!(token, 42);
+    let mut following = [0u8; 8];
+    stream.read_exact(&mut following).await.unwrap();
+    assert_eq!(&following, b"sentinel");
+}
+
+#[tokio::test]
 async fn obfuscated_init_writer_avoids_plain_length_and_tls_prefixes() {
     let frame = InitMessage::PeerInit {
         username: "peer".to_owned(),

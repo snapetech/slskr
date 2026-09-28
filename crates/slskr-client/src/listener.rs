@@ -226,7 +226,8 @@ where
 /// contract separate is necessary because those bytes are also valid first
 /// bytes of a frame length or an obfuscation key; no byte-only parser can
 /// distinguish those streams without guessing. A prefix advertising two known
-/// init forms is rejected before either interpretation is returned.
+/// or potentially nested init interpretations is rejected before either body
+/// is read.
 pub async fn demux_shared_incoming<S>(mut stream: S) -> Result<IncomingConnection<S>, ClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -240,7 +241,7 @@ where
         read_shared_bytes(&mut stream, &mut buffered, 9).await?;
         if candidates
             .iter()
-            .all(|candidate| shared_candidate_has_known_header(&buffered, *candidate))
+            .all(|candidate| shared_candidate_has_init_header(&buffered, *candidate))
         {
             return Err(ClientError::AmbiguousInitFrame);
         }
@@ -248,7 +249,7 @@ where
     let mut unknown = None;
     let mut last_error = None;
 
-    // Prefer the shortest valid candidate after rejecting dual-known headers.
+    // Prefer the shortest valid candidate after rejecting conflicting init headers.
     for candidate in candidates {
         if let Err(error) =
             validate_shared_candidate_header(&mut stream, &mut buffered, candidate).await
@@ -284,7 +285,7 @@ where
     incoming_from_init_message(message, stream, candidate.obfuscated)
 }
 
-fn shared_candidate_has_known_header(encoded: &[u8], candidate: SharedFrameCandidate) -> bool {
+fn shared_candidate_has_init_header(encoded: &[u8], candidate: SharedFrameCandidate) -> bool {
     let (code, prefix_len) = if candidate.obfuscated {
         let Ok(decoded) = slskr_protocol::decode_rotated(&encoded[..9]) else {
             return false;
@@ -297,7 +298,14 @@ fn shared_candidate_has_known_header(encoded: &[u8], candidate: SharedFrameCandi
     match InitCode::try_from(code) {
         Ok(InitCode::PierceFirewall) => length == PIERCE_FIREWALL_FRAME_LEN,
         Ok(InitCode::PeerInit) => (13..=MAX_PEER_INIT_FRAME_LEN).contains(&length),
-        Err(_) => false,
+        Err(_) => {
+            // A supported nested frame's body starts with its four-byte inner
+            // length. The visible code must equal that length's low byte.
+            // Arbitrary unknown extensions do not establish another init form.
+            candidate.obfuscated
+                && (9..=MAX_NESTED_OBFUSCATED_INIT_FRAME_LEN).contains(&length)
+                && usize::from(code) == (length - 4) & 0xff
+        }
     }
 }
 
