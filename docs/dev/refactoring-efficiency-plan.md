@@ -7097,3 +7097,44 @@ checksum assertions. The audit-tooling gate passes. This is internal test
 harness work; the production checksum verifier and package behavior are
 unchanged. Fresh hosted CI completion remains required, and this failed run
 is not counted as successful shared-QUIC evidence.
+
+## RF-006 Scoped WebSocket Readers and Track Processing (2026-09-28 UTC)
+
+Event, compatibility SignalR, and relay WebSocket readers are now scoped
+futures polled alongside their connection writer. Reader completion still
+drains the existing bounded frame queue; connection cancellation immediately
+drops the reader without detaching a task. A regression waits until a reader
+actually stalls, cancels the event/SignalR parent, joins it, and verifies the
+reader was dropped. Existing framing, heartbeat, subscription, and transport
+tests remain intact. Relay protocol/global-registration cancellation cleanup
+is separate remaining work and is not claimed by this reader checkpoint.
+
+Track-intent processing now uses daemon task admission and returns 503 after
+shutdown rather than reporting accepted detached work. A regression verifies
+that the intent stays Pending after rejected admission. Runtime source guards
+reject detached reader/track workers. Originals remain backed up under ignored
+`target/rf-websocket-source-backup`; no native peer port is added. Broader
+RF-006 service inventory and FTP concurrency policy remain open.
+
+Validation: 688 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and scoped outcomes are retained in
+`benchmarks/artifacts/20260928-rf-websocket-and-track-ownership.json`.
+
+## RF-006 Downloaded All-Transport Single-Port Hosted Receipt (2026-09-28 UTC)
+
+Successful hosted Rust job in run `36390159596` at exact source `a43155de`
+retained artifact `10955962868`, `ci-reproducibility-rust`. The downloaded
+all-enabled and disabled transport results each contain three successful
+live shutdown cycles with exactly one peer TCP listener and one UDP listener
+on the same numeric port, closed client sockets, and TCP/UDP rebinding.
+All-enabled probes include pinned control/data QUIC and actual DHT replies
+from the public port. Source hashes were independently checked against the
+exact Git commit; downloaded proof hashes match the reproducibility manifest.
+
+The retained receipt is
+`benchmarks/artifacts/20260928-rf-hosted-single-peer-port-receipt.json`.
+This verifies the native shared UDP/QUIC endpoint on a clean Linux runner,
+including DHT-enabled routing. The full platform matrix was still running at
+receipt download; later script/WebSocket ownership changes are not covered
+by this earlier job. Broader RF-006 and deployed interop remain open.

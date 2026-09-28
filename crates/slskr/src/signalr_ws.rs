@@ -155,7 +155,7 @@ where
     }
 
     let (inbound_tx, mut inbound_rx) = mpsc::channel(relay_ws::HUB_INBOUND_QUEUE_CAPACITY);
-    let reader_task = tokio::spawn(async move {
+    let reader_task = async move {
         loop {
             let frame =
                 relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT)
@@ -165,7 +165,7 @@ where
                 break;
             }
         }
-    });
+    };
 
     let mut keepalive = tokio::time::interval(relay_ws::SIGNALR_KEEPALIVE_INTERVAL);
     keepalive.tick().await;
@@ -220,11 +220,15 @@ where
                 },
             }
         }
-    }
-    .await;
+    };
 
-    reader_task.abort();
-    let _ = reader_task.await;
+    // Both futures belong to this connection. Cancellation drops the reader
+    // immediately; if it finishes first, drain its bounded frame queue.
+    tokio::pin!(reader_task, result);
+    let result = tokio::select! {
+        result = &mut result => result,
+        () = &mut reader_task => result.await,
+    };
     result
 }
 

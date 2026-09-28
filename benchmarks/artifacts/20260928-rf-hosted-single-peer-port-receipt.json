@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "downloaded successful hosted Rust job; full platform matrix still in progress",
+  "runUrl": "https://github.com/snapetech/slskr/actions/runs/36390159596",
+  "runId": 36390159596,
+  "artifactId": 10955962868,
+  "artifactName": "ci-reproducibility-rust",
+  "sourceSha": "a43155dec423a13ba038ee256683fe453bca37b3",
+  "sourceAndArtifactHashesVerified": true,
+  "reproducibility": {
+    "artifacts": [
+      {
+        "bytes": 4927,
+        "path": "dashboard/coverage/coverage-summary.json",
+        "present": true,
+        "sha256": "cca351a8bf6cb7076853b3b0c44af0947d1b725a1a1a5e0856cc3e1fc02e8323"
+      },
+      {
+        "bytes": 1767,
+        "path": "web/build/index.html",
+        "present": true,
+        "sha256": "771be8d4aed7f3f8b2715ff97ec288b44f12133029639951098375fd4d0db46b"
+      },
+      {
+        "bytes": 4330,
+        "path": "target/reproducibility/shared-tcp-shutdown.json",
+        "present": true,
+        "sha256": "b7758608c9c9021c5186c07f5549929855e35417544af04f8c3a08b01612a2c5"
+      },
+      {
+        "bytes": 7164,
+        "path": "target/reproducibility/shared-all-transports-shutdown.json",
+        "present": true,
+        "sha256": "210606e5f6bfa04a2e947ba6bb7cd5faa10c51bddf79e78845bdd5f70c4fefed"
+      }
+    ],
+    "ci": {
+      "artifactName": "ci-reproducibility-rust",
+      "job": "rust",
+      "provider": "github-actions",
+      "repository": "snapetech/slskr",
+      "runAttempt": "1",
+      "runId": "36390159596",
+      "runUrl": "https://github.com/snapetech/slskr/actions/runs/36390159596",
+      "serverUrl": "https://github.com",
+      "sourceCommit": "a43155dec423a13ba038ee256683fe453bca37b3"
+    },
+    "configurationFiles": [
+      {
+        "bytes": 677,
+        "path": "Cargo.toml",
+        "present": true,
+        "sha256": "57b8884db70aa2d3e4c57b9700be868e72afc9e98a76344dd701b6d58a890eab"
+      },
+      {
+        "bytes": 123,
+        "path": "rust-toolchain.toml",
+        "present": true,
+        "sha256": "e313418f3d02f7e16b76a7b46bbe04a34673f72ef192abd17bc76c8f53a2f224"
+      },
+      {
+        "bytes": 856,
+        "path": ".cargo/config.toml",
+        "present": true,
+        "sha256": "10f33d7be09327efefe8c2dec7ff9737fb5a0990b9b50fa20234198fe14cd10f"
+      }
+    ],
+    "environment": {
+      "architecture": "x86_64",
+      "system": "Linux"
+    },
+    "generatedAt": "2026-09-28T07:21:22.229329Z",
+    "lockFiles": [
+      {
+        "bytes": 90026,
+        "path": "Cargo.lock",
+        "present": true,
+        "sha256": "4db55d1c35e147765a1c39e2ebcd54e360ab12555fd61c3593eaa760b981bd73"
+      },
+      {
+        "bytes": 84,
+        "path": "package-lock.json",
+        "present": true,
+        "sha256": "eed7f7366eec98b69be22c11b44c44f5df2311b6424369263a103d63c2009208"
+      },
+      {
+        "bytes": 314611,
+        "path": "web/package-lock.json",
+        "present": true,
+        "sha256": "d813edf58e02a3e36d6798e720b061ae4071fb21dc2ed7dac382e554d2797e15"
+      },
+      {
+        "bytes": 202539,
+        "path": "dashboard/package-lock.json",
+        "present": true,
+        "sha256": "38dc7dd6d4e82bdbfb8b86753f00bdbf3bad5fa5f13d0bd98c57ff5ec8186781"
+      },
+      {
+        "bytes": 194522,
+        "path": "client-ts/package-lock.json",
+        "present": true,
+        "sha256": "9b00f1c5b4701cca1bffc69b929a9dfd2322b825099cfa628a39124d6ef6ad4a"
+      },
+      {
+        "bytes": 175,
+        "path": "client-go/go.sum",
+        "present": true,
+        "sha256": "1737d5523b7264df09b253e86e29f96af295a7bd18e0aaa4373c6099317e065f"
+      },
+      {
+        "bytes": 339,
+        "path": "client-python/pyproject.toml",
+        "present": true,
+        "sha256": "5b5bee712e5e18831b417ed987f81183f3148e77f6ea9abe7bffd1736505112b"
+      }
+    ],
+    "repository": {
+      "sourceCommit": "a43155dec423a13ba038ee256683fe453bca37b3",
+      "worktreeDirty": false,
+      "worktreeStatusEntries": 0
+    },
+    "schemaVersion": 2,
+    "toolchain": {
+      "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+      "node": "v22.23.2",
+      "npm": "10.9.8",
+      "python3": "Python 3.12.14",
+      "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)"
+    }
+  },
+  "sharedPeerProofs": {
+    "shared-tcp-shutdown.json": {
+      "schemaVersion": 1,
+      "evidenceMode": "live isolated daemon process; not deployed interop proof",
+      "sourceSha": "a43155dec423a13ba038ee256683fe453bca37b3",
+      "dirtyWorktree": false,
+      "binarySha256": "92f200543fbde2ee962acdcf74eaecf0833cd05d86bcb8978df4ffbef9e374db",
+      "harnessSha256": "3a71c2ca306c21940f0d5c00325ba10591e6dc1216dcb759b55f86706a523e73",
+      "transportSourceSha256": {
+        "crates/slskr/src/daemon_serve.rs": "50d58ac4fb35f9e3c380f2ee6afaea49be8026972c1702a4dc0b3d91162c313b",
+        "crates/slskr/src/config_parts/startup.rs": "970ceef95d50e27570131a691a37b7073c38fd926b66384a7e757040b1def716",
+        "crates/slskr/src/config_parts/peer_transport.rs": "bbae1b1657def9258406b95daa94486ac54d9f8afad0c0da6a64c6ea65f1a59a",
+        "crates/slskr/src/private_gateway.rs": "5eb5eb85721435c9c52f20efe671ee44b1469331010bbaf2aa242cf0d7e75965",
+        "crates/slskr/src/private_gateway_owners/gateway_models.rs": "089d52a73578e3755aa59aa915787999c97fb5237d739df0e7671204ae7344b4",
+        "crates/slskr/src/private_gateway_owners/gateway_transport.rs": "efed090c0b1dfd16aa34442e4b75a0bb01ee36e1f0eda015fdc161bc62901857",
+        "crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs": "14ecdf76930e64f1377fa68bd785f6dce54d3b0983da1c39a3b285b454f4b415",
+        "crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs": "fdbb525e3802594b5ae9dfa10aeab6bc1c24b4ffc9dcdfa4a3bc6d6b740c0c0f",
+        "crates/slskr/src/dht.rs": "2b9a142138f030967d2255a6bde2a4f84d46663c2b1d2e1d38d0e89de6ac0531",
+        "crates/slskr/src/quic_alpn.rs": "c47317878d04b21064fdd276c666b86c9cb9a518cdb1d3cbc12567aec654215b",
+        "crates/slskr-client/src/shared_udp.rs": "64734ea6cd527b3bccb16e0cfc4bc1560379c4f4527230643c297ffb25cc9c8e",
+        "crates/slskr-client/src/shared_quic_server.rs": "65adbef6487d7a732c9b1075542415023020f4c901ef11a7dce111a50c83f8f3",
+        "crates/slskr-client/src/quic_control.rs": "19b0d5a9c7dafe9f36eecf96a009fee242d456f2763b4ebbcac4b33d4c31cbb3",
+        "crates/slskr-client/src/quic_data.rs": "7bdf7f7f0b50460e062e14627784ececfc3b0f19d74b62c1bb15d891670c7d3c",
+        "vendor/mainline/src/lib.rs": "1b0bcff3ea9422244bfcd542a5ac98cbb6a401b4fc08f2b5df8321b51e5606fc",
+        "vendor/mainline/src/dht.rs": "bbe9dee9758387a8915d3baf002ccdd530d9327fd4e5423f0ff9a5b69a52e5e4",
+        "vendor/mainline/src/rpc/config.rs": "627cabe427b5a81dcd66ee78ac4edbb31ea6475ac9403c0e138dcde516fd6fe0",
+        "vendor/mainline/src/rpc/socket.rs": "21190713fdd70856f5d3f81b93924e9dbe1361bf36b00bcd53cea6ffdfc8f545"
+      },
+      "startedUtc": "2026-09-28T07:21:17.887462+00:00",
+      "dhtEnabled": false,
+      "meshDhtEnabled": false,
+      "quicEnabled": false,
+      "quicDataEnabled": false,
+      "productionPortsAdded": 0,
+      "cycles": [
+        {
+          "cycle": 1,
+          "tcpListeners": 2,
+          "peerTcpListeners": 1,
+          "gatewayUdpListeners": 1,
+          "peerTcpAndUdpSamePort": true,
+          "stalledPartialTlsClients": 1,
+          "perIpCapacityRejectedFourthClient": null,
+          "establishedTlsAwaitingOverlayInit": 1,
+          "certificateSha256": "093fc652fd9bf70e23762272b2cc743f79c24bc0f75d9be79a0032fc76f82946",
+          "exitCode": 0,
+          "udpTransportProbes": [],
+          "shutdownSeconds": 0.113699,
+          "allClientSocketsClosed": true,
+          "peerTcpAndUdpRebound": true
+        },
+        {
+          "cycle": 2,
+          "tcpListeners": 2,
+          "peerTcpListeners": 1,
+          "gatewayUdpListeners": 1,
+          "peerTcpAndUdpSamePort": true,
+          "stalledPartialTlsClients": 0,
+          "perIpCapacityRejectedFourthClient": true,
+          "establishedTlsAwaitingOverlayInit": 3,
+          "certificateSha256": "0a6403b7b3c2485eaff01f71aa129a72415f2ad01aae10300b56976e5d5eddf3",
+          "exitCode": 0,
+          "udpTransportProbes": [],
+          "shutdownSeconds": 0.113641,
+          "allClientSocketsClosed": true,
+          "peerTcpAndUdpRebound": true
+        },
+        {
+          "cycle": 3,
+          "tcpListeners": 2,
+          "peerTcpListeners": 1,
+          "gatewayUdpListeners": 1,
+          "peerTcpAndUdpSamePort": true,
+          "stalledPartialTlsClients": 1,
+          "perIpCapacityRejectedFourthClient": null,
+          "establishedTlsAwaitingOverlayInit": 1,
+          "certificateSha256": "fa0499e465b24da07bbe995767b070f91da1bf1d7deb9e4daee8414fb8cf9059",
+          "exitCode": 0,
+          "udpTransportProbes": [],
+          "shutdownSeconds": 0.113639,
+          "allClientSocketsClosed": true,
+          "peerTcpAndUdpRebound": true
+        }
+      ],
+      "success": true
+    },
+    "shared-all-transports-shutdown.json": {
+      "schemaVersion": 1,
+      "evidenceMode": "live isolated daemon process; not deployed interop proof",
+      "sourceSha": "a43155dec423a13ba038ee256683fe453bca37b3",
+      "dirtyWorktree": false,
+      "binarySha256": "92f200543fbde2ee962acdcf74eaecf0833cd05d86bcb8978df4ffbef9e374db",
+      "harnessSha256": "3a71c2ca306c21940f0d5c00325ba10591e6dc1216dcb759b55f86706a523e73",
+      "transportSourceSha256": {
+        "crates/slskr/src/daemon_serve.rs": "50d58ac4fb35f9e3c380f2ee6afaea49be8026972c1702a4dc0b3d91162c313b",
+        "crates/slskr/src/config_parts/startup.rs": "970ceef95d50e27570131a691a37b7073c38fd926b66384a7e757040b1def716",
+        "crates/slskr/src/config_parts/peer_transport.rs": "bbae1b1657def9258406b95daa94486ac54d9f8afad0c0da6a64c6ea65f1a59a",
+        "crates/slskr/src/private_gateway.rs": "5eb5eb85721435c9c52f20efe671ee44b1469331010bbaf2aa242cf0d7e75965",
+        "crates/slskr/src/private_gateway_owners/gateway_models.rs": "089d52a73578e3755aa59aa915787999c97fb5237d739df0e7671204ae7344b4",
+        "crates/slskr/src/private_gateway_owners/gateway_transport.rs": "efed090c0b1dfd16aa34442e4b75a0bb01ee36e1f0eda015fdc161bc62901857",
+        "crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs": "14ecdf76930e64f1377fa68bd785f6dce54d3b0983da1c39a3b285b454f4b415",
+        "crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs": "fdbb525e3802594b5ae9dfa10aeab6bc1c24b4ffc9dcdfa4a3bc6d6b740c0c0f",
+        "crates/slskr/src/dht.rs": "2b9a142138f030967d2255a6bde2a4f84d46663c2b1d2e1d38d0e89de6ac0531",
+        "crates/slskr/src/quic_alpn.rs": "c47317878d04b21064fdd276c666b86c9cb9a518cdb1d3cbc12567aec654215b",
+        "crates/slskr-client/src/shared_udp.rs": "64734ea6cd527b3bccb16e0cfc4bc1560379c4f4527230643c297ffb25cc9c8e",
+        "crates/slskr-client/src/shared_quic_server.rs": "65adbef6487d7a732c9b1075542415023020f4c901ef11a7dce111a50c83f8f3",
+        "crates/slskr-client/src/quic_control.rs": "19b0d5a9c7dafe9f36eecf96a009fee242d456f2763b4ebbcac4b33d4c31cbb3",
+        "crates/slskr-client/src/quic_data.rs": "7bdf7f7f0b50460e062e14627784ececfc3b0f19d74b62c1bb15d891670c7d3c",
+        "vendor/mainline/src/lib.rs": "1b0bcff3ea9422244bfcd542a5ac98cbb6a401b4fc08f2b5df8321b51e5606fc",
+        "vendor/mainline/src/dht.rs": "bbe9dee9758387a8915d3baf002ccdd530d9327fd4e5423f0ff9a5b69a52e5e4",
+        "vendor/mainline/src/rpc/config.rs": "627cabe427b5a81dcd66ee78ac4edbb31ea6475ac9403c0e138dcde516fd6fe0",
+        "vendor/mainline/src/rpc/socket.rs": "21190713fdd70856f5d3f81b93924e9dbe1361bf36b00bcd53cea6ffdfc8f545"
+      },
+      "startedUtc": "2026-09-28T07:21:19.178462+00:00",
+      "dhtEnabled": true,
+      "meshDhtEnabled": true,
+      "quicEnabled": true,
+      "quicDataEnabled": true,
+      "productionPortsAdded": 0,
+      "cycles": [
+        {
+          "cycle": 1,
+          "tcpListeners": 2,
+          "peerTcpListeners": 1,
+          "gatewayUdpListeners": 1,
+          "peerTcpAndUdpSamePort": true,
+          "stalledPartialTlsClients": 1,
+          "perIpCapacityRejectedFourthClient": null,
+          "establishedTlsAwaitingOverlayInit": 1,
+          "certificateSha256": "d331899d2256e8a9bfd6584b1d8abcda77c0b2269efec62642571d96403f4f2e",
+          "exitCode": 0,
+          "udpTransportProbes": [
+            {
+              "command": "overlay-quic-control-probe",
+              "exitCode": 0,
+              "result": {
+                "probe": "overlay-quic-control",
+                "status": "ok",
+                "duration_ms": 0,
+                "detail": "endpoint=127.0.0.1:59443 envelope=probe certificate_pin=discovered-for-frozen-target"
+              },
+              "outputSha256": "93fe4fe09d363bc80e85e2618b2f0121e7d9ae12474b4cb9d7eb0ba873261363"
+            },
+            {
+              "command": "quic-data-probe",
+              "exitCode": 0,
+              "result": {
+                "probe": "quic-data",
+                "status": "ok",
+                "duration_ms": 0,
+                "detail": "endpoint=127.0.0.1:59443 bytes=28 payload=raw",
+                "bytes": 28
+              },
+              "outputSha256": "f96cba6ab1e1f446a4807caeddf07c034475c7ffc9d838c0e1261d2001706eca"
+            },
+            {
+              "command": "actual DHT ping/reply",
+              "publicSourcePort": true
+            }
+          ],
+          "shutdownSeconds": 0.113619,
+          "allClientSocketsClosed": true,
+          "peerTcpAndUdpRebound": true
+        },
+        {
+          "cycle": 2,
+          "tcpListeners": 2,
+          "peerTcpListeners": 1,
+          "gatewayUdpListeners": 1,
+          "peerTcpAndUdpSamePort": true,
+          "stalledPartialTlsClients": 0,
+          "perIpCapacityRejectedFourthClient": true,
+          "establishedTlsAwaitingOverlayInit": 3,
+          "certificateSha256": "c4f604e88eb65a79c0230550ef5b938a21ab6d7bd380565b9343c8282c4101dc",
+          "exitCode": 0,
+          "udpTransportProbes": [
+            {
+              "command": "overlay-quic-control-probe",
+              "exitCode": 0,
+              "result": {
+                "probe": "overlay-quic-control",
+                "status": "ok",
+                "duration_ms": 0,
+                "detail": "endpoint=127.0.0.1:49265 envelope=probe certificate_pin=discovered-for-frozen-target"
+              },
+              "outputSha256": "8671594a722d3dd698902457f70d6e491ff18dbb6d98a7560e439b12d41e3d8d"
+            },
+            {
+              "command": "quic-data-probe",
+              "exitCode": 0,
+              "result": {
+                "probe": "quic-data",
+                "status": "ok",
+                "duration_ms": 0,
+                "detail": "endpoint=127.0.0.1:49265 bytes=28 payload=raw",
+                "bytes": 28
+              },
+              "outputSha256": "0c70ce6db2b8cae098d1d81ab8764f64ce991f8c720407173539686e26626cd6"
+            },
+            {
+              "command": "actual DHT ping/reply",
+              "publicSourcePort": true
+            }
+          ],
+          "shutdownSeconds": 0.113634,
+          "allClientSocketsClosed": true,
+          "peerTcpAndUdpRebound": true
+        },
+        {
+          "cycle": 3,
+          "tcpListeners": 2,
+          "peerTcpListeners": 1,
+          "gatewayUdpListeners": 1,
+          "peerTcpAndUdpSamePort": true,
+          "stalledPartialTlsClients": 1,
+          "perIpCapacityRejectedFourthClient": null,
+          "establishedTlsAwaitingOverlayInit": 1,
+          "certificateSha256": "402a4b3842fdc5864230886c6694ed88f834db47b73149f526c08e6785c6985d",
+          "exitCode": 0,
+          "udpTransportProbes": [
+            {
+              "command": "overlay-quic-control-probe",
+              "exitCode": 0,
+              "result": {
+                "probe": "overlay-quic-control",
+                "status": "ok",
+                "duration_ms": 0,
+                "detail": "endpoint=127.0.0.1:55447 envelope=probe certificate_pin=discovered-for-frozen-target"
+              },
+              "outputSha256": "138215a03f202a84da825b7ca4f150aaf126a8f21604964348642b20921bf623"
+            },
+            {
+              "command": "quic-data-probe",
+              "exitCode": 0,
+              "result": {
+                "probe": "quic-data",
+                "status": "ok",
+                "duration_ms": 0,
+                "detail": "endpoint=127.0.0.1:55447 bytes=28 payload=raw",
+                "bytes": 28
+              },
+              "outputSha256": "1e9db76a67150ba49d5a87e16eeae7aff9df086261342ef8d69eb5f8db5979ed"
+            },
+            {
+              "command": "actual DHT ping/reply",
+              "publicSourcePort": true
+            }
+          ],
+          "shutdownSeconds": 0.113573,
+          "allClientSocketsClosed": true,
+          "peerTcpAndUdpRebound": true
+        }
+      ],
+      "success": true
+    }
+  }
+}

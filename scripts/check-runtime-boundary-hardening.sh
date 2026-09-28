@@ -589,6 +589,7 @@ if rg -n 'tokio::(task::)?spawn\(' \
   crates/slskr/src/route_dispatch_group_1_events.rs \
   crates/slskr/src/route_dispatch_group_3_admin_controls.rs \
   crates/slskr/src/transfer_completion.rs \
+  crates/slskr/src/virtual_soulfind_v2_controller.rs \
   crates/slskr/src/scripts.rs; then
   printf 'runtime boundary hardening failed: detached administrative worker\n' >&2
   exit 1
@@ -602,6 +603,18 @@ for anchor in ('connections.spawn(', 'connections.shutdown().await', 'impl Drop 
     if anchor not in source:
         raise SystemExit(f'runtime boundary hardening failed: missing forwarding owner {anchor}')
 PYFORWARD
+
+# WebSocket readers stay inside their connection future, including cancellation.
+python3 - <<'PYWS'
+from pathlib import Path
+for name in ('events_ws.rs', 'signalr_ws.rs', 'relay_ws.rs'):
+    path = Path('crates/slskr/src') / name
+    production = path.read_text().split('#[cfg(test)]', 1)[0]
+    if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
+        raise SystemExit(f'runtime boundary hardening failed: detached WebSocket reader in {path}')
+    if 'tokio::pin!(reader_task,' not in production:
+        raise SystemExit(f'runtime boundary hardening failed: missing scoped reader in {path}')
+PYWS
 
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'
