@@ -39,14 +39,17 @@ for suite, budget in [("controller_tests", 2500), ("config_tests", 1200)]:
         lines = len(file.read_bytes().splitlines())
         if lines > budget:
             violations.append(f"{file}: {lines} lines exceed the {budget}-line owner budget")
-for file in (root / "config_parts").glob("*.rs"):
-    lines = len(file.read_bytes().splitlines())
-    if lines > 1200:
-        violations.append(f"{file}: {lines} lines exceed the 1200-line configuration owner budget")
-if len((root / "config.rs").read_bytes().splitlines()) > 400:
-    violations.append("config.rs: aggregate and registry exceed the 400-line budget")
-if re.search(r"\binclude!\s*\(", (root / "config.rs").read_text()):
-    violations.append("config.rs: flat configuration includes are forbidden")
+for directory in ["config_parts", "config_file_parts"]:
+    for file in (root / directory).glob("*.rs"):
+        lines = len(file.read_bytes().splitlines())
+        if lines > 1200:
+            violations.append(f"{file}: {lines} lines exceed the 1200-line configuration owner budget")
+for name, budget in [("config.rs", 400), ("config_file.rs", 300)]:
+    registry = root / name
+    if len(registry.read_bytes().splitlines()) > budget:
+        violations.append(f"{name}: aggregate and registry exceed the {budget}-line budget")
+    if re.search(r"\binclude!\s*\(", registry.read_text()):
+        violations.append(f"{name}: flat configuration includes are forbidden")
 if violations:
     raise SystemExit("\n".join(violations))
 print("controller/configuration ownership check passed")

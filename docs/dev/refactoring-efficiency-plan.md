@@ -6265,3 +6265,27 @@ Boundary checks search the real owners; module hygiene forbids flat includes,
 caps this aggregate at 400 lines, and caps its owners at 1,200 lines.
 This checkpoint is internal-only. The 3,231-line file-configuration model and
 other RF-024 scopes remain open.
+
+## RF-024 File Configuration Model And Validation Owners (2026-09-28 UTC)
+
+Reduced `config_file.rs` from 3,231 lines to a 210-line aggregate and registry.
+Ten domain owners contain the input models and their validation/default
+implementations: federation/membership, filters/shares, foundation, integration,
+media services, network security, peer transport, signal policy, transfer policy,
+and Web security. The largest owner is 863 lines. All 129 original public and
+configuration-scoped declaration bindings remain available from the file-model
+namespace. Nested input-type compatibility exports have targeted unused-import
+allowances; implementation bodies have no such allowance.
+
+Moved `pub(super)` members explicitly retain `crate::config` visibility, and
+moved private members retain file-configuration visibility. Serde attributes,
+field values, layer ordering, validation bodies, and default implementations
+are preserved. The retained audit at
+`benchmarks/artifacts/20260928-rf-config-file-model-owner-extraction.json`
+accounts for all 123,927 original bytes and all 150 original items, proves exact
+reconstruction after reversing visibility edits, and preserves all 22 function/
+method declarations. All 79 configuration tests, 656 default daemon tests,
+strict daemon all-targets Clippy, and full-controller/legacy all-targets compile
+pass. Hygiene caps the aggregate at 300 lines and these owners at 1,200 lines.
+This checkpoint is internal-only. Native Web ownership and other RF-024 scopes
+remain open.
