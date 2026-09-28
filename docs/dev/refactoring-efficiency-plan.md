@@ -1,9 +1,9 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, as of 2026-09-27; RF-002, RF-003, RF-007, RF-032, and RF-036 are verified locally through the retained 2026-09-27 shutdown-overlap proof. RF-024 is reopened after a complete tracked-source inventory found large files outside its earlier scan. RF-001 retains a shared-wire compatibility limit. The live/hosted evidence items listed below remain in progress.
+Status: active whole-project implementation plan, as of 2026-09-28 UTC; RF-002, RF-003, RF-007, RF-032, and RF-036 are verified locally. RF-034 is verified locally and through the retained hosted shared-artifact matrix. RF-024 is reopened after a complete tracked-source inventory found large files outside its earlier scan. RF-001 retains a shared-wire compatibility limit. The live/hosted evidence items listed below remain in progress.
 
 
-Audit baseline date: 2026-09-15; evidence addenda through 2026-09-27
+Audit baseline date: 2026-09-15; evidence addenda through 2026-09-28 UTC
 Baseline HEAD: `0dfab48cd16e6e7910759fa7d60e5d21b7b28be1` (local evidence; the
 working tree contains the implementation batch described in the status column).
 
@@ -140,7 +140,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-026 | `docs/dev/bug-burndown-ledger.md` marks several SDK/docs items verified while the current checks do not exercise the cited behavior. | Audit closure is not evidence-backed. | The ledger now names the executable checks for BUG-020, BUG-030, and BUG-039; docs freshness, SDK example contracts, the aggregate SDK gate, and the remediation baseline pass. Hosted/live compatibility rows remain explicitly separate. | Verified locally; hosted/live evidence separate |
 | RF-032 | `docs/full-network-test-plan.md` mixed a historical all-pass result with a newer missing-artifact plan; `REMEDIATION.md` was a stale snapshot that said daemon tests were excluded even though CI runs them. | Operators could not tell current release evidence from archived history. | The network plan labels dated results historical and points operators to current release/live gates; REMEDIATION is explicitly historical with active-plan links. A scoped local-link and referenced-script audit found no broken current paths; absent script names appear only as proposed work. The server-code count is corrected to the 103-code validated inventory, and docs freshness passes. | Verified locally; fresh live certification remains separate |
 | RF-033 | Council counts had drifted across `docs/dev/council-scan-inventory.md`, `.council/latest-candidate-counts.md`, and the active backlog; benchmark comparison/profile tests were not invoked; frontend configs lacked coverage thresholds. | Audit numbers drift and executable performance/coverage checks are absent. | The generated report now stamps date/commit provenance; active-backlog, inventory-closure, and council-freshness gates validate synchronized copies. Dashboard V8 coverage remains ratcheted in CI/release. CI and release now run the seven benchmark comparison/SQLite profiler unit tests and a focused Web API/session/event-lifecycle coverage gate at 84% statements, 75% branches, 72% functions, and 86% lines; the focused 50-test run passes at 85.54%, 78.13%, 73.91%, and 87.38%. | Verified locally |
-| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS and Linux hosted archives passed, and Windows archive construction, verification, and packaged-binary smoke passed at `339e6812`; shared CI artifact matrix proof remains open. | In progress, local deterministic proof |
+| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS and Linux hosted archives passed, and Windows archive construction, verification, and packaged-binary smoke passed at `339e6812`; all seven hosted archive jobs reuse one verified Web artifact and the complete CI/package workflow passes at `47440cfb`, with retained job/artifact metadata; SDK checks use one canonical TypeScript package build. | Verified locally and hosted archive matrix |
 | RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Retain clean-runner/actionlint evidence before external closure. | Verified locally, external runner open |
 | RF-036 | `crates/slskr-protocol/src/server.rs` repeated server-code variants, inventory metadata, numeric conversion, and direction-specific matches. | Adding a protocol code can update one table and miss another. | A declarative macro owns the variants, numeric values, inventory order, names, and numeric decoding. The 103-code two-direction test inventory classifies every code as typed or opaque and fails if dispatch drifts. All 25 server protocol tests pass. | Verified locally |
 | RF-037 | `crates/slskr-client/src/overlay.rs` combines framing, handshake DTOs, validation, service DTOs, and request lifecycle in about 2,200 lines. | Unrelated changes share one review/compile boundary. | Framing, protocol messages/validation, and TLS/client lifecycle now have separate private modules; `overlay` preserves the public re-exports. The complete locked client package test suite passes. | Verified locally |
@@ -6036,3 +6036,18 @@ A header-only regression advertises the old general maximum and requires
 immediate rejection; another accepts extensions exactly at the initialization
 bound and preserves following bytes. All changes use the existing shared
 port. The legacy byte-level framing ambiguity remains open under RF-001.
+
+## RF-034 Retained Shared Artifact And SDK Closure (2026-09-28 UTC)
+
+GitHub CI run [36359792162](https://github.com/snapetech/slskr/actions/runs/36359792162)
+at `47440cfb` completed successfully: the Web producer, all seven platform
+archive jobs, Windows packaged-binary smoke, native AArch64 tests, Rust/security
+gates, and the downstream package/deployment job.
+`benchmarks/artifacts/20260928-rf-shared-web-hosted-archive-matrix.json` retains
+job links, source commit, the eight artifact identifiers/digests/expiry dates,
+and successful archive verification/download steps. One additional duplicate
+TypeScript build remained in the combined SDK script; the package checker now
+owns that single build and its tracked-dist/package verification. The full
+Go/Python/TypeScript SDK gate passes in 22.2 seconds with a 452.8 MiB peak and
+zero swap. Together with the earlier deterministic TAR/ZIP/SBOM evidence, this
+closes RF-034. The latest source tip still has its own queued hosted CI run.
