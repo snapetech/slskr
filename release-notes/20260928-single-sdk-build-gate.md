@@ -1,6 +1,6 @@
 ---
 category: changed
-audience: contributors
+audience: operators
 area: ci
 action: none
 breaking: false
