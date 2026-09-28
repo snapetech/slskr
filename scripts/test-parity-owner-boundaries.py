@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import tempfile
 import unittest
@@ -40,6 +41,20 @@ class ParityOwnerBoundaryTests(unittest.TestCase):
         )
         self.runner = self.root / 'scripts/run-slskdn-cross-client-interop.sh'
         self.runner.write_text((SCRIPTS / self.runner.name).read_text())
+
+    def test_audit_owners_are_bounded_and_keep_the_entry_point(self):
+        registry = SCRIPTS / 'audit-parity-manifest.py'
+        self.assertLessEqual(len(registry.read_bytes().splitlines()), 700)
+        functions = [node.name for node in ast.parse(registry.read_bytes()).body
+                     if isinstance(node, ast.FunctionDef)]
+        self.assertEqual(functions, ['main'])
+        owners = sorted(SCRIPTS.glob('parity_audit_*.py'))
+        self.assertEqual(len(owners), 16)
+        for owner in owners:
+            self.assertLessEqual(len(owner.read_bytes().splitlines()), 1000, owner.name)
+        self.assertEqual(MANIFEST.run_json.__module__, 'parity_audit_process')
+        self.assertEqual(MANIFEST.validate_live_interop_mapping_contracts.__module__,
+                         'parity_audit_frozen_transport')
 
     def test_backfill_guard_accepts_registered_owner(self):
         MANIFEST.validate_live_interop_mapping_contracts(self.root)

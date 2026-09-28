@@ -6453,3 +6453,30 @@ manifest remains blocked by absent `target/react-webui-audit/audit.json`.
 A separate extraction-equivalence fixture disables differential execution and
 browser proof, preserving needs-proof states; it is not live parity evidence.
 RF-024 and the missing UI/evidence tasks remain open.
+
+## RF-024 Parity Audit Domain Owners (2026-09-28 UTC)
+
+Replaced the 3,589-line parity manifest implementation with a 605-line entry
+point and sixteen real modules for API/security, configuration, WebUI,
+persistence, files, operators, protocol, live catalogs/contracts/evidence,
+transport/UI evidence, completeness, subprocess admission, and shared
+constants. Every original function and constant binding remains at the entry
+point. No dynamic execution or shared global namespace is used.
+
+`benchmarks/artifacts/20260928-rf-parity-audit-owner-extraction.json`
+accounts for every original byte and item with exact reconstruction. All 41
+public function bodies and all constant declarations match the original AST,
+including nested function bodies. Seven boundary/ownership regressions,
+Python compilation, audit tooling, and process-memory policy gates pass.
+The complete before/after extraction fixtures match all 19,216 entries when
+fed identical captured frozen inventory inputs. Those fixtures disable live
+and differential proof execution and preserve needs-proof states; they are
+not live parity evidence. Fresh controller inventory provenance can vary
+because unsorted `rg --files` results choose among duplicate route sources;
+that separate determinism issue remains to repair.
+
+The normal reused-evidence manifest still requires the absent React audit
+artifact. Rust and script owners are structurally bounded, while the broader
+source scan also identifies native Web `static/styles.css` at 3,316 lines.
+RF-024 remains open for that stylesheet and its remaining evidence scope.
+This extraction checkpoint is internal-only.
