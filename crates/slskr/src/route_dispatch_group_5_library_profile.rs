@@ -332,15 +332,9 @@ async fn route_dispatch_group_5_library_profile(
         // ADDITIONAL MISSING USER ENDPOINTS (Phase 5)
         ("GET", "/api/profile/me") => {
             if route.path.starts_with("/api/v0/") {
-                let session = state.session.read().await;
-                let display_name = session
-                    .username
-                    .clone()
-                    .or_else(|| state.config.username.clone())
-                    .unwrap_or_else(|| "Unknown".to_owned())
-                    .trim()
-                    .to_owned();
-                drop(session);
+                let display_name = pod_request_peer_id(state)
+                    .await
+                    .unwrap_or_else(|| "Unknown".to_owned());
                 let descriptor = match local_capability_descriptor(state).await {
                     Ok(descriptor) => descriptor,
                     Err(error) => return Ok(routing::service_unavailable_response(&error)),
@@ -420,15 +414,9 @@ async fn route_dispatch_group_5_library_profile(
             if !peer_id.eq_ignore_ascii_case(&local_peer_id) {
                 return Ok(routing::not_found_response());
             }
-            let session = state.session.read().await;
-            let display_name = session
-                .username
-                .clone()
-                .or_else(|| state.config.username.clone())
-                .unwrap_or_else(|| "Unknown".to_owned())
-                .trim()
-                .to_owned();
-            drop(session);
+            let display_name = pod_request_peer_id(state)
+                .await
+                .unwrap_or_else(|| "Unknown".to_owned());
             return Ok(routing::ok_response(
                 serde_json::json!({
                     "peerId": local_peer_id,

@@ -30,7 +30,8 @@ const asRecords = (value) =>
 const normalizeContact = (contact, index) => ({
   ...contact,
   id: contact.id ?? `contact-${index}`,
-  nickname: typeof contact.nickname === 'string' ? contact.nickname : '',
+  nickname: typeof contact.nickname === 'string' ? contact.nickname
+    : typeof contact.username === 'string' ? contact.username : '',
   peerId: String(contact.peerId ?? ''),
 });
 

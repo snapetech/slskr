@@ -304,13 +304,9 @@ async fn route_dispatch_group_7_media_profile_import(
                     Ok(descriptor) => descriptor,
                     Err(error) => return Ok(routing::bad_request_response(&error)),
                 };
-                let session = state.session.read().await;
-                let display_name = session
-                    .username
-                    .clone()
-                    .or_else(|| state.config.username.clone())
+                let display_name = pod_request_peer_id(state)
+                    .await
                     .unwrap_or_else(|| "local".to_owned());
-                drop(session);
                 let expires_at =
                     chrono::Utc::now() + chrono::Duration::hours(i64::from(expires_in_hours));
                 let profile_peer_id = local_profile_peer_id(state);

@@ -7357,3 +7357,37 @@ source hashes are retained in
 streaming gates now require Sintel alone, matching their actual dependency.
 The real nine-case sharing/streaming run is pending at this checkpoint;
 RF-066 remains open until its actual acceptance evidence is complete.
+
+## RF-066 Real Invite/Contact Browser Flow (2026-09-28 UTC)
+
+The first actual optional-media run exposed product/test contract failures:
+four cases failed and five serial cases did not run. The contact UI supplied
+an invite link but omitted the username required by the current contact API.
+The native profile/invite generator also read the deliberately redacted
+session snapshot, producing a masked contact address. Native profile/invite
+display names now use the runtime/configured identity resolver already used
+by capability descriptors; session summary redaction remains intact.
+
+The web adapter decodes bounded version-1 UTF-8 invite payloads, rejects invalid
+or expired links before posting, and sends the extracted address-book username.
+Username-only contact records display as named, unverified contacts. Imports
+do not authenticate profiles or grant transport/share permissions. The real
+`invite_add_friend` browser case passes against three rebuilt native nodes,
+each using one loopback peer TCP/UDP port, with external login disabled.
+
+Validation passes 704 daemon tests (one ignored mount fixture), 930 web tests,
+strict Clippy, and full-controller/legacy all-targets compilation. Source/log
+hashes and scope are retained in
+`benchmarks/artifacts/20260928-rf-native-profile-contact-invite.json`.
+Other playback cases still use stale group setup, outgoing-share discovery,
+or raw query tokens instead of the current stream-ticket exchange. These
+failures are established by a real run and keep RF-066 open.
+
+## RF-006 Later Completed Hosted Lifecycle Matrix (2026-09-28 UTC)
+
+Run `36391848047` at exact commit `59ddda17` completed successfully across all
+eleven CI jobs, including Windows archive smoke and package/deployment surfaces.
+The retained job/step receipt is
+`benchmarks/artifacts/20260928-rf-hosted-59dd-complete-matrix.json`. It covers
+the script process-group and scoped WebSocket reader ownership checkpoints.
+Later lifecycle/media/profile changes still require their own hosted result.

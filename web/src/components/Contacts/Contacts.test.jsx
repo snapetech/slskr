@@ -27,6 +27,13 @@ const renderContacts = () =>
   );
 
 describe('Contacts', () => {
+  it('renders legacy username records as unverified named contacts', async () => {
+    identityAPI.getContacts.mockResolvedValue({ data: [{ id: 'contact-1', username: 'nodeA' }] });
+    renderContacts();
+    const row = await screen.findByTestId('contact-row-nodeA');
+    expect(row).toHaveTextContent('nodeA');
+    expect(row).toHaveTextContent('Unverified');
+  });
   beforeEach(() => {
     identityAPI.getContacts.mockResolvedValue({ data: [] });
     identityAPI.getNearby.mockResolvedValue({ data: [] });

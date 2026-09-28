@@ -1,6 +1,52 @@
 use super::fixtures::*;
 
 #[tokio::test]
+async fn native_profile_and_invite_use_identity_instead_of_redacted_session_snapshot() {
+    use base64::Engine;
+    let (state, _commands) =
+        test_state_with_env(MapEnv::default().with("SLSKD_SLSK_USERNAME", "profile-owner"));
+    *state.runtime_credentials.write().await = Some(crate::LoginCredentials {
+        username: "runtime-owner".to_owned(),
+        password: "test-only".to_owned(),
+        major_version: 157,
+        minor_version: 100,
+    });
+    state.session.write().await.username = Some("r***r".to_owned());
+    let profile = crate::route_http_request("GET", "/api/v0/profile/me", None, "", &state)
+        .await
+        .unwrap();
+    assert_eq!(profile.status, "200 OK");
+    let profile: serde_json::Value = serde_json::from_str(&profile.body).unwrap();
+    assert_eq!(profile["displayName"], "runtime-owner");
+    let invite = crate::route_http_request(
+        "POST",
+        "/api/v0/profile/invite",
+        None,
+        r#"{"expiresInHours":24}"#,
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(invite.status, "200 OK");
+    let invite: serde_json::Value = serde_json::from_str(&invite.body).unwrap();
+    let encoded = invite["inviteLink"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("slskdn://invite/")
+        .unwrap();
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .unwrap();
+    let decoded: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+    assert_eq!(decoded["Profile"]["DisplayName"], "runtime-owner");
+    assert_eq!(
+        state.session.read().await.username.as_deref(),
+        Some("r***r")
+    );
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn webhook_update_and_delete_share_one_persistence_order() {
     let db = crate::persistence::DatabaseManager::in_memory()
         .await
