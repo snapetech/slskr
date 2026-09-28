@@ -5,10 +5,11 @@ configuration was changed during this investigation.
 
 ## Findings
 
-- GitLab accepted `main` through `b9679f30404c5f8523c402e035ceda925d475f50`;
+- GitLab accepted `main` through `4cc18c269fb741b98f15c7b9207405c02b274ea6`;
   `git ls-remote gitlab refs/heads/main` returned that exact commit.
 - GitLab's internal `allowed` and `post_receive` endpoints returned HTTP 200
-  for the `a96953a2` to `b9679f30` push at 2026-09-28 22:33 UTC.
+  for pushes through `b9679f30` and for the `b9679f30` to `4cc18c26` push at
+  2026-09-28 22:39 UTC.
 - A read-only query of GitLab project 44's pipeline partitions still showed
   pipeline #81 as the newest record, created 2026-05-17. No pipeline record
   exists for the accepted current `main` tip.

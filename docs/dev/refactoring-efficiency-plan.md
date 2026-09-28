@@ -7917,8 +7917,9 @@ so the original browser finding remains open pending deployed revalidation.
 
 ## RF-008/RF-067 GitLab Post-Receive Check (2026-09-28 UTC)
 
-The repaired GitLab accepted pushes through `b9679f30`, and its internal
-`post_receive` endpoint returned HTTP 200. Direct pipeline-table inspection
+The repaired GitLab accepted pushes through `4cc18c26`, and its internal
+`post_receive` endpoint returned HTTP 200 for the latest push at 22:39 UTC.
+Direct pipeline-table inspection
 still shows no run newer than pipeline #81 from 2026-05-17, despite the project
 having CI enabled and using the repository's default `.gitlab-ci.yml` path. The
 configured GitLab MCP token returns 401. Post-receive worker lease warnings
