@@ -144,7 +144,13 @@ fn native_shell_contains_in_app_confirmation_modal_styles() {
     let html = route_page_html("/downloads");
     assert!(html.contains("Cancel"));
     assert!(html.contains("Remove"));
-    let css = include_str!("../../static/styles.css");
+    let manifest: Vec<String> =
+        serde_json::from_str(include_str!("../../static/styles.manifest.json")).unwrap();
+    let static_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static");
+    let css: String = manifest
+        .iter()
+        .map(|owner| std::fs::read_to_string(static_root.join(owner)).unwrap())
+        .collect();
     for value in [
         "slskr-modal-backdrop",
         "slskr-modal",

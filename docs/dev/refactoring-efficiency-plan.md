@@ -6480,3 +6480,27 @@ artifact. Rust and script owners are structurally bounded, while the broader
 source scan also identifies native Web `static/styles.css` at 3,316 lines.
 RF-024 remains open for that stylesheet and its remaining evidence scope.
 This extraction checkpoint is internal-only.
+
+## RF-024 Native Stylesheet Source Owners (2026-09-28 UTC)
+
+Replaced the 3,316-line native stylesheet with fourteen ordered source owners
+and a small manifest. The largest owner is 403 lines. The existing native
+Web build now assembles one distribution `styles.css`; it adds no browser
+requests and no dedicated ports. All 57,794 original bytes, all 456 top-level
+rules, and their exact cascade order survive unchanged. The distribution
+stylesheet remains a generated artifact, rather than a large tracked source.
+
+`benchmarks/artifacts/20260928-rf-native-style-owner-extraction.json`
+retains owner hashes and exact reconstruction. The complete release WASM /
+wasm-bindgen packaging build passes and emits a stylesheet with the original
+hash. All 86 Web tests, strict all-targets Clippy, the locked WASM check, six
+builder regressions, audit tooling, and style-owner hygiene pass. The native
+confirmation-modal contract reads the ordered source owners. The builder
+rejects empty, duplicate, omitted, escaping, and noncanonical manifests.
+The operator fragment records the source/build materialization change.
+
+The broad tracked source scan now has no code file above 2,500 lines;
+RF-024's structural source split is complete. The retained extraction and
+feature proofs remain distinct from missing deployed/live parity evidence.
+Hosted validation and the remaining full-program lifecycle/evidence work
+remain open; this checkpoint does not declare the RF program complete.

@@ -24,6 +24,7 @@ scripts/with-process-memory-guard.sh python3 -m py_compile \
   "$transport_deriver" "$transport_capability_deriver" "$transport_test" \
   "$lifecycle_runner" "$lifecycle_test"
 python3 scripts/test-parity-owner-boundaries.py
+python3 scripts/test-native-style-owners.py
 scripts/with-process-memory-guard.sh python3 "$transport_test"
 scripts/with-process-memory-guard.sh python3 "$lifecycle_test"
 

@@ -89,6 +89,12 @@ for old_source, owner_directory in [("search_planning.rs", "search_planning_owne
         lines = len(file.read_bytes().splitlines())
         if lines > 1000:
             violations.append(f"{file}: {lines} lines exceed the 1000-line Web owner budget")
+for file in (web_root.parent / "static/style_parts").glob("*.css"):
+    lines = len(file.read_bytes().splitlines())
+    if lines > 1000:
+        violations.append(f"{file}: {lines} lines exceed the 1000-line native style owner budget")
+if (web_root.parent / "static/styles.css").exists():
+    violations.append("native styles.css must be a generated distribution asset")
 if violations:
     raise SystemExit("\n".join(violations))
 print("controller/configuration ownership check passed")

@@ -1,0 +1,91 @@
+@media (max-width: 760px) {
+  .slskr-appbar,
+  .slskr-functional-layout,
+  .slskr-workspace-grid,
+  .slskr-workflow-grid,
+  .slskr-native-grid,
+  .slskr-native-split-detail,
+  .slskr-native-graph,
+  .slskr-player {
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-player {
+    position: static;
+  }
+
+  .slskr-rustymilk-panel {
+    bottom: 12px;
+    max-width: calc(100vw - 24px);
+  }
+
+  .slskr-rustymilk-panel header,
+  .slskr-rustymilk-panel footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  body {
+    padding-bottom: 0;
+  }
+
+  .slskr-main {
+    padding: 12px;
+  }
+
+  .slskr-page-header,
+  .slskr-work-area > header,
+  .slskr-workflow-primary > header,
+  .slskr-reference-panel header {
+    flex-direction: column;
+  }
+
+  .slskr-route-actions li,
+  .slskr-runtime li,
+  .slskr-native-row,
+  .slskr-route-live li {
+    align-items: start;
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-workbench-surface {
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-workbench-surface header {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .slskr-wishlist-ignore-panel > header,
+  .slskr-wishlist-ignore-add,
+  .slskr-wishlist-policy-panel > header,
+  .slskr-wishlist-policy-grid {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-wishlist-run-ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .slskr-wishlist-ignore-rule {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .slskr-transfer-request-workspace > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .slskr-transfer-column-chooser > div {
+    left: 0;
+    right: auto;
+  }
+
+  .slskr-transfer-request-actions,
+  .slskr-transfer-request-inline {
+    flex-wrap: wrap;
+  }
+}
