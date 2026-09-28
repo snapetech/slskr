@@ -363,3 +363,73 @@ async fn server_state_response_releases_session_lock_while_credentials_are_queue
     }
     fs::remove_dir_all(&state.config.state_dir).expect("remove session lock test state");
 }
+
+#[tokio::test]
+async fn musicbrainz_overlay_routes_accept_namespaces_and_reject_paths() {
+    let (state, _session_commands) = test_state_with_env(MapEnv::default());
+    let created = crate::route_http_request(
+        "POST",
+        "/api/v0/musicbrainz/overlays/edits",
+        None,
+        r#"{"type":"Other","targetType":"Recording","targetId":"recording-1","field":"title","value":"Title","evidence":[{"type":"WorkRef","reference":"reference-1"}]}"#,
+        &state,
+    ).await.expect("create overlay edit");
+    assert_eq!(created.status, "200 OK");
+    let edit_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["edit"]
+        ["editId"]
+        .as_str()
+        .expect("edit id")
+        .to_owned();
+    let route = format!("/api/v0/musicbrainz/overlays/edits/{edit_id}/routes");
+    for (body, expected) in [
+        (
+            serde_json::json!({}),
+            "At least one target peer is required.",
+        ),
+        (
+            serde_json::json!({"targetPeerIds":["actor:peer-1"]}),
+            "Routing backend is not available.",
+        ),
+        (
+            serde_json::json!({"targetPeerIds":["https://example.com/peer"]}),
+            "Route targets must be opaque and safe.",
+        ),
+        (
+            serde_json::json!({"targetPeerIds":["../peer"]}),
+            "Route targets must be opaque and safe.",
+        ),
+        (
+            serde_json::json!({"targetPeerIds":["actor:peer-1"],"channelId":"/etc/passwd"}),
+            "Route metadata must be opaque and safe.",
+        ),
+        (
+            serde_json::json!({"targetPeerIds":["actor:peer-1"],"senderPeerId":"https://example.com/actor"}),
+            "Route metadata must be opaque and safe.",
+        ),
+        (
+            serde_json::json!({"targetPeerIds":["x".repeat(257)]}),
+            "Route targets must be opaque and safe.",
+        ),
+    ] {
+        let response = crate::route_http_request("POST", &route, None, &body.to_string(), &state)
+            .await
+            .expect("route overlay edit");
+        assert_eq!(response.status, "400 Bad Request");
+        let attempt = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(attempt["errorMessage"], expected, "{attempt}");
+        assert_eq!(attempt["success"], false);
+        if body.get("channelId").is_none() {
+            assert_eq!(attempt["channelId"], format!("edit:{edit_id}"));
+        }
+        let readback = crate::route_http_request("GET", &route, None, "", &state)
+            .await
+            .expect("read overlay routing attempts");
+        assert_eq!(readback.status, "200 OK");
+        assert!(serde_json::from_str::<serde_json::Value>(&readback.body)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .contains(&attempt));
+    }
+    fs::remove_dir_all(&state.config.state_dir).expect("remove overlay route test state");
+}

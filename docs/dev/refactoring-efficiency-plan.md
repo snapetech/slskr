@@ -6085,3 +6085,34 @@ flat includes and controller test owners over 2,500 lines. This is internal-only
 work. The full-controller/legacy all-targets compile, runtime boundary hardening,
 formatter, and ownership/hygiene gates pass. RF-024 remains open for its broader
 tracked-source scope; bounded execution gates are recorded after they finish.
+
+## MusicBrainz Overlay Routing Differential Repair (2026-09-28 UTC)
+
+Bounded API group 2 exposed a real validation mismatch: overlay routing used
+an opaque-reference validator that rejected its generated `edit:<id>` channel
+and namespaced `actor:<id>` peers. Overlay routing now shares the existing
+bounded artist-radar identifier validator. A focused regression checks empty
+peers, namespaced peers, path/URL metadata and targets, oversized identifiers,
+and durable readback of every failed attempt. All 651 default daemon tests and
+bounded API group 2 pass; strict daemon all-targets Clippy passes. The behavior
+fix has its own release fragment. API group 1 also passes through the extracted
+controller owners at clean commit `3552f9ed`.
+
+## RF-024 Native Web Rendering Ownership (2026-09-28 UTC)
+
+A complete tracked-source scan found the 5,822-line native Web renderer outside
+the earlier daemon/Web-JSX closure inventory. Its 121 functions now live in
+nine owners: route data projections, reference panels, native rows, tabs,
+workspace panels, workflow rendering, shell startup, table navigation, and
+transfer controls. WASM-only navigation and controls retain module guards;
+public rendering and WASM exports retain their signatures. Exact pre-format
+reconstruction accounts for all 278,732 bytes, and the formatted function-name
+inventory matches. The largest owner is 1,339 lines.
+
+`benchmarks/artifacts/20260928-rf-native-web-rendering-owner-extraction.json`
+retains the source/item and formatted-module hashes; source snapshots remain
+under `target/rf-web-rendering-owner-backup/`. All 86 native Web tests, strict
+all-targets Web Clippy, and the locked WASM-target compile pass. This is an
+internal-only ownership move. Across tracked Rust files, the largest remaining
+source is daemon `config.rs` at 4,703 lines; RF-024 stays open while broader
+ownership and bounded execution gates continue.

@@ -1,0 +1,800 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "3552f9ed5127dac713e68eadf1067d95b82e40cc",
+  "sourcePath": "crates/slskr-web/src/route_rendering.rs",
+  "sourceBytes": 278732,
+  "sourceSha256": "487ebd026cb1e5d92ea01459d0b52fc926649718194b503489eabdceb3d498b4",
+  "functions": 121,
+  "byteReconstructionVerified": true,
+  "items": [
+    {
+      "name": "route_kind",
+      "owner": "route_data_projection",
+      "sourceBytes": 911,
+      "sha256": "f30734466debe531b6525ad414c2681b921007b71bbf9cf98d930703dd597b40"
+    },
+    {
+      "name": "response_count",
+      "owner": "route_data_projection",
+      "sourceBytes": 275,
+      "sha256": "cfc7e06a078bef606050c9cbb0c3db477d9d5ac0a413ba59d115949dcce03569"
+    },
+    {
+      "name": "response_numeric_sum",
+      "owner": "route_data_projection",
+      "sourceBytes": 340,
+      "sha256": "23bc8b1b5fc8c2210ca75880fabdf854254957b632cbce3074362d13237fccbf"
+    },
+    {
+      "name": "response_bool_count",
+      "owner": "route_data_projection",
+      "sourceBytes": 278,
+      "sha256": "3c9834c863fa023e3a7b8b803626523a46b7556feb83dcf5dd065b445adcf65d"
+    },
+    {
+      "name": "response_online_count",
+      "owner": "route_data_projection",
+      "sourceBytes": 510,
+      "sha256": "18e1a85bc62732da4a6814b96062ce1b48663cddce563288a0b171aa11479eb9"
+    },
+    {
+      "name": "response_value",
+      "owner": "route_data_projection",
+      "sourceBytes": 277,
+      "sha256": "8e5929f9968c02c5924a373aedbe3b18a4a4db20dde060ff4b649624333f4857"
+    },
+    {
+      "name": "status_chip_html",
+      "owner": "route_data_projection",
+      "sourceBytes": 210,
+      "sha256": "39c5138842656ca00b3bb547206e6613c99b9183313377ae8538825d0023e5cb"
+    },
+    {
+      "name": "json_endpoint_value",
+      "owner": "route_data_projection",
+      "sourceBytes": 271,
+      "sha256": "bbfd9f5b2ac148bf6a7d2ea44b8655be32610001bda269cec18ad5020d9047bb"
+    },
+    {
+      "name": "value_array",
+      "owner": "route_data_projection",
+      "sourceBytes": 672,
+      "sha256": "b9f762f246506bc487a3181d6be580c47b7b8fe892f07a5fe74a2d55c4ae979b"
+    },
+    {
+      "name": "endpoint_array",
+      "owner": "route_data_projection",
+      "sourceBytes": 217,
+      "sha256": "a79e30d43ec6b19b56bdc70cc9af1f5e5c1f2dca10c2ae092edcdf6e212f5568"
+    },
+    {
+      "name": "value_at_path",
+      "owner": "route_data_projection",
+      "sourceBytes": 361,
+      "sha256": "58cdba27896f9bd6b9a650ad6abe2ff8351021eea95afc09241e970885dd6f63"
+    },
+    {
+      "name": "value_text",
+      "owner": "route_data_projection",
+      "sourceBytes": 601,
+      "sha256": "4e6afdcbeb435f1f84e045b5996bb02bacc1ff5981f9ad408c5f0d2039f484ba"
+    },
+    {
+      "name": "value_number",
+      "owner": "route_data_projection",
+      "sourceBytes": 431,
+      "sha256": "97a79df428dc34954edafca741b60f868b5e1f30f4acb7c1336c807f1c58cc91"
+    },
+    {
+      "name": "value_bool",
+      "owner": "route_data_projection",
+      "sourceBytes": 604,
+      "sha256": "6a80f6954fdb8a8b155f0cc5f133c21761de863bc1020c73e214595e847328ff"
+    },
+    {
+      "name": "nested_items",
+      "owner": "route_data_projection",
+      "sourceBytes": 268,
+      "sha256": "23fa12760661992c87bdf4ea07762a82f1d0bb3d44453ccad9e52e83cdb5a10f"
+    },
+    {
+      "name": "value_count",
+      "owner": "route_data_projection",
+      "sourceBytes": 526,
+      "sha256": "f6b579b7d0c56ab54ff9c2cf37dd929784edb9f4010ff57fc34b15b8dc8aa343"
+    },
+    {
+      "name": "value_text_with_parent",
+      "owner": "route_data_projection",
+      "sourceBytes": 233,
+      "sha256": "6d30f535233d9635587d2be9daf778bf05ca0f25f60257ec6b977547ae8c6205"
+    },
+    {
+      "name": "value_number_with_parent",
+      "owner": "route_data_projection",
+      "sourceBytes": 236,
+      "sha256": "5acea76bec6471066d8a8962d65b112edd87c85702f3f9b7f9aff58321ee3d78"
+    },
+    {
+      "name": "format_speed",
+      "owner": "route_data_projection",
+      "sourceBytes": 439,
+      "sha256": "81ef632d5085cb880ca656da9b652e0f5d8f5b78dfe6315885fb7d2e34791194"
+    },
+    {
+      "name": "first_nested_text",
+      "owner": "route_data_projection",
+      "sourceBytes": 236,
+      "sha256": "e803ab8bad49cb8877e5754bd4a6f361e383f3af0afd30b5cd2217152bce47d6"
+    },
+    {
+      "name": "format_transfer_progress",
+      "owner": "route_data_projection",
+      "sourceBytes": 967,
+      "sha256": "f50aac488ff7307dbdf61e806fb51843104480e0d45d61db4d3d5e8d0adfb89b"
+    },
+    {
+      "name": "row_meta_with_id",
+      "owner": "route_data_projection",
+      "sourceBytes": 204,
+      "sha256": "d10512acd303ee02135db237e55a5751099333fa7110fe6d2262168b1f131630"
+    },
+    {
+      "name": "browse_response_entries",
+      "owner": "route_data_projection",
+      "sourceBytes": 628,
+      "sha256": "d3e2f58dd022f35878717f326c7dac9e8dd8a82e8ae085fda02f62e63616cec6"
+    },
+    {
+      "name": "route_dynamic_rows",
+      "owner": "route_data_projection",
+      "sourceBytes": 18252,
+      "sha256": "e1d93daee27173914c467d59dde505a98436e4e8a8955af33ea0dcda50f71ecd"
+    },
+    {
+      "name": "reference_field_html",
+      "owner": "route_reference_panels",
+      "sourceBytes": 292,
+      "sha256": "52a563be65f9a9ab1ee4ebfddafd0a313cf2091b1c32e32412fd3fa29f96d68c"
+    },
+    {
+      "name": "reference_buttons_html",
+      "owner": "route_reference_panels",
+      "sourceBytes": 344,
+      "sha256": "dedacd84009da2a55258f221e8bb4fb03a65686309084d52ac3545283e1babd0"
+    },
+    {
+      "name": "route_component_parity_attrs",
+      "owner": "route_reference_panels",
+      "sourceBytes": 1334,
+      "sha256": "4b4a92dacc25c93abd582b9302bb574f487a74e53459e906664affde2c28ec6e"
+    },
+    {
+      "name": "route_component_parity_class",
+      "owner": "route_reference_panels",
+      "sourceBytes": 864,
+      "sha256": "a781a773bf58088a018e1c4f7f69b379ce533c5aa3744426764ea21b67c70748"
+    },
+    {
+      "name": null,
+      "owner": "route_reference_panels",
+      "sourceBytes": 127,
+      "sha256": "69ee54000ded7a6a7f0a8cf99e8523efb83dfca25c58ed76a36433ffc6fa5a93"
+    },
+    {
+      "name": "route_reference_panel_html",
+      "owner": "route_reference_panels",
+      "sourceBytes": 9922,
+      "sha256": "7654da6775c9f6451adc1c9491ff71f9556120a5199be2913f7713d84ffb0d79"
+    },
+    {
+      "name": "native_row_cards_html",
+      "owner": "native_row_rendering",
+      "sourceBytes": 881,
+      "sha256": "60389e69e51f6bf9684fc686b339d6f56abf67f5ae2ee5c08f1caddf30055a38"
+    },
+    {
+      "name": "native_table_html",
+      "owner": "native_row_rendering",
+      "sourceBytes": 3081,
+      "sha256": "b5143f11b6262afd79b04c5cae03de2af8d4dd8333461be07464ed433285182e"
+    },
+    {
+      "name": "native_meta_cell_html",
+      "owner": "native_row_rendering",
+      "sourceBytes": 4245,
+      "sha256": "dba41f046ec3c23377f72c5b1e7b24cf36a02108fe364bc926e1b00e17594668"
+    },
+    {
+      "name": "native_progress_percent",
+      "owner": "native_row_rendering",
+      "sourceBytes": 295,
+      "sha256": "9c7f6e6a6ea1d67614325d08934d6a7311455f872b4f0c84c2ba444dc9b3428b"
+    },
+    {
+      "name": "native_row_detail_list",
+      "owner": "native_row_rendering",
+      "sourceBytes": 3234,
+      "sha256": "c543d8aba4684c6d5f3d0c4b42b37a3c08b732b655b1dac98dc80be4724907ea"
+    },
+    {
+      "name": "native_row_action_summary",
+      "owner": "native_row_rendering",
+      "sourceBytes": 1829,
+      "sha256": "eb3060f85d4aee854fbbb6d1f1c109a94c5aa915056dba9a206026a176c1235f"
+    },
+    {
+      "name": "native_row_data_attrs",
+      "owner": "native_row_rendering",
+      "sourceBytes": 4871,
+      "sha256": "e0e85ac165dc92bf23b1c35d9829d733cbac78d545bfae52b3924ad4382c2813"
+    },
+    {
+      "name": "native_row_embedded_id",
+      "owner": "native_row_rendering",
+      "sourceBytes": 294,
+      "sha256": "c14650735f28c20b8430d8ffc9dd6a20952bce371946d01200c2ba62d16ec7eb"
+    },
+    {
+      "name": "native_row_resource_id",
+      "owner": "native_row_rendering",
+      "sourceBytes": 952,
+      "sha256": "2a97ee424508cbf80642da2355fb377f67185e9f049c05df0b32451cffdac333"
+    },
+    {
+      "name": "native_resource_candidate",
+      "owner": "native_row_rendering",
+      "sourceBytes": 355,
+      "sha256": "fe775b35bce9d5166e0ea224743b4ee45f655e55238bcfa048dd372f07165915"
+    },
+    {
+      "name": "native_row_action_labels",
+      "owner": "native_row_rendering",
+      "sourceBytes": 2221,
+      "sha256": "3bc1758dfccd4a51352f1b132bd2a6f02c1c58cbf3675b9ecfbcd8522265fea6"
+    },
+    {
+      "name": "native_row_action_buttons_html",
+      "owner": "native_row_rendering",
+      "sourceBytes": 437,
+      "sha256": "dd1af87d5d64a57b5bed4a689c4f445f809922478d421d79e4d7a2bd734734d7"
+    },
+    {
+      "name": "native_route_table_html",
+      "owner": "native_row_rendering",
+      "sourceBytes": 2723,
+      "sha256": "a058a740d0e30aa2c54a6c9cc95cf1efedb0a0c9127cc34037e706daec85747a"
+    },
+    {
+      "name": "native_stat_html",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 219,
+      "sha256": "1fff9a436472e1c8f03d3bdb86b65e18c28e69414d46e3c39aba9b1f28b7eb06"
+    },
+    {
+      "name": "native_tab_labels",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 1963,
+      "sha256": "cad8d42416453b6dbec424ecbec224c3f7bfef6e180c9fa9652939ad0ef7a651"
+    },
+    {
+      "name": "native_tab_detail",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 9073,
+      "sha256": "ed4f429c0c43aebdf144b18dde1c7f0298cb22d382778b970b1882fc79adb089"
+    },
+    {
+      "name": "native_tabs_html",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 1339,
+      "sha256": "acc1358f6d67b42e04ffdbbfec5c603ef58b36395e2af373cc31701f9b0e922f"
+    },
+    {
+      "name": "native_tab_panel_html",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 1407,
+      "sha256": "f371f9c41c877ede01131ead20608291d3f9b65cc022be51bd6f80c3723121cc"
+    },
+    {
+      "name": "native_system_tab_panel_html",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 2142,
+      "sha256": "74aca3802bd5dfa58a3b5c04c2a12c8dfa967e2cdf82ccac64dcacb2afd15c9d"
+    },
+    {
+      "name": "native_system_live_rows",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 3288,
+      "sha256": "6393a5cebd5fc7da5507b25c82ebc1fcbe1a7daa46784832b45fbbf8da0200c1"
+    },
+    {
+      "name": "native_system_tab_rows",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 10886,
+      "sha256": "e1f47c65eb60623d607fbb011912697767d93eb51e51ec5d016b0aab6738d0d3"
+    },
+    {
+      "name": "native_tab_controls",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 3633,
+      "sha256": "5f16effc6e8ae3d88e8447c729b56089c20166d767e3ed8d1fd975373744bf38"
+    },
+    {
+      "name": "native_tab_fields",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 2141,
+      "sha256": "d40da2a2f595f9b8569da50b04acf57fa23e1e853b22a7e19336bcad43e25877"
+    },
+    {
+      "name": "native_tab_facts",
+      "owner": "native_tab_rendering",
+      "sourceBytes": 2658,
+      "sha256": "aef1a5b9846446d96821e5feb283ec63701a06390e8a4fce0319307a4a2d4848"
+    },
+    {
+      "name": "native_filter_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 563,
+      "sha256": "3617b48d8f96db12af28500098eb5e6e6eaafe7301ec478912da77fd292830a1"
+    },
+    {
+      "name": "native_inspector_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 892,
+      "sha256": "c4c8aaec04aa7d54ee81a6cb4d6df078c15146cfea0e1934dbb9c358930ddf32"
+    },
+    {
+      "name": "native_selection_preview_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 649,
+      "sha256": "2fe5312c8def26d9a910974572ff20729cf0e7b0fb5fda41b20a8859808f8cde"
+    },
+    {
+      "name": "native_editor_field_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 181,
+      "sha256": "d08688cf1460113872c234304a2af46b33551ebcbf19a5e54224746cde791be4"
+    },
+    {
+      "name": "native_editor_text_field_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 288,
+      "sha256": "5ae3c9d6d58274e8d8b524040c00f31c7c0c5f3f843867a39906e5c6fad19737"
+    },
+    {
+      "name": "native_editor_checkbox_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 310,
+      "sha256": "bffe37759ca4e7f444053b6a556606c85d82523042a6b2d6b1454911e51fbb23"
+    },
+    {
+      "name": "native_editor_action_buttons",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 228,
+      "sha256": "0d1f7f88a453d5f5d2a91d05533e1ce4499bcf9921d75b6837d4d7a08511f2e4"
+    },
+    {
+      "name": "native_editor_state_items",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 203,
+      "sha256": "728696caf85fbec6b561ce4ab4e330111b609c4e8b6ab9eeba060a9f8937c21a"
+    },
+    {
+      "name": "native_editor_modal_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 6909,
+      "sha256": "6a4c52ad92a514e8c9ce551eda265441fdb6453d518bb7782923833019c368fa"
+    },
+    {
+      "name": "native_browse_workspace_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 3932,
+      "sha256": "14f969a0dd2be7b427c8b6557ee6629554f42271a4c1ea68ec336c3c7c6d511b"
+    },
+    {
+      "name": "native_collection_items_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 2823,
+      "sha256": "69ebff4b1a99af59384cdaafcbb38b5e30bf4c828edb760297abfc84af991cb4"
+    },
+    {
+      "name": "private_message_auto_response_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 1658,
+      "sha256": "b87d391ed095173bac77d37a2f2494d1ac7fdac4f1330544e45b442a5a9a8533"
+    },
+    {
+      "name": "native_message_room_rows_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 1467,
+      "sha256": "a00223077171f7988cce465741330f7558688a84ea2ab5dfd41f7b05bc26a63d"
+    },
+    {
+      "name": "native_message_thread_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 1659,
+      "sha256": "7fcd65739a3a3f6e8d5c7d1039dbb49feda2c305dc1b3f85da4ef9dcd66e44cd"
+    },
+    {
+      "name": "native_message_transcript_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 934,
+      "sha256": "923f4d39d5a0458bfdc15293ffaa06053cd6afcef97358adec611c2d58c4c203"
+    },
+    {
+      "name": "native_message_pods_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 693,
+      "sha256": "1757b8ee2c83fd3a69a68b660cad5dc7d325bb37e88304d28f50b618b329583a"
+    },
+    {
+      "name": "native_messaging_workspace_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 2950,
+      "sha256": "53b03748cc0a07aa2c7f9d7fe3ace787b374dea3557d72dd78065f4c3b766fec"
+    },
+    {
+      "name": "native_search_filter_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 1649,
+      "sha256": "a4e4680e6716e05b79337c075027477b0dc4f8f9a7eafd211576475053864199"
+    },
+    {
+      "name": "native_download_policy_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 2664,
+      "sha256": "2c6e1b2a5a180817d2de689768115f18237755de5523e8da00b0d23eee29f481"
+    },
+    {
+      "name": "native_system_configuration_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 1733,
+      "sha256": "ab49de9b13bef7feb4312d6f346e8e5c7c0b3ab677b77e784c81294f428d09b2"
+    },
+    {
+      "name": "native_final_parity_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 6691,
+      "sha256": "3e02776c4a6e97a3cbb8bda621a11a139ef90e02e8c225ad6cef09f874cb5159"
+    },
+    {
+      "name": "wishlist_ignored_results_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 3629,
+      "sha256": "3f9c4d63922e834c42e5ed4f86f4b302738ced1f0dea94143ddae00594b3f763"
+    },
+    {
+      "name": "wishlist_policy_history_panel_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 5309,
+      "sha256": "24e98216d7f011c0bd27cdc0e06cbd959b2272a2a83c6e18067623958dd2b1da"
+    },
+    {
+      "name": "download_request_workspace_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 8579,
+      "sha256": "db86783628aea5cd64f82011fb8081c6737d36fc102109e91c3119e5924f434a"
+    },
+    {
+      "name": "wishlist_history_response_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 1528,
+      "sha256": "68e622958dfc99d85a28ca0f21207d2344358e6ff71793c76191aaccad965395"
+    },
+    {
+      "name": "route_native_workspace_html",
+      "owner": "native_workspace_panels",
+      "sourceBytes": 19800,
+      "sha256": "935b43bd9a8c219ce05a5b8beb1c5330ab5d198a39b5abbdc358ffcbe6fde770"
+    },
+    {
+      "name": "route_workflow_stats_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 6202,
+      "sha256": "a76f4760bceede409fe05d040bc4bd3eb573db0f8740ce5e5e22da01e2db14e9"
+    },
+    {
+      "name": "route_workflow_toolbar_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 7223,
+      "sha256": "4dba2b27eece2f20e293d61f090c162a1dcad88d2f75b2ebecfefe33d64823b9"
+    },
+    {
+      "name": "route_workflow_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 10922,
+      "sha256": "6a979fe05a78997b6f781764954334c33e90977874c72752e4e56f4b20e466d8"
+    },
+    {
+      "name": "route_workspace_pending_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 99,
+      "sha256": "bf2b0d81c2c67d9164436a93d6571e55f25d69a77960c018a25e94d1d923f91c"
+    },
+    {
+      "name": "route_workspace_result_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 137,
+      "sha256": "7fe5351f19342fe514c755df5e63f4c96ea7fd44e5af9f8b7f8fbf5f829d865a"
+    },
+    {
+      "name": "experience_settings_panel_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 2438,
+      "sha256": "fc69138ca3af9eb5e63467002dbc06d5021df0a6616f6f2627954dcdcd8ecad2"
+    },
+    {
+      "name": "automation_center_panel_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 1966,
+      "sha256": "a9e9bdb2d61eafa86b30fc15fdc8f13f45253a1f518218177a74da008c52c131"
+    },
+    {
+      "name": "route_toolbar_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 4486,
+      "sha256": "95c6956e1fd87267f1f2b04f5a30e2abf49bf93ceaf2fd03147dda092e7a4cb8"
+    },
+    {
+      "name": "route_page_html",
+      "owner": "route_workflow_rendering",
+      "sourceBytes": 4011,
+      "sha256": "49a051ee83f0c0b3bf2316a02542fd96a604167907e664d8158a22405df8fbfa"
+    },
+    {
+      "name": "player_footer_html",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 1677,
+      "sha256": "b8e75163e16470d72d26ce2af657a5ff3226262c7b2ade6237fc82b1e7729af8"
+    },
+    {
+      "name": "rustymilk_panel_html",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 5463,
+      "sha256": "eced93cb5a340df95387df34ca23049e2a98f20598317208cf0b9ba0070c5ee1"
+    },
+    {
+      "name": "shell_html",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 1309,
+      "sha256": "72d58e308c2acc2536a54fd398f44a51e71856487d4d7c5e61cc180db22b7a47"
+    },
+    {
+      "name": "start",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 889,
+      "sha256": "29583e8fdaa6fea5266d69a89182dc6e8062001e1eca981bb6914ecf4f52eb18"
+    },
+    {
+      "name": "start",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 106,
+      "sha256": "71701999a3893a79c975f57c203d7fda64a8741245ade87b3a7ca23eab735e57"
+    },
+    {
+      "name": "render_shell_html",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 102,
+      "sha256": "92a55ffec120b66fd6c24e43d4f29d4d942d0ecf2dd949d5cb1ab1f5515c24f8"
+    },
+    {
+      "name": "wasm_compatibility_report",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 124,
+      "sha256": "1de9b2308d8770570822d9737e2e0ee87e1612fa03186f6f86c97001e7d99b12"
+    },
+    {
+      "name": "wasm_runtime_probe_pending_html",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 146,
+      "sha256": "7bf87f8db9db9187e014a0bff6c726c70064796f41c3cf0b7eb0522e1aa0b6cf"
+    },
+    {
+      "name": "wasm_route_page_html",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 128,
+      "sha256": "943a1de8f92c451066a41a5df5d3f21ae25a0fe61b3432d955911273549eebb4"
+    },
+    {
+      "name": "mount_router",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 1446,
+      "sha256": "8e76d4be4c103869e47281bf5d4c71c8e132227b2d692cec23f83605f745ba93"
+    },
+    {
+      "name": "render_current_route",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 1538,
+      "sha256": "afa05ba7b238fc312ea94fe908e44690a2d7aa322b6b04f04520a01df342a6ca"
+    },
+    {
+      "name": "mount_data_cards",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 7968,
+      "sha256": "29b0ef810e0d47ef4ffef92368ff246b814429b48845ee75382194ed1b365e86"
+    },
+    {
+      "name": "mount_native_tables",
+      "owner": "route_shell_runtime",
+      "sourceBytes": 2310,
+      "sha256": "2065cd0f28ee746df7a9d396237351319375ffded7172543b6dad2aaed1c5015"
+    },
+    {
+      "name": "focus_relative_native_row",
+      "owner": "native_table_navigation",
+      "sourceBytes": 631,
+      "sha256": "5dffeec4f89c21335c5f2d62632d737d5c9c90783406987b2238bc2b1602c385"
+    },
+    {
+      "name": "focus_edge_native_row",
+      "owner": "native_table_navigation",
+      "sourceBytes": 432,
+      "sha256": "70082cda62d9ec0a5bccd7309a955d06bc73a2409247f067c361d0e05c8583df"
+    },
+    {
+      "name": "visible_native_rows",
+      "owner": "native_table_navigation",
+      "sourceBytes": 601,
+      "sha256": "7c7ff389561eb809238f558c024c14d7397d2e8667967011842d93155d9fedfb"
+    },
+    {
+      "name": "focus_native_row",
+      "owner": "native_table_navigation",
+      "sourceBytes": 254,
+      "sha256": "0dfc0e433cbd6e5fc5b37130f78413a8a368f7464d863246e5956b3dcdc43442"
+    },
+    {
+      "name": "mount_native_subviews",
+      "owner": "native_table_navigation",
+      "sourceBytes": 866,
+      "sha256": "0d8739ec9841ddb4ef9e7e1f90e460c8c85fb5d9af14f2bda9b77935536a22fc"
+    },
+    {
+      "name": "select_native_subview",
+      "owner": "native_table_navigation",
+      "sourceBytes": 2012,
+      "sha256": "e900c9e70cf72d2d6a89fdc3c1980939a71bffcf27c575f7fc4074601f66b243"
+    },
+    {
+      "name": "mount_native_actions",
+      "owner": "native_table_navigation",
+      "sourceBytes": 1298,
+      "sha256": "6ef3c4d954afebbfb033ab2c9bc8d427af1b781b3fa5774f99931bd1064fce2d"
+    },
+    {
+      "name": "handle_native_action",
+      "owner": "native_table_navigation",
+      "sourceBytes": 2405,
+      "sha256": "8cdb15897177dfdcbbeb713278b86d5b7a8eb68fd83ed7e22f11adf2c57e68d5"
+    },
+    {
+      "name": "handle_search_bulk_action",
+      "owner": "native_table_navigation",
+      "sourceBytes": 3232,
+      "sha256": "962b3c7b9d9a7a1ba8c4342237ac4a131c7c8728e59c145cbf1fabbd8fb84f93"
+    },
+    {
+      "name": "mount_download_policy_controls",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 2276,
+      "sha256": "1a9b00c8aaadfffb9d34bcc2e86d1e1a494edb118438b51fbb83927123199ce8"
+    },
+    {
+      "name": "handle_download_policy_action",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 3057,
+      "sha256": "0d0e801942de5d1aeed30d0e287246d530f47544f536492112792bb513a04ef9"
+    },
+    {
+      "name": "handle_options_yaml_action",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 2360,
+      "sha256": "ba56b1f2577a23310e1d8096cc2a269f8c3492453a2bc8db8593f019ed7d3d8a"
+    },
+    {
+      "name": "mount_transfer_columns",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 5240,
+      "sha256": "e40b0eaac282da228a8923b37a3cb52341e67b3b3a7cecb6491064dc046e5ac7"
+    },
+    {
+      "name": "set_transfer_column_width",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 672,
+      "sha256": "128300a4e734f0c96c5be49f652f9f3fac84ba888cfd05cd7d4f6cf02d701bdd"
+    },
+    {
+      "name": "restore_transfer_column_widths",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 687,
+      "sha256": "b5a18d4e1757745f3de6dfb09675d641d0ea9e3caa497e9c009c2770bf7d45f1"
+    },
+    {
+      "name": "persist_transfer_column_widths",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 1013,
+      "sha256": "419fb6077e595eb93a7434c0233b83d8daeeab4f4f5cd13dec1afacb7db19de7"
+    },
+    {
+      "name": "reset_transfer_column_widths",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 760,
+      "sha256": "c30c63ce5d88c0c872f54324bb4828f408c57313b1534ef06dd9e9e719e832c5"
+    },
+    {
+      "name": "set_transfer_column_visibility",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 1005,
+      "sha256": "8ba0cfe5383f345e30548ad78917ea419b6d49e8d8668125bfaa0630bf0b8fff"
+    },
+    {
+      "name": "persist_transfer_columns",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 892,
+      "sha256": "2bc6ecd86d3011541928e3450c22e9e79323ed90fa6a9e89aff20ffc611cbd22"
+    },
+    {
+      "name": "handle_transfer_request_action",
+      "owner": "native_transfer_controls",
+      "sourceBytes": 5431,
+      "sha256": "798ec45fa86565d3097b8469da822a99110f38e18244763169c7d68ac2520f91"
+    }
+  ],
+  "formattedModules": [
+    {
+      "path": "crates/slskr-web/src/route_data_projection.rs",
+      "bytes": 28309,
+      "lines": 718,
+      "sha256": "cf54298c2b5861f20667af9865cc89acb4083655d47725b9f4466f21502cc346"
+    },
+    {
+      "path": "crates/slskr-web/src/route_reference_panels.rs",
+      "bytes": 13003,
+      "lines": 288,
+      "sha256": "f84a6c236077ca22872ac3b79781ff5f10aacb7879143720a5ad43ba8ba18666"
+    },
+    {
+      "path": "crates/slskr-web/src/native_row_rendering.rs",
+      "bytes": 25673,
+      "lines": 639,
+      "sha256": "6f161e300327ff4abbcce8bb0bd864f1925411321a399c48204591de96abdd65"
+    },
+    {
+      "path": "crates/slskr-web/src/native_tab_rendering.rs",
+      "bytes": 38944,
+      "lines": 939,
+      "sha256": "d3ad7316bcdb69f3c64a3a7ab2211a1d5646f3bb997a938e8d9c2998ab31ab10"
+    },
+    {
+      "path": "crates/slskr-web/src/native_workspace_panels.rs",
+      "bytes": 78299,
+      "lines": 1339,
+      "sha256": "862c69b514e6cff0df95741c51bce2ae8b933b5cad14319008968541ddcaa49d"
+    },
+    {
+      "path": "crates/slskr-web/src/route_workflow_rendering.rs",
+      "bytes": 37617,
+      "lines": 611,
+      "sha256": "efd2a909c953003101231eb41eb533bfc92391964b1aaf170c4b132590cffcfb"
+    },
+    {
+      "path": "crates/slskr-web/src/route_shell_runtime.rs",
+      "bytes": 23334,
+      "lines": 390,
+      "sha256": "b9ff7100f7019dc423edaae6410a95e66f5a3dd101a82152d7ca58ea7c0fd58d"
+    },
+    {
+      "path": "crates/slskr-web/src/native_table_navigation.rs",
+      "bytes": 11911,
+      "lines": 333,
+      "sha256": "09bd001981dffafdd80def29cdb3224399724ba0f1d390399de64884a56465a1"
+    },
+    {
+      "path": "crates/slskr-web/src/native_transfer_controls.rs",
+      "bytes": 23617,
+      "lines": 665,
+      "sha256": "720c0eaf90fe419ca106d2958aa3f69fa225ed2c0a292848cd4400138f0be13d"
+    }
+  ],
+  "formattedFunctionNamesVerified": true
+}
