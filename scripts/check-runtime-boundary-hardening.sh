@@ -8,6 +8,7 @@ source_files=(
   crates/slskr/src/lib.rs
   crates/slskr/src/activitypub_controller.rs
   crates/slskr/src/session_runtime.rs
+  crates/slskr/src/session_runtime_owners/*.rs
   crates/slskr/src/security_controller.rs
   crates/slskr/src/quarantine_controller.rs
   crates/slskr/src/misc_controller_mutations.rs

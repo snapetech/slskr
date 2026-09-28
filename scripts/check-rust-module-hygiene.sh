@@ -50,6 +50,16 @@ for name, budget in [("config.rs", 400), ("config_file.rs", 300)]:
         violations.append(f"{name}: aggregate and registry exceed the {budget}-line budget")
     if re.search(r"\binclude!\s*\(", registry.read_text()):
         violations.append(f"{name}: flat configuration includes are forbidden")
+for registry_name, directory in [("session_runtime.rs", "session_runtime_owners")]:
+    registry = root / registry_name
+    if len(registry.read_bytes().splitlines()) > 150:
+        violations.append(f"{registry}: runtime registry exceeds 150 lines")
+    if re.search(r"\binclude!\s*\(", registry.read_text()):
+        violations.append(f"{registry}: flat runtime includes are forbidden")
+    for file in (root / directory).glob("*.rs"):
+        lines = len(file.read_bytes().splitlines())
+        if lines > 1200:
+            violations.append(f"{file}: {lines} lines exceed the 1200-line runtime owner budget")
 web_root = Path("crates/slskr-web/src")
 web_registry = web_root / "web_tests.rs"
 if len(web_registry.read_bytes().splitlines()) > 100:

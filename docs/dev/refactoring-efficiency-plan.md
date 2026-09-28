@@ -6366,3 +6366,22 @@ WASM check pass. Hygiene forbids the old flat include and caps owners at
 1,000 lines. This checkpoint is internal-only. Four tracked Rust files
 remain above 2,500 lines: private gateway, session runtime, CLI smoke/soak,
 and file-transfer runtime. Broader RF-024 scope remains open.
+
+## RF-024 Session Runtime Domain Owners (2026-09-28 UTC)
+
+Replaced the 3,083-line session runtime implementation with a 50-line registry
+and twelve real owners for login replay, room dispatch, server transport,
+peer connection and messages, command dispatch, session connection,
+wishlist dispatch, server projections, supervision, pod room bridges, and
+incoming search. The largest owner is 474 lines. Existing parent-scoped
+bindings and managed worker lifetimes remain intact; shared-port connection
+behavior is preserved.
+
+`benchmarks/artifacts/20260928-rf-session-runtime-owner-extraction.json`
+accounts for all 113411 original bytes and 38 items, with exact
+reconstruction after reversing scope relocations. All 36 functions/methods
+remain present. All 656 default daemon library tests, strict all-targets
+Clippy, and the full-controller/legacy-route all-targets feature compile pass.
+Runtime boundary checks include all new owners. Hygiene caps the registry
+at 150 lines and owners at 1,200 lines. This checkpoint is internal-only.
+Three tracked Rust files remain above 2,500 lines; RF-024 remains open.
