@@ -16,6 +16,12 @@ from parity_audit_process import (
 )
 
 
+def validate_ui_workflow_audit(audit: dict[str, Any]) -> None:
+    count = audit.get("endpointSweepCount")
+    if type(count) is not int or count != 0:
+        raise RuntimeError("React WebUI workflow evidence must declare zero synthetic endpoint sweeps; regenerate the audit")
+
+
 def webui_workflow_ledger(
     root: Path, report: dict[str, Any], reuse_evidence: bool = False
 ) -> dict[str, dict[str, bool]]:
@@ -67,14 +73,6 @@ def webui_workflow_ledger(
                 )
         return max(matches)[1] if matches else None
 
-    endpoint_sweep = []
-    for template in sorted(target_union):
-        method, path = template.split(" ", 1)
-        concrete_path = re.sub(r":var\b", "audit", path)
-        if not concrete_path.startswith("/api/"):
-            concrete_path = f"/api/v0{concrete_path}"
-        endpoint_sweep.append({"method": method, "url": concrete_path})
-
     scenarios = (
         ("rendered-success", "success"),
         ("rendered-loading-and-empty", "rendered-loading-and-empty"),
@@ -89,6 +87,7 @@ def webui_workflow_ledger(
             if not audit_path.is_file():
                 raise RuntimeError(f"reusable React WebUI evidence is missing: {audit_path}")
             audit = json.loads(audit_path.read_text(encoding="utf-8"))
+            validate_ui_workflow_audit(audit)
             if audit.get("errors"):
                 raise RuntimeError(
                     f"React WebUI {scenario} evidence contains errors: "
@@ -112,6 +111,7 @@ def webui_workflow_ledger(
     for case, scenario in scenarios:
         scenario_dir = audit_dir if scenario == "success" else audit_dir / "scenarios" / scenario
         environment = os.environ.copy()
+        environment.pop("SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP", None)
         if not environment.get("SLSKR_PLAYWRIGHT_EXECUTABLE_PATH"):
             chromium = shutil.which("chromium") or shutil.which("chromium-browser")
             if chromium:
@@ -119,7 +119,6 @@ def webui_workflow_ledger(
         environment.update(
             {
                 "SLSKR_REACT_WEB_AUDIT_DIR": str(scenario_dir),
-                "SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP": json.dumps(endpoint_sweep),
                 "SLSKR_REACT_WEB_AUDIT_SCENARIO": scenario,
                 "SLSKR_REACT_WEB_AUDIT_SKIP_BUILD": "1",
             }
@@ -150,6 +149,7 @@ def webui_workflow_ledger(
             ) from error
         audit_path = scenario_dir / "audit.json"
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        validate_ui_workflow_audit(audit)
         if audit.get("errors"):
             raise RuntimeError(
                 f"React WebUI {scenario} audit reported errors after a successful process exit: "

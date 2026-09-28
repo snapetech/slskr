@@ -1,6 +1,6 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, as of 2026-09-28 UTC; RF-002, RF-003, RF-007, RF-032, and RF-036 are verified locally. RF-034 is verified locally and through the retained hosted shared-artifact matrix. RF-024 is reopened after a complete tracked-source inventory found large files outside its earlier scan. RF-001 retains a shared-wire compatibility limit. The live/hosted evidence items listed below remain in progress.
+Status: active whole-project implementation plan, as of 2026-09-28 UTC; RF-002, RF-003, RF-007, RF-032, and RF-036 are verified locally. RF-034 is verified locally and through the retained hosted shared-artifact matrix. RF-024 source ownership is complete after the expanded tracked-source inventory; hosted validation remains pending. RF-001 retains a shared-wire compatibility limit. The live/hosted evidence items listed below remain in progress.
 
 
 Audit baseline date: 2026-09-15; evidence addenda through 2026-09-28 UTC
@@ -124,7 +124,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-027 | `web/e2e/README.md:58-60` previously used `cd src/web` and referenced absent fixture scripts/schema. The current batch adds a root wrapper, schema checker, corruption regression, updates E2E paths, serializes real-node workers, and permits a cold optimized build to finish. | Documented E2E setup previously was broken and zero-download fixture fetch could report success. | Serialized E2E passes 14 tests; 9 media-dependent tests skip because optional media is absent. | Verified with optional-media gap |
 | RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Validate workflow policy and a clean package runner before marking verified. | In progress |
 | RF-029 | `.github/workflows/release-publish.yml:625-638` intentionally targets the existing `snapetech/homebrew-slskdn` compatibility tap, while `docs/dev/release-channels.md:15-18` named `snapetech/homebrew-slskr`. | Channel documentation was stale, but the publication target was not shown to be wrong. | Release-channel documentation now names the actual compatibility tap and preserves the explicit target boundary. | Verified locally, docs |
-| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass; retain browser/nightly artifacts before full verification. | In progress |
+| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. Nightly artifact retention remains open. | In progress; browser evidence retained, nightly pending |
 | RF-031 | The release gate invokes the remediation baseline and differential checks, but the universal replacement acceptance document points to retained local artifacts and the release path does not run the full live transport/lifecycle manifest. | Historical acceptance evidence could be mistaken for fresh release evidence. | The acceptance document now explicitly labels the 2026-08-20 closure as historical and requires fresh release-gate/live artifacts for current certification. | Verified locally, policy explicit |
 
 ### P2 Efficiency And Structural Boundaries
@@ -6622,3 +6622,38 @@ tunnel reader joining with TCP EOF, gateway record cleanup, and metadata Drop
 outside Tokio. Evidence is retained in
 `benchmarks/artifacts/20260928-rf-managed-gateway-child-resources.json`.
 No production port was added. Broader RF-006 clean-runner coverage remains open.
+
+
+## React Browser Contracts, Cleanup, And Honest Workflow Evidence (2026-09-28 UTC)
+
+Regenerating the real Chromium audit exposed invalid success fixtures for
+unread activity, rooms, jobs, metadata processing, auto-replace, and analytics.
+Ten tests now validate the fixture responses through the actual frontend API
+adapters. A failed Chromium launch previously left the temporary HTTP server
+running; launch now belongs to cleanup, including when browser close fails.
+A bounded subprocess regression proves launch failure exits promptly.
+
+The audit also credited synthetic endpoint sweeps as rendered workflows,
+inflating all four categories to 417 cases each. The authoritative workflow
+ledger now removes inherited sweep settings and never requests sweeps. Fresh
+and reusable reports must declare an integer zero `endpointSweepCount`;
+unmarked, swept, malformed, and failed reports cannot become workflow proof.
+Six evidence regressions and the launch regression run through audit tooling,
+now wired into the GitHub Rust job.
+
+The corrected Chromium run passes 84 route/viewport rendering checks and all
+four scenarios, with zero sweeps and errors. Actual UI requests establish 73
+success, 8 loading/empty, 11 error, and 14 authorization cases. The isolated
+frozen manifest reuses these reports successfully: WebUI has 523 complete
+cases (417 call-presence plus 106 workflow cases), with 1,562 still needing
+proof. Six differential families were deliberately skipped for this UI-only
+check; these counts are not whole-program certification or a replacement for
+the separately retained differential evidence.
+
+Full Web validation passes 915 tests across 149 files, ESLint, audit tooling,
+workflow policy, artifact-matrix policy, and repository boundaries. Evidence
+is retained in `benchmarks/artifacts/20260928-rf-react-webui-ui-request-evidence.json`.
+This is real-browser evidence against deterministic mocks, not live daemon,
+deployed-device, or credential-backed interoperability proof. No production
+port was added. RF-030 nightly retention and the deployed evidence tasks stay
+open.
