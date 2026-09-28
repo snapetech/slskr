@@ -1668,6 +1668,7 @@ async fn explicit_share_stream_limits_migrate_persist_reset_and_rollback() {
     let rows = reopened.list_share_grants(10, 0).await.unwrap();
     let mut invalid = rows[0].clone();
     invalid.id = "invalid-policy".to_owned();
+    invalid.username = "invalid-recipient".to_owned();
     invalid.max_concurrent_streams = Some(65);
     let restored = crate::ShareGrantStore::from_persisted(vec![rows[0].clone(), invalid]);
     assert_eq!(restored.records.len(), 1);

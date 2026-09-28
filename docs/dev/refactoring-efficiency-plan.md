@@ -7614,3 +7614,32 @@ source/log hashes are retained in
 `benchmarks/artifacts/20260928-rf-owner-share-stream-concurrency.json`.
 Source originals remain in ignored `target/rf-share-stream-limit-source-backup`
 and Git. Fresh hosted completion remains separate acceptance work.
+
+## RF-006/RF-066 Joined Harness Log Ownership (2026-09-28 UTC)
+
+The actual eight-case media run exposed log FileHandles being closed only by
+garbage collection. `NodeProcessLogs.ts` now owns both handles and backpressure
+pipelines, joins writes, and closes handles before app-directory removal.
+Normal stop and failed launch use the same cleanup path. Startup work is tracked
+and joined, spawn errors reject startup instead of throwing from an event
+callback, diagnostic writes are joined, and stop interrupts TCP/health polling.
+In-memory log tails are capped at one MiB per stream while complete output is
+still written to the artifact files. `ss` diagnostics have a two-second timeout
+and 256 KiB output cap. No process, listener, or peer port is added.
+
+Thirteen utility regressions pass, including exact real child stdout/stderr
+capture, both closed file descriptors, unlaunched handles, actual failed spawn,
+startup cleanup, command ownership, and native child close. Both sharing and
+streaming specs pass the targeted TypeScript check. The contacts response wait
+now starts before navigation and asserts the actual successful JSON array;
+its old swallowed timeout is removed. All eight actual media cases pass again
+in 29.6 seconds without FileHandle garbage-collection warnings or missing-contact
+response errors. Recipient backfill and the eight blocking-worker shutdown
+joins remain open.
+
+The corrupt persisted-limit regression now uses a distinct recipient, proving
+invalid policy rejection independently of duplicate-grant filtering. That
+focused migration/persistence/reset/rollback regression passes again. Actual
+logs and source hashes are retained in
+`benchmarks/artifacts/20260928-rf-harness-log-owner.json`. Originals remain in
+ignored `target/rf-harness-log-owner-source-backup` and Git history.

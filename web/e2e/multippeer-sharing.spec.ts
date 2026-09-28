@@ -95,6 +95,12 @@ test.describe('multi-peer sharing', () => {
     console.log('[Contacts Test] Navigating to contacts page...');
     const targetUrl = `${nodeA.baseUrl}/contacts`;
     console.log('[Contacts Test] Target URL:', targetUrl);
+    const contactsResponse = pageA.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/api/v0/contacts' && response.request().method() === 'GET',
+      { timeout: 10_000 },
+    );
+    // Attach a rejection handler immediately; the awaited assertion below owns failure.
+    void contactsResponse.catch(() => {});
     await pageA.goto(targetUrl, { timeout: 10_000, waitUntil: 'networkidle' });
     console.log('[Contacts Test] Navigation complete, URL:', pageA.url());
 
@@ -210,7 +216,7 @@ test.describe('multi-peer sharing', () => {
       console.error('[Contacts Test] ERROR: contacts-root not found!');
       // Dump all data-testid elements to see what's actually rendered
       const allTestIds = await pageA.evaluate(() => {
-        const elements = document.querySelectorAll('[data-testid]');
+        const elements = document.querySelectorAll<HTMLElement>('[data-testid]');
         return Array.from(elements).map((element) => ({
           tag: element.tagName,
           testid: element.dataset.testid,
@@ -224,40 +230,10 @@ test.describe('multi-peer sharing', () => {
       throw error;
     }
 
-    // Wait for contacts API call to complete and capture response body
-    console.log('[Contacts Test] Waiting for /api/v0/contacts response...');
-    let resp;
-    try {
-      resp = await pageA.waitForResponse(
-        (r) => r.url().includes('/api/v0/contacts') && r.status() === 200,
-        { timeout: 10_000 },
-      );
-
-      // Diagnostic: Verify response body
-      const text = await resp.text();
-      const contentType = resp.headers()['content-type'] || '';
-      console.log('[Contacts Test] API Response - Content-Type:', contentType);
-      console.log('[Contacts Test] API Response - Length:', text.length);
-      console.log(
-        '[Contacts Test] API Response - First 200 chars:',
-        text.slice(0, 200),
-      );
-
-      if (text.length === 0) {
-        console.error(
-          '[Contacts Test] ERROR: API returned 200 with empty body!',
-        );
-      }
-
-      if (text.startsWith('<html')) {
-        console.error(
-          '[Contacts Test] ERROR: API returned HTML instead of JSON!',
-        );
-      }
-    } catch (error) {
-      console.error('[Contacts Test] ERROR waiting for API response:', error);
-      // Continue with diagnostics even if API wait failed
-    }
+    const contacts = await contactsResponse;
+    expect(contacts.status()).toBe(200);
+    expect(contacts.headers()['content-type']).toContain('application/json');
+    expect(await contacts.json()).toBeInstanceOf(Array);
 
     // Diagnostic: Check current state
     const tid = T.contactsCreateInvite;
@@ -909,6 +885,7 @@ test.describe('multi-peer sharing', () => {
       shareOverride = share;
     }
 
+    if (!shareGrantId) throw new Error('Movie share grant is missing');
     // Announce share to nodeC
     await announceShareGrant({
       owner: nodeA,

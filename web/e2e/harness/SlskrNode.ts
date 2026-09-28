@@ -2,6 +2,7 @@ import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
+import { NodeProcessLogs } from './NodeProcessLogs';
 import { runOwnedCommand, SharedBuildOwner } from './BuildOwner';
 import { ensureFixtures, getRepoRootFromCwd } from '../fixtures/ensure-fixtures';
 
@@ -54,9 +55,11 @@ async function waitForTcpListen(
   host: string,
   port: number,
   timeoutMs: number,
+  keepWaiting: () => boolean = () => true,
 ): Promise<void> {
   const start = Date.now();
   for (;;) {
+    if (!keepWaiting()) throw new Error('Node stopped or exited during TCP startup');
     const ok = await new Promise<boolean>((resolve) => {
       const sock = new net.Socket();
       sock.setTimeout(500); // Reduced from 750ms
@@ -162,7 +165,7 @@ export async function buildOutputIsFresh(
 
 async function getListenSummary(port: number): Promise<string> {
   return new Promise((resolve) => {
-    execFile('ss', ['-ltnp'], (error, stdout, stderr) => {
+    execFile('ss', ['-ltnp'], { timeout: 2_000, maxBuffer: 262_144 }, (error, stdout, stderr) => {
       if (error) {
         resolve(`ss failed: ${stderr || error.message}`);
         return;
@@ -182,7 +185,7 @@ async function getListenSummary(port: number): Promise<string> {
 
 async function getListenSummaryForPid(pid: number): Promise<string> {
   return new Promise((resolve) => {
-    execFile('ss', ['-ltnp'], (error, stdout, stderr) => {
+    execFile('ss', ['-ltnp'], { timeout: 2_000, maxBuffer: 262_144 }, (error, stdout, stderr) => {
       if (error) {
         resolve(`ss failed: ${stderr || error.message}`);
         return;
@@ -218,6 +221,14 @@ export class SlskrNode {
   private pendingBuilds = new Set<Promise<void>>();
 
   private process: ChildProcess | null = null;
+
+  private startupPromise?: Promise<void>;
+
+  private startupFailure?: Error;
+
+  private logs?: NodeProcessLogs;
+
+  private pendingDiagnosticWrites = new Set<Promise<void>>();
 
   private apiPort: number = 0;
 
@@ -340,6 +351,20 @@ export class SlskrNode {
    * Start the slskr node process.
    */
   async start(): Promise<void> {
+    if (this.startupPromise || this.process) throw new Error('Node already starting or running');
+    const pending = this.startInternal();
+    this.startupPromise = pending;
+    try {
+      await pending;
+    } catch (error) {
+      await this.stop().catch((cleanupError) => console.error('Node startup cleanup failed:', cleanupError));
+      throw error;
+    } finally {
+      if (this.startupPromise === pending) this.startupPromise = undefined;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
     if (this.stopRequested) throw new Error('Cannot start a stopped node');
     const repoRoot = this.getRepoRoot();
     const webBuildPath = await this.ensureWebBuild(repoRoot);
@@ -486,12 +511,10 @@ export class SlskrNode {
     await fs.mkdir(artifactsDir, { recursive: true });
     const stdoutPath = path.join(artifactsDir, 'stdout.log');
     const stderrPath = path.join(artifactsDir, 'stderr.log');
-    const stdoutFd = await fs.open(stdoutPath, 'w');
-    const stderrFd = await fs.open(stderrPath, 'w');
+    this.logs = await NodeProcessLogs.open(stdoutPath, stderrPath);
 
     if (this.stopRequested) {
-      await stdoutFd.close();
-      await stderrFd.close();
+      await this.logs.close();
       throw new Error('Node startup was stopped before process launch');
     }
 
@@ -500,6 +523,7 @@ export class SlskrNode {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    this.logs.connect(this.process);
 
     // Capture output for debugging (always log on error)
     let stdout = '';
@@ -516,19 +540,17 @@ export class SlskrNode {
 
     logWithTimestamp(`[start] Launch mode: prebuilt ${binaryPath}`);
 
-    this.process.stdout?.on('data', async (data) => {
+    this.process.stdout?.on('data', (data) => {
       const text = data.toString();
-      stdout += text;
-      await stdoutFd.write(data);
+      stdout = (stdout + text).slice(-1_048_576);
       if (process.env.DEBUG) {
         logWithTimestamp(text.trim());
       }
     });
 
-    this.process.stderr?.on('data', async (data) => {
+    this.process.stderr?.on('data', (data) => {
       const text = data.toString();
-      await stderrFd.write(data);
-      stderr += text;
+      stderr = (stderr + text).slice(-1_048_576);
       if (process.env.DEBUG) {
         logWithTimestamp(`STDERR: ${text.trim()}`);
       }
@@ -536,7 +558,7 @@ export class SlskrNode {
 
     // Handle process errors
     this.process.on('error', (error) => {
-      throw new Error(`Failed to start slskr process: ${error.message}`);
+      this.startupFailure = new Error(`Failed to start slskr process: ${error.message}`);
     });
 
     // Check if process exits early
@@ -552,11 +574,13 @@ export class SlskrNode {
         // Write full logs to artifacts for debugging
         if (this.appDir) {
           const exitLogPath = path.join(this.appDir, 'artifacts', 'exit.log');
-          fs.writeFile(
+          const diagnostic = fs.writeFile(
             exitLogPath,
             `Exit code: ${code}\nSignal: ${signal || 'none'}\nUptime: ${elapsed}ms\nTimestamp: ${timestamp}\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}\n`,
             'utf8',
           ).catch(() => {});
+          this.pendingDiagnosticWrites.add(diagnostic);
+          void diagnostic.then(() => this.pendingDiagnosticWrites.delete(diagnostic));
         }
       } else if (code === 0 && signal) {
         console.log(
@@ -569,7 +593,6 @@ export class SlskrNode {
     if (!process.env.DEBUG) {
       this.process.stderr?.on('data', (data) => {
         const text = data.toString();
-        stderr += text;
         // Log errors even without DEBUG
         if (
           text.toLowerCase().includes('error') ||
@@ -586,12 +609,15 @@ export class SlskrNode {
     const tcpStartTime = Date.now();
     logWithTimestamp(`[start] Waiting for TCP port ${this.apiPort} to listen`);
     try {
-      await waitForTcpListen('127.0.0.1', this.apiPort, 60_000);
+      await waitForTcpListen('127.0.0.1', this.apiPort, 60_000, () =>
+        !this.stopRequested && !this.startupFailure && this.process?.exitCode === null && this.process?.signalCode === null);
       const tcpElapsed = Date.now() - tcpStartTime;
       logWithTimestamp(
         `[start] TCP port ${this.apiPort} listening after ${tcpElapsed}ms`,
       );
     } catch {
+      if (this.startupFailure) throw this.startupFailure;
+      if (this.stopRequested) throw new Error('Node stopped during TCP startup');
       // TCP never opened - true startup/bind problem
       const stdoutTail = tail(stdout, 200);
       const stderrTail = tail(stderr, 200);
@@ -600,8 +626,6 @@ export class SlskrNode {
         this.process?.pid !== undefined
           ? await getListenSummaryForPid(this.process.pid)
           : 'No process pid available';
-      await stdoutFd.close();
-      await stderrFd.close();
       throw new Error(
         `TCP port ${this.apiPort} never started listening.\n` +
           `This indicates a true startup/bind problem.\n\n` +
@@ -623,6 +647,7 @@ export class SlskrNode {
     logWithTimestamp(`[start] Starting health check (timeout: ${timeout}ms)`);
 
     while (Date.now() - healthStartTime < timeout) {
+      if (this.stopRequested || this.startupFailure) throw this.startupFailure ?? new Error('Node stopped during health startup');
       // Check if process died
       if (this.process.exitCode !== null) {
         if (this.process.exitCode !== 0) {
@@ -697,8 +722,6 @@ export class SlskrNode {
     }
 
     // If we timeout, include tail of captured output
-    await stdoutFd.close();
-    await stderrFd.close();
     const stdoutTail = tail(stdout, 200);
     const stderrTail = tail(stderr, 200);
     const errorMessage =
@@ -892,7 +915,7 @@ export class SlskrNode {
     this.buildCancellation.abort(new Error('Node stopped during build'));
     await Promise.allSettled([...this.pendingBuilds]);
     const child = this.process;
-    if (child && child.exitCode === null && child.signalCode === null) {
+    if (child && child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
         child.once('close', () => {
@@ -902,7 +925,18 @@ export class SlskrNode {
         child.kill('SIGTERM');
       });
     }
+    if (this.startupPromise) await Promise.allSettled([this.startupPromise]);
     if (this.process === child) this.process = null;
+    await Promise.allSettled([...this.pendingDiagnosticWrites]);
+    const logs = this.logs;
+    let logFailure: unknown;
+    try {
+      await logs?.close();
+    } catch (error) {
+      logFailure = error;
+    } finally {
+      if (this.logs === logs) this.logs = undefined;
+    }
 
     // Cleanup app directory unless KEEP_ARTIFACTS is set
     if (this.appDir && process.env.SLSKR_TEST_KEEP_ARTIFACTS !== '1') {
@@ -912,5 +946,6 @@ export class SlskrNode {
         // Ignore cleanup errors
       }
     }
+    if (logFailure !== undefined) throw logFailure;
   }
 }

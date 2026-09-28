@@ -6,6 +6,56 @@ import * as path from 'node:path';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
 import { buildOutputIsFresh, nativePeerEnvironment, SlskrNode } from './harness/SlskrNode';
 import { runOwnedCommand, SharedBuildOwner } from './harness/BuildOwner';
+import { NodeProcessLogs } from './harness/NodeProcessLogs';
+
+test('node logs drain actual child output and close their file handles', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'slskr-log-owner-'));
+  const stdoutPath = path.join(root, 'stdout.log');
+  const stderrPath = path.join(root, 'stderr.log');
+  const logs = await NodeProcessLogs.open(stdoutPath, stderrPath);
+  const handles = (logs as unknown as { handles: import('node:fs/promises').FileHandle[] }).handles;
+  const child = spawn(process.execPath, ['-e', "process.stdout.write('out\\n'.repeat(32768)); process.stderr.write('err\\n'.repeat(32768));"], { stdio: ['ignore', 'pipe', 'pipe'] });
+  logs.connect(child);
+  const node = new SlskrNode({ nodeName: 'log-owner', shareDir: '' });
+  (node as unknown as { process: ChildProcess; logs: NodeProcessLogs }).process = child;
+  (node as unknown as { logs: NodeProcessLogs }).logs = logs;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once('close', resolve);
+      child.once('error', reject);
+    });
+    await node.stop();
+    expect(await readFile(stdoutPath, 'utf8')).toBe('out\n'.repeat(32768));
+    expect(await readFile(stderrPath, 'utf8')).toBe('err\n'.repeat(32768));
+    expect(handles.map((handle) => handle.fd)).toEqual([-1, -1]);
+    await node.stop();
+  } finally {
+    await node.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unlaunched node logs close explicitly and failed startup releases resources', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'slskr-log-startup-'));
+  const logs = await NodeProcessLogs.open(path.join(root, 'stdout.log'), path.join(root, 'stderr.log'));
+  const handles = (logs as unknown as { handles: import('node:fs/promises').FileHandle[] }).handles;
+  await logs.close();
+  expect(handles.map((handle) => handle.fd)).toEqual([-1, -1]);
+  await logs.close();
+  const node = new SlskrNode({ nodeName: 'failed-spawn', shareDir: '' });
+  (node as unknown as { getBinaryPath: () => Promise<string> }).getBinaryPath = async () => path.join(root, 'missing-slskr');
+  try {
+    await expect(node.start()).rejects.toThrow('Failed to start slskr process');
+    const internal = node as unknown as { process: ChildProcess | null; logs?: NodeProcessLogs; startupPromise?: Promise<void> };
+    expect(internal.process).toBeNull();
+    expect(internal.logs).toBeUndefined();
+    expect(internal.startupPromise).toBeUndefined();
+    await node.stop();
+  } finally {
+    await node.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('owned commands preserve failures, bound deadlines, and accept retries', async () => {
   const signal = new AbortController().signal;
