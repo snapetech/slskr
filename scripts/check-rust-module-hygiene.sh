@@ -51,7 +51,9 @@ for name, budget in [("config.rs", 400), ("config_file.rs", 300)]:
     if re.search(r"\binclude!\s*\(", registry.read_text()):
         violations.append(f"{name}: flat configuration includes are forbidden")
 for registry_name, directory in [("session_runtime.rs", "session_runtime_owners"),
-                                     ("private_gateway.rs", "private_gateway_owners")]:
+                                     ("private_gateway.rs", "private_gateway_owners"),
+                                     ("file_transfer_runtime.rs", "file_transfer_runtime_owners"),
+                                     ("cli_smoke_soak.rs", "cli_smoke_soak_owners")]:
     registry = root / registry_name
     if len(registry.read_bytes().splitlines()) > 150:
         violations.append(f"{registry}: runtime registry exceeds 150 lines")

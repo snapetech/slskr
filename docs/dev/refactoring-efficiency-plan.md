@@ -6406,3 +6406,31 @@ legacy-route all-targets feature compile pass. Hygiene caps the registry at
 150 lines and owners at 1,200 lines. This checkpoint is internal-only. Two
 tracked Rust files and the parity audit script remain above 2,500 lines;
 RF-024 remains open.
+
+## RF-024 Transfer And CLI Proof Runtime Owners (2026-09-28 UTC)
+
+Replaced `file_transfer_runtime.rs` (2,524 lines) with an 80-line registry and
+eleven real owners for paths, capacity/upload policy, negotiation, permissions,
+audio metadata, indirect transfer, upload/download streaming, content safety,
+progress, and inbound transfer. Replaced `cli_smoke_soak.rs` (2,914 lines)
+with a 74-line registry and fourteen real owners for fixture transfers, live
+server/peer runtime, configuration, probes, scenarios, protocol names, and
+redaction. The largest transfer and CLI owners are 527 and 357 lines.
+Original conditional helpers retain their guards; narrow unused-import
+allowances preserve original parent-scoped compatibility aliases.
+
+The two `20260928-rf-*-owner-extraction.json` artifacts for file-transfer
+runtime and CLI smoke/soak account for every original byte and item, with
+exact reconstruction after reversing scope relocations. All 56 transfer and
+70 CLI function/method declarations remain present. All 656 default daemon
+tests, strict all-targets Clippy, and the full-controller/legacy-route
+all-targets compile pass against both extractions together. Boundary checks
+include the transfer owners. Hygiene caps both registries at 150 lines and
+owners at 1,200 lines. This checkpoint is internal-only.
+
+A complete tracked Rust scan now finds no file above 2,500 lines. The broader
+tracked code scan still finds `scripts/audit-parity-manifest.py` at 3,585
+lines. Its current live-backfill source guard still targets the historical
+`lib.rs` location and fails before producing a manifest; repair that guard
+against the real backfill owner before extracting the audit domains. RF-024
+remains open for that script and the remaining evidence requirements.

@@ -43,6 +43,7 @@ source_files=(
   crates/slskr/src/mediacore_controller.rs
   crates/slskr/src/extended_controller.rs
   crates/slskr/src/file_transfer_runtime.rs
+  crates/slskr/src/file_transfer_runtime_owners/*.rs
   crates/slskr/src/peer_transport.rs
   crates/slskr/src/peer_message_runtime.rs
   crates/slskr/src/http_connection.rs
