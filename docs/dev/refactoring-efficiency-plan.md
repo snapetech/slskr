@@ -7927,3 +7927,16 @@ were observed, but their relationship to pipeline scheduling is unproven. The
 sanitized service evidence is in
 [`20260928-gitlab-postreceive-pipeline-status.md`](../../benchmarks/artifacts/20260928-gitlab-postreceive-pipeline-status.md).
 RF-008 and RF-067 remain open pending a post-repair pipeline run.
+
+## RF-072 Live Account Preflight (2026-09-28 UTC)
+
+The credentialed matrix previously checked only `SLSKR_TEST_ACCOUNT_COUNT`
+entries (default four), then used accounts 5 and 6 for peer and social probes;
+VPN mode also defaults login probes to accounts 5–8. It resolved the public
+Soulseek hostname before discovering missing credentials. The runner now
+validates the unique union of its base account range and selected probe
+indices, rejects invalid/missing accounts before DNS lookup, and defaults the
+base range to six. A local regression covers missing account 5 in the ordinary
+matrix, missing account 6 at the default count, and missing account 7 in VPN
+mode. Both CI workflows run this regression. The `SLSKR_LIVE_INTEROP_ENV`
+secret remains absent, so the hosted external proof is still open.

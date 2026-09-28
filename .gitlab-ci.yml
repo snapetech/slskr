@@ -20,6 +20,7 @@ rust:
   script:
     - scripts/check-process-memory-guard.sh
     - scripts/test-process-memory-guard.sh
+    - scripts/test-live-interop-account-validation.sh
     - scripts/check-docs-freshness.sh
     - scripts/test-check-docs-freshness.sh
     - scripts/check-plan-freshness.sh
