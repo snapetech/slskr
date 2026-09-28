@@ -133,3 +133,15 @@ impl Drop for OutboundOverlayGuard {
         }
     }
 }
+
+/// Releases admission even if a handler is cancelled or never polled.
+pub(super) struct GatewayConnectionAdmission {
+    pub(super) limiter: Arc<OverlayRateLimiter>,
+    pub(super) remote_ip: IpAddr,
+}
+
+impl Drop for GatewayConnectionAdmission {
+    fn drop(&mut self) {
+        self.limiter.record_disconnection(self.remote_ip);
+    }
+}

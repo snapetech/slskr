@@ -6558,3 +6558,22 @@ ESLint, production build, and bundle budgets pass. Evidence is retained in
 `benchmarks/artifacts/20260928-rf-dashboard-webhook-lifecycle.json`; the release
 fragment records the accessible controls. This fixes the observed local
 reproduction; exact-tip hosted validation remains pending. No port was added.
+
+
+## RF-006 Managed Shared Gateway Workers (2026-09-28 UTC)
+
+Shared-listener TLS handlers, UDP control, QUIC control/data listeners and
+accepted handlers, and DHT response forwarding now register with daemon
+shutdown rather than detaching. Existing connection semaphores and rate limits
+remain intact. A synchronous admission guard releases the rate limiter on
+normal completion, cancellation, panic, or rejection before first polling.
+
+Four deadline-bounded regressions prove stalled TLS socket closure on joined
+shutdown and late rejection, plus admission release on cancelled and rejected
+tasks. All 664 daemon tests, strict all-targets Clippy, and full-controller/legacy
+all-targets compilation pass. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-managed-gateway-workers.json`. No production
+port was added. The release fragment records the operational lifecycle fix.
+Tunnel readers, proxy-session workers, outbound metadata cleanup, and broader
+clean-runner service evidence remain RF-006 work; this checkpoint does not
+claim their completion.

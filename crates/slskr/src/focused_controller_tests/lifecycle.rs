@@ -920,3 +920,48 @@ async fn dropped_bridge_listener_owner_cancels_stalled_clients() {
     state.shutdown_managed_tasks().await;
     fs::remove_dir_all(&state.config.state_dir).unwrap();
 }
+
+#[tokio::test]
+async fn managed_shutdown_closes_shared_gateway_stalled_tls_handshake() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let gateway = Arc::new(
+        crate::private_gateway::Gateway::load_or_create_with_quic(
+            "127.0.0.1:0".parse().unwrap(),
+            &state.config.state_dir,
+            None,
+        )
+        .await
+        .unwrap(),
+    );
+    let (mut client, accepted) = bridge_client_socket_pair().await;
+    gateway
+        .handle_accepted_tcp(accepted, Arc::clone(&state))
+        .await;
+    tokio::task::yield_now().await;
+    state.shutdown_managed_tasks().await;
+    assert_bridge_client_closed(&mut client).await;
+    drop(gateway);
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
+async fn shared_gateway_rejects_stalled_tls_handshake_after_shutdown() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let gateway = Arc::new(
+        crate::private_gateway::Gateway::load_or_create_with_quic(
+            "127.0.0.1:0".parse().unwrap(),
+            &state.config.state_dir,
+            None,
+        )
+        .await
+        .unwrap(),
+    );
+    state.shutdown_managed_tasks().await;
+    let (mut client, accepted) = bridge_client_socket_pair().await;
+    gateway
+        .handle_accepted_tcp(accepted, Arc::clone(&state))
+        .await;
+    assert_bridge_client_closed(&mut client).await;
+    drop(gateway);
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}

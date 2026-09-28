@@ -370,12 +370,17 @@ impl Gateway {
             return;
         };
         let gateway = Arc::clone(self);
-        tokio::spawn(async move {
+        let admission = GatewayConnectionAdmission {
+            limiter: Arc::clone(&self.overlay_rate_limiter),
+            remote_ip,
+        };
+        let registry_state = Arc::clone(&state);
+        registry_state.managed_background_tasks.spawn(async move {
             let _permit = permit;
+            let _admission = admission;
             if let Err(error) = gateway.handle_connection(tcp, &state).await {
                 tracing::debug!(%error, "overlay gateway connection closed");
             }
-            gateway.overlay_rate_limiter.record_disconnection(remote_ip);
         });
     }
 
@@ -479,7 +484,7 @@ impl Gateway {
             let udp_state = Arc::clone(&state);
             let quic_proxy_backend = self.quic_proxy_backend;
             let quic_data_proxy_backend = self.quic_data_proxy_backend;
-            tokio::spawn(async move {
+            state.managed_background_tasks.spawn(async move {
                 gateway
                     .run_udp_control(
                         udp_listener,
@@ -493,14 +498,15 @@ impl Gateway {
         if let Some(quic_listener) = self.quic_listener.lock().await.take() {
             let gateway = Arc::clone(&self);
             let quic_state = Arc::clone(&state);
-            tokio::spawn(async move {
+            state.managed_background_tasks.spawn(async move {
                 gateway.run_quic_control(quic_listener, quic_state).await;
             });
         }
         if let Some(quic_data_listener) = self.quic_data_listener.lock().await.take() {
             let gateway = Arc::clone(&self);
-            tokio::spawn(async move {
-                gateway.run_quic_data(quic_data_listener).await;
+            let quic_state = Arc::clone(&state);
+            state.managed_background_tasks.spawn(async move {
+                gateway.run_quic_data(quic_data_listener, quic_state).await;
             });
         }
         let Some(listener) = listener else {
@@ -528,7 +534,7 @@ impl Gateway {
         let mut quic_sessions = HashMap::new();
         let quic_admission = QuicProxyAdmissionGate::default();
         if let Some(forward_socket) = self.dht_forward_socket.as_ref() {
-            tokio::spawn(forward_dht_responses(
+            state.managed_background_tasks.spawn(forward_dht_responses(
                 Arc::clone(forward_socket),
                 Arc::clone(&public_socket),
             ));
@@ -688,17 +694,25 @@ impl Gateway {
             };
             let gateway = Arc::clone(&self);
             let connection_state = Arc::clone(&state);
-            tokio::spawn(async move {
+            let admission = GatewayConnectionAdmission {
+                limiter: Arc::clone(&self.overlay_rate_limiter),
+                remote_ip,
+            };
+            state.managed_background_tasks.spawn(async move {
                 let _permit = permit;
+                let _admission = admission;
                 gateway
                     .handle_quic_connection(connection, connection_state)
                     .await;
-                gateway.overlay_rate_limiter.record_disconnection(remote_ip);
             });
         }
     }
 
-    pub(super) async fn run_quic_data(self: Arc<Self>, server: QuicDataServer) {
+    pub(super) async fn run_quic_data(
+        self: Arc<Self>,
+        server: QuicDataServer,
+        state: Arc<crate::AppState>,
+    ) {
         loop {
             let Some(connection) = server.accept().await else {
                 return;
@@ -723,12 +737,16 @@ impl Gateway {
                 continue;
             };
             let gateway = Arc::clone(&self);
-            tokio::spawn(async move {
+            let admission = GatewayConnectionAdmission {
+                limiter: Arc::clone(&self.overlay_rate_limiter),
+                remote_ip,
+            };
+            state.managed_background_tasks.spawn(async move {
                 let _permit = permit;
+                let _admission = admission;
                 Arc::clone(&gateway)
                     .handle_quic_data_connection(connection)
                     .await;
-                gateway.overlay_rate_limiter.record_disconnection(remote_ip);
             });
         }
     }

@@ -610,3 +610,39 @@ fn secret_publish_never_replaces_existing_identity() {
     assert_eq!(temporary_files, 0);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn gateway_admission_is_released_when_managed_task_is_cancelled() {
+    let limiter = Arc::new(OverlayRateLimiter::new());
+    let remote_ip = "127.0.0.1".parse().unwrap();
+    assert!(limiter.check_connection(remote_ip).allowed);
+    let admission = GatewayConnectionAdmission {
+        limiter: Arc::clone(&limiter),
+        remote_ip,
+    };
+    let registry = crate::managed_tasks::ManagedTaskRegistry::default();
+    registry.spawn(async move {
+        let _admission = admission;
+        std::future::pending::<()>().await;
+    });
+    registry.shutdown().await;
+    assert_eq!(limiter.stats().total_connections, 0);
+}
+
+#[tokio::test]
+async fn gateway_admission_is_released_when_managed_task_is_rejected() {
+    let limiter = Arc::new(OverlayRateLimiter::new());
+    let remote_ip = "127.0.0.1".parse().unwrap();
+    let registry = crate::managed_tasks::ManagedTaskRegistry::default();
+    registry.shutdown().await;
+    assert!(limiter.check_connection(remote_ip).allowed);
+    let admission = GatewayConnectionAdmission {
+        limiter: Arc::clone(&limiter),
+        remote_ip,
+    };
+    assert!(!registry.try_spawn(async move {
+        let _admission = admission;
+        std::future::pending::<()>().await;
+    }));
+    assert_eq!(limiter.stats().total_connections, 0);
+}
