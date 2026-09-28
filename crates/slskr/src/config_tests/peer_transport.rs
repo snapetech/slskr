@@ -146,13 +146,8 @@ fn current_native_networking_defaults_consolidate_the_public_tcp_endpoint() {
         crate::config::FileConfig::default(),
         &env.clone().with("SLSKR_OVERLAY_BIND", "127.0.0.1:50305"),
     )
-    .expect("explicit dedicated overlay bind");
-    assert_eq!(
-        dedicated.overlay_bind,
-        Some("127.0.0.1:50305".parse().unwrap())
-    );
-    assert_eq!(dedicated.advanced_networking.dht.overlay_port, 50_305);
-    assert!(!dedicated.shared_mesh_tcp());
+    .unwrap_err();
+    assert!(dedicated.contains("must share the Soulseek listener bind"));
 
     let custom_tcp = crate::config::AppConfig::from_layers(
         None,
@@ -162,9 +157,18 @@ fn current_native_networking_defaults_consolidate_the_public_tcp_endpoint() {
     .expect("custom current Soulseek TCP port");
     assert_eq!(custom_tcp.listen_port, 51_000);
     assert_eq!(custom_tcp.listener_bind.as_deref(), Some("0.0.0.0:51000"));
-    assert_eq!(custom_tcp.advanced_networking.dht.dht_port, 50_300);
+    assert_eq!(custom_tcp.dht_port, 51_000);
+    assert_eq!(custom_tcp.advanced_networking.dht.dht_port, 51_000);
     assert_eq!(custom_tcp.advanced_networking.dht.overlay_port, 51_000);
-    assert_eq!(custom_tcp.advanced_networking.overlay.listen_port, 50_300);
+    assert_eq!(custom_tcp.advanced_networking.overlay.listen_port, 51_000);
+    assert_eq!(
+        custom_tcp.advanced_networking.overlay.quic_listen_port,
+        51_000
+    );
+    assert_eq!(
+        custom_tcp.advanced_networking.overlay_data.listen_port,
+        51_000
+    );
     assert!(custom_tcp.shared_mesh_tcp());
 }
 
@@ -897,4 +901,28 @@ fn advanced_networking_validation_rejects_inconsistent_security_limits() {
     .expect_err("inconsistent consensus must fail");
     assert!(error.contains("sync_security"), "{error}");
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn current_native_rejects_dedicated_obfuscation_and_normalizes_the_shared_bind() {
+    let env = MapEnv::default()
+        .with("SLSKR_CONTROLLER_PROFILE", "native")
+        .with("SLSKR_PARITY_PROFILE", "current")
+        .with("SLSKD_NO_CONNECT", "true")
+        .with("SLSKR_AUTH_DISABLED", "true");
+    let separate = crate::config::AppConfig::from_layers(
+        None,
+        crate::config::FileConfig::default(),
+        &env.clone()
+            .with("SLSKR_OBFUSCATED_LISTENER_BIND", "0.0.0.0:50301"),
+    )
+    .unwrap_err();
+    assert!(separate.contains("obfuscation must share"));
+    let shared = crate::config::AppConfig::from_layers(
+        None,
+        crate::config::FileConfig::default(),
+        &env.with("SLSKR_OBFUSCATED_LISTENER_BIND", "0.0.0.0:50300"),
+    )
+    .unwrap();
+    assert!(shared.obfuscated_listener_bind.is_none());
 }

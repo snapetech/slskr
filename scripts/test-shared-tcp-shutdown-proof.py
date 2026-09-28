@@ -57,6 +57,14 @@ class SocketEvidence(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "descriptor budget"):
                 MODULE.owned_socket_ports(123, self.root)
 
+    def test_probe_receipt_requires_matching_measured_success(self):
+        good = b'{"probe":"quic-data","status":"ok","duration_ms":123}'
+        self.assertEqual(MODULE.probe_report(good, 'quic-data-probe')['duration_ms'], 123)
+        for value in (b'', b'{}', b'[]', good.replace(b'ok', b'skipped'),
+                      good.replace(b'quic-data', b'other'), good.replace(b'123', b'true')):
+            with self.subTest(value=value), self.assertRaises((ValueError, RuntimeError)):
+                MODULE.probe_report(value, 'quic-data-probe')
+
     def test_eof_and_reset_prove_closure(self):
         for result in (b"", ConnectionResetError(), ConnectionAbortedError(), ssl.SSLEOFError()):
             client = Mock()

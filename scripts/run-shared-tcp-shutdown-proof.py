@@ -75,12 +75,23 @@ def require_closed(client):
         raise RuntimeError('stalled gateway client received data after shutdown')
 
 
+def probe_report(output, command):
+    report = json.loads(output)
+    if (not isinstance(report, dict) or report.get('status') != 'ok'
+            or report.get('probe') != command.removesuffix('-probe')
+            or type(report.get('duration_ms')) is not int or report['duration_ms'] < 0):
+        raise RuntimeError(f'{command} did not report measured success')
+    return report
+
+
 def main():
     repo = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=repo / 'target/debug/slskr')
     parser.add_argument('--output', type=Path, default=repo / 'target/rf-shared-tcp-shutdown.json')
     parser.add_argument('--cycles', type=int, default=3)
+    parser.add_argument('--all-udp-transports', action='store_true',
+                        help='enable DHT and both QUIC ALPNs on the shared peer port')
     args = parser.parse_args()
     if os.name != 'posix' or not Path('/proc/self/fd').exists():
         parser.error('this proof requires Linux procfs and SIGTERM')
@@ -94,10 +105,27 @@ def main():
         'dirtyWorktree': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo, text=True)),
         'binarySha256': digest(binary),
         'harnessSha256': digest(Path(__file__)),
+        'transportSourceSha256': {str(path): digest(repo / path) for path in (
+            Path('crates/slskr/src/daemon_serve.rs'),
+            Path('crates/slskr/src/config_parts/startup.rs'),
+            Path('crates/slskr/src/config_parts/peer_transport.rs'),
+            Path('crates/slskr/src/private_gateway.rs'),
+            Path('crates/slskr/src/private_gateway_owners/gateway_models.rs'),
+            Path('crates/slskr/src/private_gateway_owners/gateway_transport.rs'),
+            Path('crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs'),
+            Path('crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs'),
+            Path('crates/slskr/src/dht.rs'), Path('crates/slskr/src/quic_alpn.rs'),
+            Path('crates/slskr-client/src/shared_udp.rs'),
+            Path('crates/slskr-client/src/quic_control.rs'),
+            Path('crates/slskr-client/src/quic_data.rs'), Path('vendor/mainline/src/lib.rs'),
+            Path('vendor/mainline/src/dht.rs'), Path('vendor/mainline/src/rpc/config.rs'),
+            Path('vendor/mainline/src/rpc/socket.rs'),
+        )},
         'startedUtc': datetime.now(timezone.utc).isoformat(),
-        'dhtEnabled': False,
-        'meshDhtEnabled': False,
-        'quicEnabled': False,
+        'dhtEnabled': args.all_udp_transports,
+        'meshDhtEnabled': args.all_udp_transports,
+        'quicEnabled': args.all_udp_transports,
+        'quicDataEnabled': args.all_udp_transports,
         'productionPortsAdded': 0,
         'cycles': [],
     }
@@ -111,11 +139,12 @@ def main():
                     http_port = http_reservation.getsockname()[1]
                     peer_port = peer_reservation.getsockname()[1]
                 config = root / 'config.toml'
+                enabled = 'true' if args.all_udp_transports else 'false'
                 config.write_text(
-                    '[dht]\nenabled = false\n'
-                    '[mesh]\nenabled = true\nenable_dht = false\nenable_overlay = true\nenable_stun = false\n'
-                    '[overlay]\nenable = true\nenable_quic = false\n'
-                    '[overlay_data]\nenable = false\n'
+                    f'[dht]\nenabled = {enabled}\nlan_only = true\n'
+                    f'[mesh]\nenabled = true\nenable_dht = {enabled}\nenable_overlay = true\nenable_stun = false\n'
+                    f'[overlay]\nenable = true\nenable_quic = {enabled}\n'
+                    f'[overlay_data]\nenable = {enabled}\n'
                     '[mesh_gateway]\nenabled = false\n'
                 )
                 environment = {key: value for key, value in os.environ.items() if not key.startswith('SLSK')}
@@ -145,6 +174,30 @@ def main():
                                 if time.monotonic() >= deadline:
                                     raise RuntimeError('daemon readiness deadline exceeded')
                                 time.sleep(.02)
+                        udp_probes = []
+                        if args.all_udp_transports:
+                            # CLI probes discover this fixture's self-signed certificate,
+                            # then send using the exact discovered public-key pin.
+                            probe_env = dict(environment, SLSKR_OVERLAY_ENDPOINT=f'127.0.0.1:{peer_port}',
+                                             SLSKR_PROBE_OUTPUT='json')
+                            for command in ('overlay-quic-control-probe', 'quic-data-probe'):
+                                result = subprocess.run([str(binary), command], cwd=repo, env=probe_env,
+                                                        capture_output=True, timeout=25)
+                                if result.returncode != 0:
+                                    raise RuntimeError(f'{command} failed: {result.stderr[-2000:]!r} {result.stdout[-2000:]!r}')
+                                report = probe_report(result.stdout, command)
+                                udp_probes.append({'command': command, 'exitCode': result.returncode,
+                                                   'result': report,
+                                                   'outputSha256': hashlib.sha256(result.stdout).hexdigest()})
+                            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as dht_peer:
+                                dht_peer.bind(('127.0.0.1', 0))
+                                dht_peer.settimeout(2)
+                                dht_peer.sendto(b'd1:ad2:id20:AAAAAAAAAAAAAAAAAAAAe1:q4:ping1:t4:aaaa1:y1:qe',
+                                                ('127.0.0.1', peer_port))
+                                reply, source = dht_peer.recvfrom(2048)
+                                if source != ('127.0.0.1', peer_port) or b'4:aaaa' not in reply or b'1:y1:r' not in reply:
+                                    raise RuntimeError('DHT did not reply to the original peer from the public port')
+                            udp_probes.append({'command': 'actual DHT ping/reply', 'publicSourcePort': True})
                         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                         context.check_hostname = False
                         context.verify_mode = ssl.CERT_NONE
@@ -199,6 +252,7 @@ def main():
                             'perIpCapacityRejectedFourthClient': True if capacity_case else None,
                             'establishedTlsAwaitingOverlayInit': established_count,
                             'certificateSha256': certificate_hash, 'exitCode': code,
+                            'udpTransportProbes': udp_probes,
                             'shutdownSeconds': elapsed, 'allClientSocketsClosed': True,
                             'peerTcpAndUdpRebound': True,
                         })

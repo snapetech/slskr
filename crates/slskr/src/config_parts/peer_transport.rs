@@ -574,7 +574,7 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     } else {
         None
     };
-    let obfuscated_listener_bind = if supports_soulseek_obfuscation {
+    let mut obfuscated_listener_bind = if supports_soulseek_obfuscation {
         // Current upstream uses a zero obfuscation port as the shared-listener
         // sentinel. Frozen slskdN compatibility retains the historical
         // adjacent dedicated listener when no explicit obfuscation bind was
@@ -604,6 +604,16 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     } else {
         None
     };
+    if supports_soulseek_obfuscation && current_upstream_behavior {
+        if let Some(obfuscated) = obfuscated_listener_bind.as_deref() {
+            if Some(obfuscated) != listener_bind.as_deref() {
+                return Err(
+                    "native/current obfuscation must share the Soulseek listener bind".to_owned(),
+                );
+            }
+            obfuscated_listener_bind = None;
+        }
+    }
     let obfuscated_advertised_port = if supports_soulseek_obfuscation {
         if env.var("SLSKR_OBFUSCATED_ADVERTISED_PORT").is_some() {
             env_parse_option_layer(

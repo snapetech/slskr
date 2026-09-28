@@ -43,7 +43,6 @@ use tokio_rustls::{
     },
     TlsAcceptor,
 };
-
 const MAX_GATEWAY_CONNECTIONS: usize = 128;
 const MAX_OVERLAY_METADATA_USERNAME_BYTES: usize = 256;
 const MAX_OVERLAY_METADATA_FEATURES: usize = 20;
@@ -95,6 +94,11 @@ use self::gateway_models::{
 };
 #[path = "private_gateway_owners/gateway_services.rs"]
 mod gateway_services;
+#[path = "private_gateway_owners/gateway_udp_runtime.rs"]
+mod gateway_udp_runtime;
+#[path = "private_gateway_owners/shared_quic_runtime.rs"]
+mod shared_quic_runtime;
+use self::shared_quic_runtime::SharedQuicTransport;
 #[path = "private_gateway_owners/gateway_transport.rs"]
 mod gateway_transport;
 #[path = "private_gateway_owners/mesh_content_projection.rs"]

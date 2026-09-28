@@ -90,6 +90,16 @@ for expected in \
 done
 
 for expected in \
+  '--all-udp-transports --cycles 3' \
+  '--artifact target/reproducibility/shared-all-transports-shutdown.json' \
+  '            target/reproducibility/shared-all-transports-shutdown.json'; do
+  if ! rg -n -F -- "$expected" .github/workflows/ci.yml >/dev/null; then
+    printf 'workflow release policy check failed: shared transport proof missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for expected in \
   'schedule:' \
   "cron: '43 8 * * *'" \
   'timeout-minutes: 25' \

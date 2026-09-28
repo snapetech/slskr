@@ -6941,3 +6941,49 @@ bounds, and both certificate-pinned ALPN handshakes on one socket. All 88
 client tests and strict all-targets client Clippy pass. This is an internal
 transport prerequisite: daemon startup and routing still need to adopt it
 before the remaining QUIC relay ports can be removed.
+
+
+## RF-006 Native Single-Port UDP Routing (2026-09-28 UTC)
+
+Native/current startup now projects DHT, overlay UDP, and both QUIC ALPNs to
+the peer listener's actual port. A prebound public socket preserves its bind
+interface. Separate native overlay/obfuscation listener overrides fail with
+an actionable error; an explicit matching obfuscation bind is normalized to
+the shared listener. Frozen profiles retain their compatibility configuration.
+The native QUIC path creates no loopback backend or per-peer forwarding
+socket. Each endpoint receives bounded in-process packets through the client
+adapter. The gateway is the single reader and splits GRO batches while
+preserving source, destination, and ECN metadata. Existing admission caps
+remain; inspection attempts are limited before Initial decryption, and a
+one-second sweep releases expired pending/idle leases even without traffic.
+Only a completed handshake marks the address as validated.
+
+Actual encrypted traffic uncovered incorrect v1/v2 Initial salts and v2 key
+labels in the old selector. Independent rustls-encrypted fixtures now verify
+both versions and reject tampering. A protected short header can begin with
+`d`, so native DHT classification validates the bounded message instead of
+using that byte alone. Negotiated fixed-bit greasing is preserved. LAN-only
+DHT explicitly serves local peers without external bootstrap observations.
+One-shot control/data sends now await bounded cleanup in the caller's scope;
+CLI exit cannot abandon a detached cleanup worker or retain server admission.
+
+The daemon suite passes 681 tests (one separately exercised mount fixture is
+ignored by default); all 88 client tests and strict daemon/client/mainline
+Clippy pass. The full-controller/legacy-dispatch target compiles. Seven
+shutdown harness helper tests and tooling/workflow/source gates pass. Real
+concurrent certificate-pinned control/data handshakes pass with DHT enabled
+and disabled, and DHT replies reach the original remote from the shared port.
+Three live daemon cycles with all UDP services enabled and three with DHT
+and QUIC disabled observe exactly HTTP plus one peer TCP listener and one
+same-port UDP socket, clean SIGTERM exits, closed stalled clients, and TCP/UDP
+rebinding. The all-enabled fixture performs measured CLI pin-discovery/pinned
+sends for both ALPNs and a real DHT ping. Source/binary/harness hashes and dirty
+worktree provenance are retained in
+`benchmarks/artifacts/20260928-rf-native-single-port-all-enabled-proof.json`
+and `benchmarks/artifacts/20260928-rf-native-single-port-dht-disabled-proof.json`.
+CI retains both variants in its reproducibility artifact.
+
+RF-006 remains open for its broader service ownership inventory. RF-001 still
+needs complete shared-protocol proof; this selector admits a complete known
+Initial ALPN and rejects ambiguous/incomplete selection. It does not claim
+fragmented ClientHello or every legacy transport boundary is verified.

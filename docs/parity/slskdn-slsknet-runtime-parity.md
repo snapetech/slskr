@@ -33,6 +33,16 @@ older counts or phrases such as “open” describe their checkpoint, not the
 current frozen-boundary status. A newer upstream revision requires a new
 comparison pin and certification run.
 
+Native/current peer services use one public TCP/UDP port. QUIC control and data
+send directly through that UDP socket and receive classified packets through
+bounded in-process queues, with no loopback backend listeners or per-peer
+forwarding sockets. GRO boundaries, remote addresses, destination IP, and ECN
+are preserved. Actual pinned handshakes exercise both ALPNs together; the
+selector is checked against independently encrypted rustls v1/v2 Initials.
+Binary short headers beginning with `d` are distinguished from valid DHT
+messages. Unknown or incomplete ALPN selection is rejected rather than routed
+to another protocol. Frozen compatibility configuration remains distinct.
+
 The shared-UDP implementation gives mainline a clone of the existing public
 socket and delivers DHT-shaped packets through a bounded in-process queue.
 It preserves each original remote address and does not create a dedicated

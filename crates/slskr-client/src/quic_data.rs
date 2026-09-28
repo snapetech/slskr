@@ -720,12 +720,12 @@ pub async fn send_quic_data_with_limit(
     stream.write_payload(payload).await?;
 
     let length = payload.len();
-    tokio::spawn(async move {
-        tokio::time::sleep(QUIC_SEND_GRACE).await;
-        let (endpoint_client, connection) = client.into_parts();
-        connection.close(0_u32.into(), b"data sent");
-        endpoint_client.wait_idle().await;
-    });
+    tokio::time::sleep(QUIC_SEND_GRACE).await;
+    let (endpoint_client, connection) = client.into_parts();
+    connection.close(0_u32.into(), b"data sent");
+    timeout(QUIC_CONNECT_TIMEOUT, endpoint_client.wait_idle())
+        .await
+        .map_err(|_| QuicDataError::Timeout("QUIC data cleanup"))?;
     Ok(length)
 }
 

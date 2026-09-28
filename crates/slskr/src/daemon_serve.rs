@@ -503,10 +503,22 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     && config.advanced_networking.overlay_data.listen_port == dht.dht_port));
         shares_public_udp.then_some(SocketAddr::new(bind.ip(), dht.dht_port))
     });
+    let native_public_udp_socket = if shared_mesh_tcp {
+        let bind = config.overlay_bind.expect("shared peer bind was validated");
+        let socket = std::net::UdpSocket::bind(bind)
+            .map_err(|error| format!("shared peer UDP bind failed: {error}"))?;
+        socket
+            .set_nonblocking(true)
+            .map_err(|error| format!("shared peer UDP setup failed: {error}"))?;
+        Some(Arc::new(socket))
+    } else {
+        None
+    };
     let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
-        Some(Arc::new(dht::Rendezvous::new_with_shared_udp(
+        Some(Arc::new(dht::Rendezvous::new_with_udp_socket(
             &config.advanced_networking.dht,
-            shared_dht_udp_bind.is_some(),
+            shared_mesh_tcp || shared_dht_udp_bind.is_some(),
+            native_public_udp_socket.clone(),
         )?))
     } else {
         None
@@ -526,6 +538,9 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 && config.advanced_networking.overlay_data.listen_port
                     == config.advanced_networking.dht.dht_port;
             let quic_bind = config.advanced_networking.overlay.enable_quic.then(|| {
+                if shared_mesh_tcp {
+                    return bind;
+                }
                 let address = if quic_shared_with_dht {
                     IpAddr::V4(Ipv4Addr::LOCALHOST)
                 } else {
@@ -539,6 +554,9 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 SocketAddr::new(address, port)
             });
             let quic_data_bind = config.advanced_networking.overlay_data.enable.then(|| {
+                if shared_mesh_tcp {
+                    return bind;
+                }
                 let shared = quic_data_shared_with_dht;
                 let address = if shared {
                     IpAddr::V4(Ipv4Addr::LOCALHOST)
@@ -586,8 +604,8 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     quic_data_bind,
                     quic_proxy_bind,
                     shared_dht_udp_bind,
-                    dht.as_ref()
-                        .and_then(|rendezvous| rendezvous.shared_udp_socket()),
+                    native_public_udp_socket.clone().or_else(|| dht.as_ref()
+                        .and_then(|rendezvous| rendezvous.shared_udp_socket())),
                     dht.as_ref()
                         .and_then(|rendezvous| rendezvous.shared_udp_backend()),
                     quic_data_policy,

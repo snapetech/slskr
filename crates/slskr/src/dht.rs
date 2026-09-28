@@ -70,6 +70,14 @@ impl Rendezvous {
         settings: &crate::config::DhtSettings,
         shared_udp: bool,
     ) -> Result<Self, String> {
+        Self::new_with_udp_socket(settings, shared_udp, None)
+    }
+
+    pub fn new_with_udp_socket(
+        settings: &crate::config::DhtSettings,
+        shared_udp: bool,
+        public_socket: Option<Arc<UdpSocket>>,
+    ) -> Result<Self, String> {
         let bootstrap = settings
             .bootstrap_routers
             .iter()
@@ -92,6 +100,7 @@ impl Rendezvous {
                 .max(settings.cold_bootstrap_timeout),
             settings.min_neighbors,
             shared_udp,
+            public_socket,
         )
     }
 
@@ -110,6 +119,7 @@ impl Rendezvous {
             LOOKUP_TIMEOUT,
             3,
             false,
+            None,
         )
     }
 
@@ -122,21 +132,27 @@ impl Rendezvous {
         lookup_timeout: Duration,
         min_neighbors: usize,
         shared_udp: bool,
+        public_socket: Option<Arc<UdpSocket>>,
     ) -> Result<Self, String> {
         #[cfg(not(slskr_mainline_outbound_socket))]
         if shared_udp {
             return Err("single-port DHT requires the bundled shared UDP transport".to_owned());
         }
         let shared_udp_socket = if shared_udp {
-            let socket = UdpSocket::bind(SocketAddr::new(
-                std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                port,
-            ))
-            .map_err(|error| format!("shared DHT UDP bind failed: {error}"))?;
+            let socket = match public_socket {
+                Some(socket) => socket,
+                None => Arc::new(
+                    UdpSocket::bind(SocketAddr::new(
+                        std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                        port,
+                    ))
+                    .map_err(|error| format!("shared DHT UDP bind failed: {error}"))?,
+                ),
+            };
             socket
                 .set_nonblocking(true)
                 .map_err(|error| format!("shared DHT UDP nonblocking setup failed: {error}"))?;
-            Some(Arc::new(socket))
+            Some(socket)
         } else {
             None
         };
@@ -152,6 +168,11 @@ impl Rendezvous {
             .map(|socket| builder.shared_udp_socket(Arc::clone(socket)));
         if let Some(bootstrap) = bootstrap {
             builder.bootstrap(bootstrap);
+        }
+        // LAN-only nodes have no external bootstrap observations that could
+        // promote the library to server mode; they must serve local peers.
+        if lan_only {
+            builder.server_mode();
         }
         #[allow(deprecated)]
         let dht = builder
@@ -508,6 +529,7 @@ mod tests {
             LOOKUP_TIMEOUT,
             3,
             true,
+            None,
         )
         .unwrap();
         assert!(rendezvous.shared_udp_backend().is_none());
@@ -531,6 +553,7 @@ mod tests {
             LOOKUP_TIMEOUT,
             3,
             true,
+            None,
         )
         .unwrap();
         let public_socket = rendezvous

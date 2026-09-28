@@ -211,6 +211,9 @@ impl Gateway {
         data_shared_with_dht: bool,
         shared_tcp: bool,
     ) -> Result<Self, String> {
+        if shared_tcp && dht_backend.is_some() {
+            return Err("single-port peer mode requires in-process DHT ingress".to_owned());
+        }
         let (certificate, private_key) = load_or_create_certificate(state_dir)?;
         let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
         let config =
@@ -218,29 +221,107 @@ impl Gateway {
                 .with_no_client_auth()
                 .with_single_cert(vec![certificate.clone()], private_key.clone_key().into())
                 .map_err(|error| format!("overlay TLS configuration failed: {error}"))?;
-        let quic_listener = quic_bind.and_then(|bind| {
-            match QuicControlServer::bind(bind, certificate.clone(), private_key.clone_key()) {
-                Ok(listener) => Some(listener),
-                Err(error) => {
-                    tracing::warn!(%error, ?bind, "overlay QUIC control listener unavailable");
-                    None
+        // Shared TCP identifies native/current single-port mode. Bind its UDP
+        // socket once even when DHT is disabled; QUIC never gets a backend port.
+        let shared_udp_socket = if shared_tcp {
+            Some(match shared_udp_socket {
+                Some(socket) => socket,
+                None => Arc::new(
+                    StdUdpSocket::bind(bind)
+                        .map_err(|error| format!("shared peer UDP bind failed: {error}"))?,
+                ),
+            })
+        } else {
+            shared_udp_socket
+        };
+        let shared_socket = if shared_tcp {
+            Some(
+                slskr_client::shared_udp::SharedUdpSocket::new(
+                    shared_udp_socket
+                        .as_ref()
+                        .expect("shared mode has a UDP socket"),
+                )
+                .map_err(|error| format!("shared QUIC socket setup failed: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let (control_ingress, control_socket) = shared_socket
+            .as_ref()
+            .filter(|_| quic_bind.is_some())
+            .map(|socket| socket.endpoint())
+            .map_or((None, None), |(ingress, socket)| {
+                (Some(ingress), Some(socket))
+            });
+        let (data_ingress, data_socket) = shared_socket
+            .as_ref()
+            .filter(|_| quic_data_bind.is_some())
+            .map(|socket| socket.endpoint())
+            .map_or((None, None), |(ingress, socket)| {
+                (Some(ingress), Some(socket))
+            });
+        let quic_listener = match quic_bind {
+            Some(bind) => {
+                let result = match control_socket {
+                    Some(socket) => QuicControlServer::with_socket(
+                        socket,
+                        certificate.clone(),
+                        private_key.clone_key(),
+                    ),
+                    None => {
+                        QuicControlServer::bind(bind, certificate.clone(), private_key.clone_key())
+                    }
+                };
+                match result {
+                    Ok(listener) => Some(listener),
+                    Err(error) if shared_tcp => {
+                        return Err(format!("overlay QUIC control listener failed: {error}"))
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, ?bind, "overlay QUIC control listener unavailable");
+                        None
+                    }
                 }
             }
-        });
-        let quic_data_listener = quic_data_bind.and_then(|bind| {
-            match QuicDataServer::bind_with_limits(
-                bind,
-                certificate,
-                private_key,
-                QUIC_DATA_MAX_PAYLOAD_BYTES,
-                u32::try_from(max_concurrent_streams).unwrap_or(u32::MAX),
-            ) {
-                Ok(listener) => Some(listener),
-                Err(error) => {
-                    tracing::warn!(%error, ?bind, "overlay QUIC data listener unavailable");
-                    None
+            None => None,
+        };
+        let stream_limit = u32::try_from(max_concurrent_streams).unwrap_or(u32::MAX);
+        let quic_data_listener = match quic_data_bind {
+            Some(bind) => {
+                let result = match data_socket {
+                    Some(socket) => QuicDataServer::with_socket(
+                        socket,
+                        certificate,
+                        private_key,
+                        QUIC_DATA_MAX_PAYLOAD_BYTES,
+                        stream_limit,
+                    ),
+                    None => QuicDataServer::bind_with_limits(
+                        bind,
+                        certificate,
+                        private_key,
+                        QUIC_DATA_MAX_PAYLOAD_BYTES,
+                        stream_limit,
+                    ),
+                };
+                match result {
+                    Ok(listener) => Some(listener),
+                    Err(error) if shared_tcp => {
+                        return Err(format!("overlay QUIC data listener failed: {error}"))
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, ?bind, "overlay QUIC data listener unavailable");
+                        None
+                    }
                 }
             }
+            None => None,
+        };
+        let shared_quic = shared_socket.map(|socket| SharedQuicTransport {
+            socket,
+            control: control_ingress,
+            data: data_ingress,
+            validated: StdMutex::new(HashMap::new()),
         });
         let listener = if shared_tcp {
             None
@@ -300,11 +381,16 @@ impl Gateway {
             dht_forward_target: dht_backend,
             quic_listener: Mutex::new(quic_listener),
             quic_data_listener: Mutex::new(quic_data_listener),
-            quic_proxy_backend: quic_proxy_bind
+            shared_quic,
+            quic_proxy_backend: (!shared_tcp)
+                .then_some(quic_proxy_bind)
+                .flatten()
                 .zip(quic_bind)
                 .filter(|(_, backend)| backend.ip().is_loopback())
                 .map(|(_, backend)| backend),
-            quic_data_proxy_backend: data_shared_with_dht.then_some(quic_data_bind).flatten(),
+            quic_data_proxy_backend: (!shared_tcp && data_shared_with_dht)
+                .then_some(quic_data_bind)
+                .flatten(),
             quic_data_max_concurrent_streams: max_concurrent_streams.clamp(1, 1_024),
             quic_data_relays: Arc::new(Semaphore::new(
                 quic_data_policy
@@ -471,6 +557,11 @@ impl Gateway {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
         self.replay_nonces.lock().await.clear();
+        if let Some(shared) = self.shared_quic.as_ref() {
+            if let Ok(mut peers) = shared.validated.lock() {
+                peers.clear();
+            }
+        }
     }
 
     pub async fn register_outbound_guard(
@@ -542,153 +633,6 @@ impl Gateway {
         }
     }
 
-    pub(super) async fn run_udp_control(
-        &self,
-        socket: UdpSocket,
-        state: Arc<crate::AppState>,
-        quic_proxy_backend: Option<SocketAddr>,
-        quic_data_proxy_backend: Option<SocketAddr>,
-    ) {
-        let public_socket = Arc::new(socket);
-        let mut quic_sessions = HashMap::new();
-        let quic_admission = QuicProxyAdmissionGate::default();
-        if let Some(forward_socket) = self.dht_forward_socket.as_ref() {
-            state.managed_background_tasks.spawn(forward_dht_responses(
-                Arc::clone(forward_socket),
-                Arc::clone(&public_socket),
-            ));
-        }
-        let mut buffer = [0_u8; 65_536];
-        loop {
-            prune_quic_proxy_sessions(&mut quic_sessions);
-            let received = match public_socket.recv_from(&mut buffer).await {
-                Ok(received) => received,
-                Err(error) => {
-                    tracing::debug!(%error, "overlay UDP control listener stopped");
-                    return;
-                }
-            };
-            if let Some(session) = quic_sessions.get_mut(&received.1) {
-                session
-                    .last_activity
-                    .store(crate::unix_timestamp(), Ordering::Relaxed);
-                if let Err(error) = session.sender.try_send(buffer[..received.0].to_vec()) {
-                    if matches!(error, mpsc::error::TrySendError::Closed(_)) {
-                        quic_sessions.remove(&received.1);
-                    }
-                }
-                continue;
-            }
-            if is_dht_packet(&buffer[..received.0]) {
-                if state.dht.as_ref().is_some_and(|rendezvous| {
-                    rendezvous.accept_shared_udp_datagram(&buffer[..received.0], received.1)
-                }) {
-                    continue;
-                }
-                if let (Some(forward_socket), Some(forward_target)) =
-                    (&self.dht_forward_socket, self.dht_forward_target)
-                {
-                    if let Err(error) = forward_socket
-                        .send_to(&buffer[..received.0], forward_target)
-                        .await
-                    {
-                        tracing::debug!(%error, ?forward_target, "shared DHT datagram forwarding failed");
-                    }
-                }
-                // DHT traffic is never handed to the overlay decoder. In
-                // standalone mode there is no forward target, so it is
-                // intentionally ignored just as before.
-                continue;
-            }
-            if is_quic_initial_packet(&buffer[..received.0]) {
-                let Some(quic_backend) = select_quic_proxy_backend(
-                    &buffer[..received.0],
-                    quic_proxy_backend,
-                    quic_data_proxy_backend,
-                ) else {
-                    continue;
-                };
-                if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
-                    continue;
-                }
-                let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
-                    continue;
-                };
-                if let Ok(session) = QuicProxySession::new(
-                    received.1,
-                    quic_backend,
-                    Arc::clone(&public_socket),
-                    admission_lease,
-                    &state.managed_background_tasks,
-                )
-                .await
-                {
-                    if session
-                        .sender
-                        .send(buffer[..received.0].to_vec())
-                        .await
-                        .is_ok()
-                    {
-                        quic_sessions.insert(received.1, session);
-                    } else {
-                        tracing::debug!(
-                            remote = ?received.1,
-                            "overlay QUIC proxy closed before initial datagram was forwarded"
-                        );
-                    }
-                }
-                continue;
-            }
-            if !self
-                .overlay_rate_limiter
-                .check_message(&overlay_datagram_limiter_id(received.1))
-                .allowed
-            {
-                continue;
-            }
-            let Ok(envelope) = ControlEnvelope::decode(&buffer[..received.0]) else {
-                continue;
-            };
-            let now = match i64::try_from(crate::unix_timestamp_millis()) {
-                Ok(now) => now,
-                Err(_) => continue,
-            };
-            if !envelope.timestamp_is_current(now) || envelope.verify().is_err() {
-                continue;
-            }
-            if envelope.message_type != "pod_message" {
-                // Target ControlDispatcher intentionally ignores unknown
-                // control types after decode; retain that one-way behavior.
-                continue;
-            }
-            let Ok(message) = serde_json::from_slice::<PodControlMessage>(&envelope.payload) else {
-                continue;
-            };
-            if message.sender_peer_id.trim().is_empty()
-                || message.message_id.trim().is_empty()
-                || message.timestamp_unix_ms <= 0
-            {
-                continue;
-            }
-            if let Err((status, error)) = self
-                .handle_pods_call(
-                    "PostMessage",
-                    &envelope.payload,
-                    message.sender_peer_id.trim(),
-                    &state,
-                )
-                .await
-            {
-                tracing::warn!(
-                    %status,
-                    %error,
-                    sender_peer_id = message.sender_peer_id.trim(),
-                    "overlay pod message dispatch failed"
-                );
-            }
-        }
-    }
-
     pub(super) async fn run_quic_control(
         self: Arc<Self>,
         server: QuicControlServer,
@@ -705,6 +649,9 @@ impl Gateway {
                     continue;
                 }
             };
+            if let Some(shared) = self.shared_quic.as_ref() {
+                shared.mark_validated(connection.remote_address());
+            }
             let remote_ip = connection.remote_address().ip();
             if !self
                 .overlay_rate_limiter
@@ -749,6 +696,9 @@ impl Gateway {
                     continue;
                 }
             };
+            if let Some(shared) = self.shared_quic.as_ref() {
+                shared.mark_validated(connection.remote_address());
+            }
             let remote_ip = connection.remote_address().ip();
             if !self
                 .overlay_rate_limiter

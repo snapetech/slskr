@@ -19,3 +19,6 @@ mod transfers;
 
 #[path = "focused_controller_tests/delayed_filesystem.rs"]
 mod delayed_filesystem;
+
+#[path = "focused_controller_tests/shared_peer_udp.rs"]
+mod shared_peer_udp;

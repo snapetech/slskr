@@ -566,6 +566,8 @@ if rg -n 'tokio::(task::)?spawn\(' \
   crates/slskr/src/private_gateway_owners/gateway_models.rs \
   crates/slskr/src/private_gateway_owners/gateway_services.rs \
   crates/slskr/src/private_gateway_owners/gateway_transport.rs \
+  crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs \
+  crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs \
   crates/slskr/src/private_gateway_owners/quic_proxy.rs; then
   printf 'runtime boundary hardening failed: detached gateway task\n' >&2
   exit 1
@@ -579,5 +581,15 @@ if rg -n 'tokio::(task::)?spawn\(' \
   printf 'runtime boundary hardening failed: detached live-soak task\n' >&2
   exit 1
 fi
+
+# One-shot QUIC operations finish cleanup in their caller's scope.
+python3 - <<'PYCODE'
+from pathlib import Path
+for name in ('quic_control.rs', 'quic_data.rs', 'shared_udp.rs'):
+    path = Path('crates/slskr-client/src') / name
+    production = path.read_text().split('#[cfg(test)]', 1)[0]
+    if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
+        raise SystemExit(f'runtime boundary hardening failed: detached QUIC worker in {path}')
+PYCODE
 
 printf 'runtime boundary hardening check passed\n'

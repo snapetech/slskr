@@ -420,15 +420,14 @@ pub async fn send_quic_control(
         .map_err(|error| QuicControlError::Transport(error.to_string()))?;
     send.finish()
         .map_err(|error| QuicControlError::Transport(error.to_string()))?;
-    // The frozen client keeps a connection cache alive.  This one-shot helper
-    // cannot expose that cache, so retain the connection briefly in a cleanup
-    // task; closing it immediately can race the peer's accept loop and drop a
-    // perfectly-written stream before the envelope is observed.
-    tokio::spawn(async move {
-        tokio::time::sleep(QUIC_SEND_GRACE).await;
-        connection.close(0_u32.into(), b"envelope sent");
-        endpoint_client.wait_idle().await;
-    });
+    // Keep the one-shot operation alive until the peer can observe FIN, then
+    // close and drain here. The caller owns cancellation; no cleanup worker
+    // can outlive it or be lost when a CLI runtime exits.
+    tokio::time::sleep(QUIC_SEND_GRACE).await;
+    connection.close(0_u32.into(), b"control sent");
+    timeout(QUIC_CONNECT_TIMEOUT, endpoint_client.wait_idle())
+        .await
+        .map_err(|_| QuicControlError::Timeout("QUIC control cleanup"))?;
     Ok(())
 }
 

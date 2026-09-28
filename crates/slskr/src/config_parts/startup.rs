@@ -237,7 +237,7 @@ impl AppConfig {
             obfuscated_advertised_port,
             overlay_bind,
             dht_enabled,
-            dht_port,
+            mut dht_port,
             trusted_mesh_peers,
             obfuscation_enabled,
             obfuscation_mode,
@@ -262,25 +262,28 @@ impl AppConfig {
             file_config.network.obfuscation.advertise_regular_port,
             file_config.network.obfuscation.prefer_outbound,
         )?;
-        let current_shared_mesh_tcp = controller_profile == ControllerProfile::Native
-            && current_upstream_behavior
-            && advanced_networking.mesh.enabled
-            && advanced_networking.mesh.enable_overlay
-            && listener_bind
-                .as_deref()
-                .and_then(|value| value.parse::<SocketAddr>().ok())
-                .is_some_and(|bind| overlay_bind == Some(bind));
-        if current_shared_mesh_tcp {
+        if controller_profile == ControllerProfile::Native && current_upstream_behavior {
             if let Some(bind) = listener_bind
                 .as_deref()
                 .and_then(|value| value.parse::<SocketAddr>().ok())
             {
-                // The current upstream startup path mutates the DHT overlay
-                // option to the Soulseek listen port before any consumer
-                // reads it. Do the same so saved legacy overlay_port values
-                // cannot advertise a port that the shared listener does not
-                // own.
+                if advanced_networking.mesh.enabled
+                    && advanced_networking.mesh.enable_overlay
+                    && overlay_bind != Some(bind)
+                {
+                    return Err(
+                        "native/current mesh overlay must share the Soulseek listener bind"
+                            .to_owned(),
+                    );
+                }
+                dht_port = bind.port();
+                advanced_networking.dht.dht_port = bind.port();
                 advanced_networking.dht.overlay_port = bind.port();
+                advanced_networking.overlay.listen_port = bind.port();
+                advanced_networking.overlay.quic_listen_port = bind.port();
+                advanced_networking.overlay.share_quic_with_dht_port = true;
+                advanced_networking.overlay_data.listen_port = bind.port();
+                advanced_networking.overlay_data.share_with_dht_port = true;
             }
         }
         let PeerProfileSettings {
@@ -702,9 +705,9 @@ impl AppConfig {
     }
 
     /// Current upstream-style native deployments put Soulseek peer traffic and
-    /// the TLS mesh overlay on one public TCP listener. Keep an explicitly
-    /// configured legacy overlay bind as a supported dedicated-listener escape
-    /// hatch, while making the current/default projection share the endpoint.
+    /// the TLS mesh overlay on one public TCP listener. Require an explicitly
+    /// configured overlay bind equal to the peer bind; frozen profiles retain
+    /// their compatibility listener projection.
     pub fn shared_mesh_tcp(&self) -> bool {
         if self.controller_profile != ControllerProfile::Native
             || !self.current_upstream_behavior

@@ -129,6 +129,9 @@ jobs:
           python3 scripts/run-shared-tcp-shutdown-proof.py \
             --output target/reproducibility/shared-tcp-shutdown.json \
             --cycles 3
+          python3 scripts/run-shared-tcp-shutdown-proof.py \
+            --output target/reproducibility/shared-all-transports-shutdown.json \
+            --all-udp-transports --cycles 3
       - name: Collect reproducibility evidence
         run: |
           python3 scripts/collect-reproducibility-metadata.py \
@@ -137,6 +140,7 @@ jobs:
             --artifact dashboard/coverage/coverage-summary.json \
             --artifact web/build/index.html \
             --artifact target/reproducibility/shared-tcp-shutdown.json \
+            --artifact target/reproducibility/shared-all-transports-shutdown.json \
             --validate
       - name: Retain reproducibility evidence
         id: reproducibility-artifact
@@ -146,6 +150,7 @@ jobs:
           path: |
             target/reproducibility/ci-rust.json
             target/reproducibility/shared-tcp-shutdown.json
+            target/reproducibility/shared-all-transports-shutdown.json
             dashboard/coverage/coverage-summary.json
             web/build/index.html
           if-no-files-found: error

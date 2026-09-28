@@ -13,11 +13,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use quinn::{
-    udp::{RecvMeta, Transmit},
-    AsyncUdpSocket, Runtime, UdpPoller,
-};
+use quinn::{udp::Transmit, AsyncUdpSocket, Runtime, UdpPoller};
 use tokio::sync::mpsc;
+
+pub use quinn::udp::RecvMeta;
 
 pub const SHARED_QUIC_QUEUE_CAPACITY: usize = 128;
 pub const MAX_SHARED_DATAGRAM_BYTES: usize = 65_535;
