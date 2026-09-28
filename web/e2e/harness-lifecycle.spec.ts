@@ -1,7 +1,31 @@
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, mkdir, writeFile, utimes, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
-import { nativePeerEnvironment, SlskrNode } from './harness/SlskrNode';
+import { buildOutputIsFresh, nativePeerEnvironment, SlskrNode } from './harness/SlskrNode';
+
+test('ignored build directories do not invalidate a fresh binary', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'slskr-build-freshness-'));
+  try {
+    const inputs = path.join(root, 'crates');
+    await mkdir(inputs);
+    const source = path.join(inputs, 'source.rs');
+    const output = path.join(root, 'slskr');
+    await writeFile(source, 'source');
+    await writeFile(output, 'binary');
+    await utimes(source, 100, 100);
+    await utimes(output, 200, 200);
+    await mkdir(path.join(inputs, 'target'));
+    await writeFile(path.join(inputs, 'target', 'generated'), 'ignored');
+    expect(await buildOutputIsFresh(output, [inputs])).toBe(true);
+    await utimes(source, 300, 300);
+    expect(await buildOutputIsFresh(output, [inputs])).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('native harness uses one loopback peer port for TCP and UDP transports', () => {
   expect(nativePeerEnvironment(43123)).toEqual({

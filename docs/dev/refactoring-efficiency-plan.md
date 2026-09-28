@@ -182,7 +182,7 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Optional encoded media has no declared downloads; actual playback coverage remains open, without an established Linux codec failure. | In progress, optional-media gap |
+| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Per-grant concurrency and recipient backfill acceptance remain open. | In progress, optional-media gap |
 | RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
@@ -7391,3 +7391,44 @@ The retained job/step receipt is
 `benchmarks/artifacts/20260928-rf-hosted-59dd-complete-matrix.json`. It covers
 the script process-group and scoped WebSocket reader ownership checkpoints.
 Later lifecycle/media/profile changes still require their own hosted result.
+
+## RF-066 Genuine Ticketed Movie Playback (2026-09-28 UTC)
+
+Five sharing cases and two streaming cases now pass with the genuine pinned
+Sintel movie. The tests select its exact filename/content hash rather than a
+poster, discover incoming grants through the incoming endpoint, send bearer
+tokens only in `X-Share-Token`, and exchange them for short-lived stream tickets.
+Actual movie responses satisfy start/offset/suffix ranges and the 77,410,288-byte
+length. Missing/invalid tickets and forbidden query share tokens are rejected.
+The recipient UI opens the ticketed movie in a browser popup; the regression
+requires readyState at least 2, nonzero intrinsic video width, a decoded frame
+counter greater than zero, and no media error. Linux codec unavailability is
+not an established blocker for this actual browser run.
+
+Primary movie file streams now label MP4/WebM/Matroska with video MIME types;
+the frozen audio-preview mapping and audio extensions retain their contracts.
+The harness no longer treats ignored build directory mtimes as source changes,
+and future local fallback builds use locked debug Cargo. A timestamp regression
+passes with the existing six utility checks. Optional pack discovery tracks
+the declared movie/audio assets and passes the supported fixture-root setting.
+
+705 daemon tests, strict Clippy, full-controller/legacy all-targets compilation,
+seven Playwright utility tests, and static manifest/corruption checks pass.
+Source/log/binary hashes and explicit remaining scope are retained in
+`benchmarks/artifacts/20260928-rf-ticketed-movie-playback.json`. Original E2E
+sources remain in Git and the ignored `target/rf-ticketed-media-source-backup`.
+The recipient-download and per-grant concurrency cases remain open; their
+assertions are not weakened or reported as passed.
+
+## RF-006 Completed Hosted Later Ownership Matrix (2026-09-28 UTC)
+
+Run `36395807187` at clean exact commit `cf37f4bd` completed all eleven CI jobs
+successfully. Downloaded Rust artifact `10959255675` contains three disabled
+and three all-enabled single-port shutdown cycles plus reproducibility metadata.
+Proof hashes match the artifact manifest, and every transport source, lockfile,
+and configuration hash independently matches `git show` at that source.
+The full job/step receipt, metadata, and both actual proofs are retained in
+`benchmarks/artifacts/20260928-rf-hosted-cf37-complete-matrix.json`. This covers
+the later CLI, FTP, webhook, relay, and fixture-discovery changes at that commit;
+subsequent harness/media/profile/MIME changes still need their own hosted result.
+The remaining production lifecycle-command inventory is separate work.

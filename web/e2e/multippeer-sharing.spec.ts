@@ -1,3 +1,4 @@
+import { incomingMovieStream } from './fixtures/ticketed-share';
 import { NODES, shouldLaunchNodes } from './env';
 import { hasMediaFixture } from './fixtures/ensure-fixtures';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
@@ -595,7 +596,7 @@ test.describe('multi-peer sharing', () => {
     // Search for sintel (movie fixture) and add by contentId
     const searchInput = pageA.getByTestId('collection-item-search-input');
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
-    const sintelItem = await waitForLibraryItem(pageA, 'sintel');
+    const sintelItem = await waitForLibraryItem(pageA, 'sintel_512kb_stereo');
     await searchInput.locator('input').fill(sintelItem.contentId);
 
     // Add the item
@@ -675,7 +676,6 @@ test.describe('multi-peer sharing', () => {
       recipientToken,
       request,
       shareGrantId: createShareBody.id,
-      shareOverride: createShareBody,
     });
     await contextC.close();
 
@@ -958,86 +958,20 @@ test.describe('multi-peer sharing', () => {
       timeout: 15_000,
     });
 
-    // Resolve stream URL from manifest via API (more reliable than UI click)
-    const streamUrl = await pageC.evaluate(
-      async ({ expectedTitle, expectedOwnerBaseUrl }) => {
-        const token =
-          sessionStorage.getItem('slskr-token') ||
-          localStorage.getItem('slskr-token');
-        if (!token) return null;
+    const streamUrl = await incomingMovieStream({
+      request, recipient: nodeC, recipientToken, owner: nodeA, title: collectionTitle,
+    });
 
-        const sharesRes = await fetch('/api/v0/share-grants', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!sharesRes.ok) return null;
-        const sharesText = await sharesRes.text();
-        if (!sharesText) return null;
-        let shares;
-        try {
-          shares = JSON.parse(sharesText);
-        } catch {
-          return null;
-        }
-
-        if (!Array.isArray(shares) || shares.length === 0) return null;
-
-        for (const share of shares) {
-          if (!share?.id) continue;
-          const manifestRes = await fetch(
-            `/api/v0/share-grants/${share.id}/manifest`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            },
-          );
-          if (!manifestRes.ok) continue;
-          const manifestText = await manifestRes.text();
-          if (!manifestText) continue;
-          let manifest;
-          try {
-            manifest = JSON.parse(manifestText);
-          } catch {
-            continue;
-          }
-
-          if (manifest?.title !== expectedTitle) continue;
-
-          const items = Array.isArray(manifest?.items) ? manifest.items : [];
-          const getName = (x: any) =>
-            String(x?.filename || x?.path || x?.name || '');
-
-          // Prefer an actual video item; share manifests can be sorted differently than insertion order.
-          const item =
-            items.find((x: any) => /sintel/i.test(getName(x))) ||
-            items.find((x: any) =>
-              /\.(mp4|mkv|webm|avi|mov)$/i.test(getName(x)),
-            ) ||
-            items.find(
-              (x: any) =>
-                String(x?.mediaKind || '')
-                  .toLowerCase()
-                  .includes('video'),
-            ) ||
-            items.find((x: any) => Boolean(x?.streamUrl || x?.stream_url));
-
-          // API responses are typically snake_case, but some DTOs are camelCase.
-          const url = item?.streamUrl || item?.stream_url;
-          if (!url) continue;
-
-          if (url.startsWith(expectedOwnerBaseUrl)) return url;
-          if (url.startsWith('/')) return `${expectedOwnerBaseUrl}${url}`;
-        }
-
-        return null;
-      },
-      {
-        expectedOwnerBaseUrl: nodeA.baseUrl,
-        expectedTitle: collectionTitle,
-      },
-    );
-
-    if (!streamUrl) {
-      throw new Error('No streamUrl found in manifest for stream test.');
-    }
+    const popupPromise = pageC.waitForEvent('popup');
+    await pageC.getByTestId('incoming-stream-93df4e31').click();
+    const playback = await popupPromise;
+    await expect.poll(() => playback.evaluate(() => {
+      const video = document.querySelector('video');
+      return Boolean(video && video.readyState >= 2 && video.videoWidth > 0
+        && video.getVideoPlaybackQuality().totalVideoFrames > 0 && !video.error);
+    }), { timeout: 20_000 }).toBe(true);
+    expect(new URL(playback.url()).searchParams.has('ticket')).toBe(true);
+    expect(new URL(playback.url()).searchParams.has('token')).toBe(false);
 
     const normalized = streamUrl
       .replace('http://localhost:', 'http://127.0.0.1:')

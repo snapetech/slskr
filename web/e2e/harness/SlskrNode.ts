@@ -139,7 +139,9 @@ async function latestModificationTime(inputPath: string): Promise<number> {
     return stats.mtimeMs;
   }
 
-  let latest = stats.mtimeMs;
+  // Creating/removing an ignored target directory changes its parent's mtime.
+  // Only actual input files determine whether an existing binary is stale.
+  let latest = 0;
   let entries;
   try {
     entries = await fs.readdir(inputPath, { withFileTypes: true });
@@ -161,7 +163,7 @@ async function latestModificationTime(inputPath: string): Promise<number> {
   return latest;
 }
 
-async function buildOutputIsFresh(
+export async function buildOutputIsFresh(
   outputPath: string,
   inputPaths: string[],
 ): Promise<boolean> {
@@ -282,15 +284,15 @@ export class SlskrNode {
       return debugPath;
     }
 
-    console.log('[E2E] Rust source is newer than available slskr binary; rebuilding release binary.');
+    console.log('[E2E] Rust source is newer than available slskr binary; rebuilding debug binary.');
     await this.ensureBinaryBuild(repoRoot);
 
     try {
-      await fs.access(releasePath);
-      return releasePath;
+      await fs.access(debugPath);
+      return debugPath;
     } catch {
       throw new Error(
-        `slskr binary not found at ${releasePath} after \`cargo build --release --bin slskr\`.`,
+        `slskr binary not found at ${debugPath} after \`cargo build --locked --bin slskr\`.`,
       );
     }
   }
@@ -301,7 +303,7 @@ export class SlskrNode {
         try {
           await runCommand(
             'cargo',
-            ['build', '--release', '--bin', 'slskr'],
+            ['build', '--locked', '--bin', 'slskr'],
             repoRoot,
           );
         } catch (error) {

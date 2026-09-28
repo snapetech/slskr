@@ -9,7 +9,6 @@ const execFileAsync = promisify(execFile);
 const OPTIONAL_MEDIA_FILES = [
   'music/open_goldberg/01_aria.ogg',
   'movie/sintel_512kb_stereo.mp4',
-  'tv/pioneer_one_s01e01_sample.mp4',
 ];
 
 export function getRepoRootFromCwd(cwd: string = process.cwd()): string {
@@ -172,8 +171,8 @@ export async function ensureFixtures(
     }
   }
 
-  // Optional media is intentionally outside the checked-in manifest.
-  // Streaming specs skip when these locally supplied files are absent.
+  // Optional media has pinned download declarations outside the static files
+  // baseline. Each streaming spec checks its own actual media dependency.
   const missingMedia: string[] = [];
   for (const mediaFile of OPTIONAL_MEDIA_FILES) {
     const filePath = path.join(fullFixturesPath, mediaFile);
@@ -200,7 +199,7 @@ export async function ensureFixtures(
       );
       await execFileAsync('bash', [fetchScript], {
         cwd: repoRoot,
-        env: { ...process.env, FIXTURES_DIR: fullFixturesPath },
+        env: { ...process.env, SLSKR_FIXTURES_ROOT: fullFixturesPath },
       });
       const remainingMedia: string[] = [];
       for (const mediaFile of OPTIONAL_MEDIA_FILES) {
@@ -217,19 +216,19 @@ export async function ensureFixtures(
         console.log('[E2E] Optional media files are available');
       } else {
         console.warn(
-          '[E2E] No downloadable media assets are declared; optional streaming files remain unavailable.',
+          '[E2E] Fetch completed without installing all required optional media.',
         );
       }
     } catch (error) {
       console.warn(`[E2E] Failed to fetch media files: ${error}`);
-      console.warn('[E2E] Tests will continue with static fixtures only');
+      console.warn('[E2E] Tests will continue with available fixtures');
     }
   } else if (missingMedia.length > 0) {
     console.warn(
       `[E2E] ${missingMedia.length} media files missing (optional): ${missingMedia.join(', ')}`,
     );
     console.warn(
-      '[E2E] Tests will use static fixtures only; optional media must be supplied separately for streaming specs.',
+      '[E2E] Only specs requiring missing media will skip. Run scripts/fetch-test-fixtures.sh.',
     );
   }
 }

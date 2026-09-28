@@ -1,5 +1,18 @@
 use super::fixtures::*;
 
+#[test]
+fn primary_movie_stream_mime_preserves_audio_preview_contract() {
+    use crate::preview_stream_controller::{
+        preview_stream_content_type, primary_stream_content_type,
+    };
+    assert_eq!(primary_stream_content_type("sintel.MP4"), "video/mp4");
+    assert_eq!(primary_stream_content_type("movie.webm"), "video/webm");
+    assert_eq!(primary_stream_content_type("movie.mkv"), "video/x-matroska");
+    assert_eq!(primary_stream_content_type("song.m4a"), "audio/mp4");
+    assert_eq!(primary_stream_content_type("song.ogg"), "audio/ogg");
+    assert_eq!(preview_stream_content_type("preview.mp4"), "audio/mp4");
+}
+
 #[tokio::test]
 async fn wishlist_completion_releases_guard_when_item_is_missing() {
     let (state, _receiver) = test_state_with_env(MapEnv::default());

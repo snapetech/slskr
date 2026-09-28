@@ -1,3 +1,4 @@
+import { incomingMovieStream } from './fixtures/ticketed-share';
 import { NODES, shouldLaunchNodes } from './env';
 import { hasMediaFixture } from './fixtures/ensure-fixtures';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
@@ -16,6 +17,7 @@ import { expect, test } from '@playwright/test';
 const hasDownloadedMedia = hasMediaFixture('movie/sintel_512kb_stereo.mp4');
 
 test.describe('streaming', () => {
+  test.describe.configure({ mode: 'serial' });
   test.skip(!hasDownloadedMedia, 'Streaming E2E requires the pinned Sintel movie fixture');
 
   let harness: MultiPeerHarness | null = null;
@@ -76,6 +78,18 @@ test.describe('streaming', () => {
       });
     }
 
+    const setupToken = await getAuthToken(pageA);
+    const groups = await request.get(`${nodeA.baseUrl}/api/v0/sharegroups`, {
+      headers: { Authorization: `Bearer ${setupToken}` },
+    });
+    expect(groups.status()).toBe(200);
+    const group = (await groups.json()).find((entry: { name?: string }) => entry.name === groupName);
+    expect(group).toBeTruthy();
+    const member = await request.post(`${nodeA.baseUrl}/api/v0/sharegroups/${group.id}/members`, {
+      data: { username: nodeB.username }, headers: { Authorization: `Bearer ${setupToken}` },
+    });
+    expect([200, 201]).toContain(member.status());
+
     // Create collection and share (similar to multippeer-sharing test)
     await clickNav(pageA, T.navCollections);
     await pageA.waitForSelector('[data-testid="collections-root"]', {
@@ -125,7 +139,7 @@ test.describe('streaming', () => {
     const addItemButton = pageA.getByTestId(T.collectionAddItem);
     if ((await addItemButton.count()) > 0) {
       await addItemButton.click();
-      const item = await waitForLibraryItem(pageA, 'sintel');
+      const item = await waitForLibraryItem(pageA, 'sintel_512kb_stereo');
       await pageA
         .getByTestId(T.collectionItemPicker)
         .locator('input')
@@ -189,7 +203,6 @@ test.describe('streaming', () => {
       recipientToken,
       request,
       shareGrantId: createShareBody.id,
-      shareOverride: createShareBody,
     });
     sharedGrantId = createShareBody.id;
     sharedCollectionId = createShareBody.collectionId;
@@ -217,63 +230,9 @@ test.describe('streaming', () => {
           timeout: 15_000,
         });
 
-        // Get stream URL from manifest via API (more reliable than UI)
-        streamUrl = await pageB.evaluate(
-          async ({ expectedTitle, expectedOwnerBaseUrl }) => {
-            const token =
-              sessionStorage.getItem('slskr-token') ||
-              localStorage.getItem('slskr-token');
-            if (!token) return null;
-
-            const sharesRes = await fetch('/api/v0/share-grants', {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!sharesRes.ok) return null;
-            const sharesText = await sharesRes.text();
-            if (!sharesText) return null;
-            let shares;
-            try {
-              shares = JSON.parse(sharesText);
-            } catch {
-              return null;
-            }
-
-            if (!Array.isArray(shares) || shares.length === 0) return null;
-
-            for (const share of shares) {
-              if (!share?.id) continue;
-              const manifestRes = await fetch(
-                `/api/v0/share-grants/${share.id}/manifest`,
-                {
-                  headers: { Authorization: `Bearer ${token}` },
-                },
-              );
-              if (!manifestRes.ok) continue;
-              const manifestText = await manifestRes.text();
-              if (!manifestText) continue;
-              let manifest;
-              try {
-                manifest = JSON.parse(manifestText);
-              } catch {
-                continue;
-              }
-
-              if (manifest?.title !== expectedTitle) continue;
-              const item = manifest?.items?.[0];
-              const url = item?.streamUrl;
-              if (!url) continue;
-
-              if (url.startsWith(expectedOwnerBaseUrl)) return url;
-              if (url.startsWith('/')) return `${expectedOwnerBaseUrl}${url}`;
-            }
-
-            return null;
-          },
-          {
-            expectedOwnerBaseUrl: nodeA.baseUrl,
-            expectedTitle: collectionTitle,
-          },
-        );
+        streamUrl = await incomingMovieStream({
+          request, recipient: nodeB, recipientToken, owner: nodeA, title: collectionTitle,
+        });
 
         break;
       }
@@ -299,8 +258,10 @@ test.describe('streaming', () => {
       headers: { Range: 'bytes=0-1' },
     });
 
-    // Should get 206 (Partial Content) or 200 (full content)
-    expect([206, 200]).toContain(rangeResponse.status());
+    expect(rangeResponse.status()).toBe(206);
+    expect(rangeResponse.headers()['content-type']).toBe('video/mp4');
+    expect(rangeResponse.headers()['content-range']).toBe('bytes 0-1/77410288');
+    expect(await rangeResponse.body()).toEqual(Buffer.from([0, 0]));
 
     await contextA.close();
     await contextB.close();
@@ -309,237 +270,31 @@ test.describe('streaming', () => {
   test('seek_works_with_range_requests', async ({ browser, request }) => {
     const nodeA = harness ? harness.getNode('A').nodeCfg : NODES.A;
     const nodeB = harness ? harness.getNode('B').nodeCfg : NODES.B;
-    await waitForHealth(request, nodeA.baseUrl);
-    await waitForHealth(request, nodeB.baseUrl);
-
-    const contextA = await browser.newContext();
-    const contextB = await browser.newContext();
-    const pageA = await contextA.newPage();
-    const pageB = await contextB.newPage();
-    await login(pageA, nodeA);
-    await login(pageB, nodeB);
-
-    // Ensure share exists and is announced (reuse from previous test or create new)
-    if (!sharedGrantId || !ownerAuthToken) {
-      const ownerToken = await getAuthToken(pageA);
-      const recipientToken = await getAuthToken(pageB);
-
-      // Quick setup: reuse collection if exists, otherwise create
-      await clickNav(pageA, T.navCollections);
-      await pageA.waitForSelector('[data-testid="collections-root"]', {
-        timeout: 10_000,
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await login(page, nodeB);
+      const recipientToken = await getAuthToken(page);
+      const streamUrl = await incomingMovieStream({
+        request, recipient: nodeB, recipientToken, owner: nodeA, title: collectionTitle,
       });
-
-      const existingCollectionRow = pageA.getByTestId(
-        T.collectionRow(collectionTitle),
-      );
-      const collectionId: string | null = null;
-      if ((await existingCollectionRow.count()) > 0) {
-        await existingCollectionRow.click();
-        await pageA.waitForTimeout(200); // Reduced from 500ms
-        const createShareResponse = pageA.waitForResponse(
-          (response) =>
-            response.url().includes('/api/v0/share-grants') &&
-            response.request().method() === 'POST',
-          { timeout: 5_000 },
-        );
-        const shareCreate = pageA.getByTestId(T.shareCreate);
-        if ((await shareCreate.count()) > 0) {
-          await shareCreate.click();
-          const audiencePicker = pageA.getByTestId(T.shareAudiencePicker);
-          await expect(audiencePicker).toBeVisible({ timeout: 5_000 });
-          await audiencePicker.click();
-          const groupOption = pageA.getByRole('option', {
-            name: new RegExp(groupName, 'i'),
-          });
-          if ((await groupOption.count()) > 0) {
-            await groupOption.first().click();
-            await pageA.getByTestId(T.sharePolicyStream).check();
-            await pageA.getByTestId(T.sharePolicyDownload).check();
-            await pageA.getByTestId(T.shareCreateSubmit).click();
-            const createShareResult = await createShareResponse;
-            let createShareBody;
-            try {
-              createShareBody = await createShareResult.json();
-            } catch {
-              createShareBody = await createShareResult.text();
-            }
-
-            if (createShareResult.status() === 201 && createShareBody?.id) {
-              await announceShareGrant({
-                owner: nodeA,
-                ownerToken,
-                recipient: nodeB,
-                recipientToken,
-                request,
-                shareGrantId: createShareBody.id,
-                shareOverride: createShareBody,
-              });
-              sharedGrantId = createShareBody.id;
-              sharedCollectionId = createShareBody.collectionId;
-              ownerAuthToken = ownerToken;
-              recipientAuthToken = recipientToken;
-            }
-          }
-        }
+      for (const range of ['bytes=0-15', 'bytes=65536-65551', 'bytes=-16']) {
+        const response = await request.get(streamUrl, { headers: { Range: range } });
+        expect(response.status()).toBe(206);
+        expect(response.headers()['content-type']).toMatch(/video/u);
+        expect(response.headers()['content-range']).toMatch(/^bytes \d+-\d+\/77410288$/u);
+        expect((await response.body()).length).toBe(16);
       }
+      const noTicket = new URL(streamUrl);
+      noTicket.search = '';
+      expect((await request.get(noTicket.toString())).status()).toBe(401);
+      noTicket.search = '?ticket=invalid-ticket';
+      expect((await request.get(noTicket.toString())).status()).toBe(401);
+      noTicket.search = '?token=forbidden-query-token';
+      expect((await request.get(noTicket.toString())).status()).toBe(400);
+    } finally {
+      await context.close();
     }
-
-    // Wait for share grant to be available (if we have the ID from previous test)
-    const recipientToken = await getAuthToken(pageB);
-    if (sharedGrantId) {
-      const shareAvailable = await waitForShareGrantById({
-        baseUrl: nodeB.baseUrl,
-        request,
-        shareGrantId: sharedGrantId,
-        timeoutMs: 30_000,
-        token: recipientToken,
-      });
-      if (!shareAvailable) {
-        throw new Error(
-          `Share grant ${sharedGrantId} not found on recipient node after 30s`,
-        );
-      }
-    }
-
-    // Navigate to shared content
-    await clickNav(pageB, T.navSharedWithMe);
-    await pageB.waitForTimeout(1_000); // Reduced from 2000ms
-
-    // Poll for the share to appear in UI (or fetch directly by ID)
-    let shareFound = false;
-    let streamUrl: string | null = null;
-
-    if (sharedGrantId) {
-      // Direct fetch by ID (more reliable)
-      const manifestRes = await request.get(
-        `${nodeB.baseUrl}/api/v0/share-grants/${sharedGrantId}/manifest`,
-        {
-          failOnStatusCode: false,
-          headers: { Authorization: `Bearer ${recipientToken}` },
-        },
-      );
-      if (manifestRes.ok()) {
-        const manifest = await manifestRes.json();
-        if (manifest?.title === collectionTitle) {
-          const item = manifest?.items?.[0];
-          streamUrl = item?.streamUrl;
-          if (streamUrl) {
-            if (!streamUrl.startsWith('http')) {
-              streamUrl = `${nodeA.baseUrl}${streamUrl.startsWith('/') ? '' : '/'}${streamUrl}`;
-            }
-
-            shareFound = true;
-          }
-        }
-      }
-    }
-
-    // Fallback to UI polling if direct fetch didn't work
-    if (!shareFound) {
-      for (let index = 0; index < 30; index++) {
-        const shareRow = pageB
-          .getByTestId(T.incomingShareRow(collectionTitle))
-          .first();
-        if ((await shareRow.count()) > 0) {
-          shareFound = true;
-          await shareRow.getByTestId(T.incomingShareOpen).click();
-          await expect(pageB.getByTestId(T.sharedManifest)).toBeVisible({
-            timeout: 15_000,
-          });
-
-          // Get stream URL from manifest via API
-          streamUrl = await pageB.evaluate(
-            async ({ expectedTitle, expectedOwnerBaseUrl }) => {
-              const token =
-                sessionStorage.getItem('slskr-token') ||
-                localStorage.getItem('slskr-token');
-              if (!token) return null;
-
-              const sharesRes = await fetch('/api/v0/share-grants', {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              if (!sharesRes.ok) return null;
-              const sharesText = await sharesRes.text();
-              if (!sharesText) return null;
-              let shares;
-              try {
-                shares = JSON.parse(sharesText);
-              } catch {
-                return null;
-              }
-
-              if (!Array.isArray(shares) || shares.length === 0) return null;
-
-              for (const share of shares) {
-                if (!share?.id) continue;
-                const manifestRes = await fetch(
-                  `/api/v0/share-grants/${share.id}/manifest`,
-                  {
-                    headers: { Authorization: `Bearer ${token}` },
-                  },
-                );
-                if (!manifestRes.ok) continue;
-                const manifestText = await manifestRes.text();
-                if (!manifestText) continue;
-                let manifest;
-                try {
-                  manifest = JSON.parse(manifestText);
-                } catch {
-                  continue;
-                }
-
-                if (manifest?.title !== expectedTitle) continue;
-                const item = manifest?.items?.[0];
-                const url = item?.streamUrl;
-                if (!url) continue;
-
-                if (url.startsWith(expectedOwnerBaseUrl)) return url;
-                if (url.startsWith('/')) return `${expectedOwnerBaseUrl}${url}`;
-              }
-
-              return null;
-            },
-            {
-              expectedOwnerBaseUrl: nodeA.baseUrl,
-              expectedTitle: collectionTitle,
-            },
-          );
-
-          break;
-        }
-
-        await pageB.waitForTimeout(500); // Reduced from 1000ms
-      }
-    }
-
-    expect(shareFound).toBe(true);
-    if (!streamUrl) {
-      throw new Error('No streamUrl found in manifest for seek test.');
-    }
-
-    // Make a Range request for bytes 1000-2000 (simulating seek)
-    const normalized = streamUrl
-      .replace('http://localhost:', 'http://127.0.0.1:')
-      .replace('https://localhost:', 'https://127.0.0.1:');
-    const fullStreamUrl = normalized.startsWith('http')
-      ? normalized
-      : `${nodeB.baseUrl}${normalized}`;
-
-    const rangeResponse = await request.get(fullStreamUrl, {
-      failOnStatusCode: false,
-      headers: { Range: 'bytes=1000-2000' },
-    });
-
-    // Should get 206 (Partial Content) if range is supported
-    if (rangeResponse.status() === 206) {
-      expect(rangeResponse.headers()['content-range']).toBeTruthy();
-    } else {
-      expect([200]).toContain(rangeResponse.status());
-    }
-
-    await contextA.close();
-    await contextB.close();
   });
 
   test('concurrency_limit_blocks_excess_streams', async ({

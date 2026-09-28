@@ -885,6 +885,16 @@ export async function waitForShareGrantById({
     }
 
     if (res.status() === 404) {
+      const incoming = await request.get(`${baseUrl}/api/v0/share-grants/incoming`, {
+        headers: auth,
+      });
+      if (incoming.ok()) {
+        const shares = await incoming.json();
+        if (Array.isArray(shares) && shares.some((share) =>
+          share?.id === shareGrantId || share?.shareGrantId === shareGrantId)) {
+          return true;
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 250)); // Reduced from 500ms
       continue;
     }

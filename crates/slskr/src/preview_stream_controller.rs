@@ -1048,7 +1048,7 @@ pub(super) async fn open_primary_stream_file(
                 return Ok(Some(LocalStreamFile {
                     file,
                     length: metadata.len(),
-                    content_type: preview_stream_content_type(&filename).to_owned(),
+                    content_type: primary_stream_content_type(&filename).to_owned(),
                     cleanup_path: None,
                 }));
             }
@@ -1089,7 +1089,7 @@ pub(super) async fn open_primary_stream_file(
     Ok(Some(LocalStreamFile {
         file,
         length: metadata.len(),
-        content_type: preview_stream_content_type(&transfer.filename).to_owned(),
+        content_type: primary_stream_content_type(&transfer.filename).to_owned(),
         cleanup_path: None,
     }))
 }
@@ -1132,6 +1132,18 @@ pub(super) fn open_shared_local_file_unix(
             .map_err(|error| format!("shared directory confined open failed: {error}"))?;
     }
     Err("shared file path is empty".to_owned())
+}
+
+pub(super) fn primary_stream_content_type(path: &str) -> &'static str {
+    match path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+    {
+        Some(extension) if extension == "mp4" => "video/mp4",
+        Some(extension) if extension == "webm" => "video/webm",
+        Some(extension) if extension == "mkv" => "video/x-matroska",
+        _ => preview_stream_content_type(path),
+    }
 }
 
 pub(super) fn preview_stream_content_type(path: &str) -> &'static str {
