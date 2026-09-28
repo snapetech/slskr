@@ -216,9 +216,10 @@ pub(crate) async fn backfill_incoming_share(
 fn validate_request_fields(request: &ShareBackfillRequest) -> Result<(), (i32, String)> {
     if request.grant_id.trim().is_empty()
         || request.grant_id.len() > MAX_BACKFILL_GRANT_ID_BYTES
+        || request.grant_id.chars().any(char::is_control)
         || request.token.trim().is_empty()
         || request.token.len() > MAX_BACKFILL_TOKEN_BYTES
-        || request.token.contains(['\r', '\n'])
+        || request.token.chars().any(char::is_control)
         || request.content_id.as_ref().is_some_and(|value| {
             value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control)
         })
@@ -325,4 +326,36 @@ pub(crate) fn safe_backfill_filename(item: &ShareBackfillItem) -> String {
         .map(|extension| format!(".{extension}"))
         .unwrap_or_default();
     format!("sha256_{digest}{extension}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(grant_id: &str, token: &str, content_id: Option<&str>) -> ShareBackfillRequest {
+        ShareBackfillRequest {
+            grant_id: grant_id.to_owned(),
+            token: token.to_owned(),
+            content_id: content_id.map(str::to_owned),
+            offset: None,
+            length: None,
+        }
+    }
+
+    #[test]
+    fn rejects_control_characters_in_grant_token_and_content_id() {
+        assert!(validate_request_fields(&request("grant-1", "valid-token", None)).is_ok());
+        for (grant_id, token, content_id) in [
+            ("grant\t1", "valid-token", None),
+            ("grant\u{0085}1", "valid-token", None),
+            ("grant-1", "token\u{0007}", None),
+            ("grant-1", "token\u{007f}", None),
+            ("grant-1", "valid-token", Some("content\u{0085}id")),
+        ] {
+            assert!(
+                validate_request_fields(&request(grant_id, token, content_id)).is_err(),
+                "accepted a control character in grant_id={grant_id:?} token={token:?} content_id={content_id:?}"
+            );
+        }
+    }
 }

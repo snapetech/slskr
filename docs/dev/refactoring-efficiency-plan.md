@@ -7756,8 +7756,11 @@ ranges through the authenticated, certificate-pinned `MeshContent` service.
 The recipient selects the owner from its configured trusted mesh peers; the
 announced HTTP endpoint does not control the network destination. The owner
 revalidates the share token, direct recipient or current group membership, and
-download permission for the manifest and each range. Native/current profiles
-only are supported. Both ends bound item counts and total bytes; the recipient
+download permission for the manifest and each range. Grant IDs, access tokens,
+and content IDs with Unicode control characters are rejected at that mesh
+boundary; a regression covers C0, DEL, and NEL values in those fields.
+Native/current profiles only are supported. Both ends bound item counts and
+total bytes; the recipient
 stages private temporary files, verifies exact size and SHA-256, then publishes
 without overwriting. Range calls are paced below the existing per-connection
 overlay rate limit and use the existing shared native peer port. The Web button
