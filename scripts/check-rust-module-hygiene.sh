@@ -28,6 +28,7 @@ fi
 if ! python3 - <<'PY_CHECK'
 from pathlib import Path
 import re
+import subprocess
 
 root = Path("crates/slskr/src")
 violations = []
@@ -95,6 +96,18 @@ for file in (web_root.parent / "static/style_parts").glob("*.css"):
         violations.append(f"{file}: {lines} lines exceed the 1000-line native style owner budget")
 if (web_root.parent / "static/styles.css").exists():
     violations.append("native styles.css must be a generated distribution asset")
+source_suffixes = {
+    ".rs", ".py", ".pyi", ".sh", ".ps1", ".js", ".jsx", ".mjs", ".cjs",
+    ".ts", ".tsx", ".go", ".cs", ".css", ".scss", ".html", ".vue",
+    ".svelte", ".astro", ".lua", ".sql", ".proto", ".c", ".h", ".cpp",
+    ".hpp", ".rb", ".nix",
+}
+for name in subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0"):
+    file = Path(name)
+    if file.suffix in source_suffixes and file.is_file():
+        lines = len(file.read_bytes().splitlines())
+        if lines > 2500:
+            violations.append(f"{file}: {lines} lines exceed the global 2500-line source budget")
 if violations:
     raise SystemExit("\n".join(violations))
 print("controller/configuration ownership check passed")
