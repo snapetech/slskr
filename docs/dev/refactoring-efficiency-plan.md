@@ -1,6 +1,6 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, as of 2026-09-28 UTC; RF-002, RF-003, RF-007, RF-032, and RF-036 are verified locally. RF-034 is verified locally and through the retained hosted shared-artifact matrix. RF-024 source ownership is verified locally and through hosted baseline `29165746`; later lifecycle/audit fixes have separate validation. RF-001 retains a shared-wire compatibility limit. The live/hosted evidence items listed below remain in progress.
+Status: active whole-project implementation plan, as of 2026-09-28 UTC; RF-002, RF-003, RF-007, RF-032, and RF-036 are verified locally. RF-034 is verified locally and through the retained hosted shared-artifact matrix. RF-024 source ownership is verified locally and through hosted baseline `29165746`; later lifecycle/audit fixes have separate validation. RF-066 recipient backfill now has local integration and real-peer E2E proof; owner per-grant concurrency and the live/hosted evidence items listed below remain in progress. RF-001 retains a shared-wire compatibility limit.
 
 
 Audit baseline date: 2026-09-15; evidence addenda through 2026-09-28 UTC
@@ -182,7 +182,7 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Per-grant concurrency and recipient backfill acceptance remain open. | In progress; eight real media cases passed, recipient backfill open |
+| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Recipient backfill now uses authenticated, certificate-pinned MeshContent on the shared native peer port; grant/recipient/permission and file/range limits are enforced, downloaded bytes are SHA-256 verified before no-overwrite publication, and a real three-peer E2E verifies the exact downloaded fixture. Owner per-grant concurrency and fresh hosted/deployed acceptance remain open. | In progress; recipient backfill locally verified, owner concurrency and hosted/deployed evidence open |
 | RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
@@ -7730,13 +7730,14 @@ Integration script cleanup now disarms its process-group guard only after a
 successful wait result. A wait error returns through the still-owned group
 cleanup path. There is no await between successful reaping and disarming.
 
-RF-066 recipient backfill is tracked as Hindsight initiative
-`kp-e3b71f5570544b1ead2175eb45199054`: reuse the authenticated, certificate-pinned
-mesh service on the shared native peer TCP port, with grant/recipient/permission
-checks, bounded confined writes and exact size/SHA-256 verification. The current
-HTTP owner endpoint is only an acknowledgement and does not create recipient
-bytes. That capability remains unimplemented and RF-066 remains open. No
-dedicated listener or global HTTP network-filter exception is planned.
+At the time this evidence entry was first written, RF-066 recipient backfill
+was unimplemented and the HTTP owner endpoint only acknowledged the request.
+The later RF-066 continuation entry at the end of this plan records the local
+implementation and acceptance proof. The retained design uses the authenticated,
+certificate-pinned mesh service on the shared native peer TCP port, with
+grant/recipient/permission checks, bounded confined writes, and exact
+size/SHA-256 verification. No dedicated listener or global HTTP network-filter
+exception is planned.
 
 The shared-alias/script-wait batch passes 722 daemon tests (one ignored mount
 fixture), strict all-target Clippy, full-controller/legacy all-target compile
@@ -7747,3 +7748,29 @@ are retained in
 Original sources remain in Git and ignored `target/rf-shared-alias-source-backup`.
 The projection check is not deployed VPN proof, and no kernel wait error is
 injected by the existing actual script cancellation tests.
+
+## RF-066 Verified Recipient Mesh Backfill (2026-09-28 UTC)
+
+Incoming-share backfill now retrieves the owner manifest and bounded file
+ranges through the authenticated, certificate-pinned `MeshContent` service.
+The recipient selects the owner from its configured trusted mesh peers; the
+announced HTTP endpoint does not control the network destination. The owner
+revalidates the share token, direct recipient or current group membership, and
+download permission for the manifest and each range. Native/current profiles
+only are supported. Both ends bound item counts and total bytes; the recipient
+stages private temporary files, verifies exact size and SHA-256, then publishes
+without overwriting. Range calls are paced below the existing per-connection
+overlay rate limit and use the existing shared native peer port. The Web button
+calls the recipient's authenticated local API, with no external HTTP fetch or
+network-filter exception.
+
+The focused full-controller Rust integration passes with distinct owner and
+recipient identities. The real three-peer Playwright E2E passes the invite,
+group membership, collection announcement, manifest, and recipient backfill
+cases. The backfill downloads the 399,906-byte fixture and checks its bytes and
+SHA-256 (`2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b`)
+on disk. The focused Web collection tests pass (15 tests); changed-file Rust
+formatting and active-plan freshness pass. This proves local behavior over the
+one shared native peer port; owner per-grant concurrency acceptance and
+fresh hosted or deployed-device evidence remain open under RF-066 and the
+associated live-evidence rows.

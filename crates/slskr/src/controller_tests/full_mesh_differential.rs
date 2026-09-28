@@ -629,6 +629,250 @@ pub(super) async fn controller_api_differential_overlay_gateway_populated_gets()
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-1"
 ))]
+pub(super) async fn controller_api_differential_share_backfill_uses_pinned_mesh_and_publishes_verified_file(
+) {
+    use sha2::Digest as _;
+    use slskr_client::overlay::FEATURE_MESH_SERVICE;
+
+    let root = std::env::temp_dir().join(format!(
+        "slskr-share-backfill-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let share_root = root.join("share");
+    let downloads_root = root.join("downloads");
+    let identity_root = root.join("identity");
+    std::fs::create_dir_all(&share_root).expect("share root");
+    std::fs::create_dir_all(&downloads_root).expect("downloads root");
+    let content = b"verified share backfill through the pinned mesh transport\n";
+    let source_path = share_root.join("treasure.txt");
+    std::fs::write(&source_path, content).expect("share file");
+    let advanced = serde_json::json!({
+        "mesh": {
+            "enabled": true,
+            "enableOverlay": true,
+            "enableDht": false,
+        },
+        "feature": {
+            "mesh": true,
+            "pods": true,
+            "virtualSoulfind": true,
+        }
+    });
+    let single_bind = "0.0.0.0:50341";
+    let (mut state, _receiver) = test_state_with_env(
+        MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "native")
+            .with("SLSKR_PARITY_PROFILE", "current")
+            .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string())
+            .with("SLSKR_LISTENER_BIND", single_bind)
+            .with("SLSKR_OVERLAY_BIND", single_bind)
+            .with("SLSKD_SHARED_DIR", &share_root.display().to_string())
+            .with("SLSKD_DOWNLOADS_DIR", &downloads_root.display().to_string()),
+    );
+    let local_username = crate::pod_request_peer_id(&state)
+        .await
+        .expect("local mesh username");
+    let recipient_username = "backfill-recipient".to_owned();
+    let gateway = Arc::new(
+        crate::private_gateway::Gateway::load_or_create_with_quic(
+            "127.0.0.1:0".parse().unwrap(),
+            &identity_root,
+            None,
+        )
+        .await
+        .expect("backfill mesh gateway"),
+    );
+    let endpoint = gateway.bind();
+    let certificate_pin = gateway.certificate_sha256();
+    {
+        let state = Arc::get_mut(&mut state).expect("unshared test state");
+        state.config.test_user_endpoint_overrides.insert(
+            local_username.clone(),
+            SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                endpoint.port(),
+            ),
+        );
+        state
+            .config
+            .trusted_mesh_peers
+            .push(crate::TrustedMeshPeer {
+                peer_id: local_username.clone(),
+                username: local_username.clone(),
+                overlay_endpoint: endpoint,
+                certificate_sha256: certificate_pin,
+                range_endpoint: None,
+            });
+        state.private_gateway = Some(gateway.clone());
+    }
+    let descriptor = slskr_client::capabilities::PeerCapabilityDescriptor::unsigned(
+        &local_username,
+        vec![FEATURE_MESH_SERVICE.to_owned()],
+        vec![format!("tcp:{}:{}", endpoint.ip(), endpoint.port())],
+        Duration::from_secs(300),
+        &state.capability_signing_key,
+        SystemTime::now(),
+    )
+    .expect("local capability descriptor")
+    .with_overlay_port(Some(endpoint.port()))
+    .sign(&state.capability_signing_key)
+    .expect("sign local capability descriptor");
+    state
+        .mesh
+        .write()
+        .await
+        .update_capability(descriptor)
+        .expect("register local capability descriptor");
+    let recipient_key = ed25519_dalek::SigningKey::from_bytes(&[43; 32]);
+    let recipient_descriptor = slskr_client::capabilities::PeerCapabilityDescriptor::unsigned(
+        &recipient_username,
+        vec![FEATURE_MESH_SERVICE.to_owned()],
+        Vec::new(),
+        Duration::from_secs(300),
+        &recipient_key,
+        SystemTime::now(),
+    )
+    .and_then(|descriptor| descriptor.sign(&recipient_key))
+    .expect("recipient capability descriptor");
+    state
+        .mesh
+        .write()
+        .await
+        .update_capability(recipient_descriptor)
+        .expect("register recipient capability descriptor");
+    crate::remember_peer_endpoint(
+        &state,
+        crate::PeerAddress {
+            username: recipient_username.clone(),
+            ip: std::net::Ipv4Addr::LOCALHOST,
+            port: 1,
+            obfuscation_type: 0,
+            obfuscated_port: 0,
+        },
+    )
+    .await;
+    Arc::get_mut(&mut state)
+        .expect("unique test state before starting gateway")
+        .capability_signing_key = recipient_key;
+    add_test_share(
+        &state,
+        "Virtual/treasure.txt",
+        &source_path,
+        content.len() as u64,
+    )
+    .await;
+    let content_sha256 = hex::encode(sha2::Sha256::digest(content));
+    let grant_id = "grant-recipient-backfill".to_owned();
+    {
+        let mut collections = state.collections.write().await;
+        collections
+            .create_with_contract(
+                "collection-recipient-backfill".to_owned(),
+                local_username.clone(),
+                "Backfill fixture".to_owned(),
+                String::new(),
+                "ShareList".to_owned(),
+            )
+            .expect("create backfill collection");
+        collections
+            .add_item_with_contract(
+                "collection-recipient-backfill",
+                Some("item-recipient-backfill".to_owned()),
+                "Virtual/treasure.txt".to_owned(),
+                String::new(),
+                "treasure.txt".to_owned(),
+                "text".to_owned(),
+                "Virtual/treasure.txt".to_owned(),
+                String::new(),
+                content_sha256.clone(),
+            )
+            .expect("add backfill item")
+            .expect("backfill item exists");
+    }
+    let share_token = {
+        let mut grants = state.share_grants.write().await;
+        grants
+            .create_with_contract_and_permissions(
+                Some(grant_id.clone()),
+                "collection-recipient-backfill".to_owned(),
+                recipient_username.clone(),
+                "download",
+            )
+            .expect("create recipient grant");
+        drop(grants);
+        state
+            .share_access_tokens
+            .write()
+            .await
+            .issue(grant_id.clone(), 600)
+            .expect("issue recipient grant token")
+            .0
+    };
+    state
+        .incoming_shares
+        .write()
+        .await
+        .upsert(crate::IncomingShareRecord {
+            id: grant_id.clone(),
+            owner_endpoint: "https://ignored.invalid".to_owned(),
+            owner_user_id: local_username.clone(),
+            recipient_user_id: recipient_username.clone(),
+            collection_id: "collection-recipient-backfill".to_owned(),
+            collection_title: "Backfill fixture".to_owned(),
+            collection_description: String::new(),
+            collection_type: "ShareList".to_owned(),
+            permissions: "download".to_owned(),
+            token: share_token,
+            expiry_utc: String::new(),
+            max_bitrate_kbps: None,
+            max_concurrent_streams: 0,
+            items: Vec::new(),
+            received_at: crate::unix_timestamp(),
+        });
+
+    let gateway_server = tokio::spawn(gateway.run(Arc::clone(&state)));
+    let result = crate::share_backfill_controller::backfill_incoming_share(
+        &state,
+        &grant_id,
+        &recipient_username,
+    )
+    .await;
+    gateway_server.abort();
+    let _ = gateway_server.await;
+    let receipts = result.expect("recipient backfill succeeds");
+    assert_eq!(receipts.len(), 1);
+    let downloaded =
+        std::fs::read(downloads_root.join(&receipts[0].filename)).expect("read downloaded file");
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(receipts[0].size, content.len() as u64);
+    assert_eq!(receipts[0].sha256, content_sha256);
+    assert_eq!(downloaded, content);
+}
+
+#[cfg_attr(
+    all(
+        test,
+        not(any(
+            feature = "bounded-controller-api-tests",
+            feature = "bounded-controller-api-tests-1",
+            feature = "bounded-controller-api-tests-2",
+            feature = "bounded-controller-api-tests-3",
+            feature = "bounded-controller-api-tests-4",
+            feature = "bounded-persistence-tests",
+            feature = "bounded-file-lifecycle-tests",
+            feature = "bounded-protocol-tests",
+            feature = "bounded-security-control-tests",
+            feature = "bounded-security-authorization-tests"
+        ))
+    ),
+    tokio::test
+)]
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-1"
+))]
 pub(super) async fn controller_api_differential_mesh_stream_ticket_validation_and_limits() {
     let target = "slskdn";
     let mut ledger = Vec::new();

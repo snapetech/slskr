@@ -302,8 +302,13 @@ impl Gateway {
                         .await
                 }
                 "MeshContent" => {
-                    self.handle_mesh_content_call(&call.method, &call.payload, state)
-                        .await
+                    self.handle_mesh_content_call(
+                        &call.method,
+                        &call.payload,
+                        remote_username,
+                        state,
+                    )
+                    .await
                 }
                 "dht" => {
                     self.dht_service
@@ -386,10 +391,17 @@ impl Gateway {
         &self,
         method: &str,
         payload: &[u8],
+        remote_username: &str,
         state: &crate::AppState,
     ) -> Result<Vec<u8>, (i32, String)> {
         if method != "GetByContentId" {
-            return Err((3, "Unknown method".to_owned()));
+            return crate::share_backfill_controller::handle_mesh_call(
+                state,
+                remote_username,
+                method,
+                payload,
+            )
+            .await;
         }
         let request: MeshContentRequest = parse_payload(payload)?;
         let content_id = bounded_required(&request.content_id, MAX_CONTENT_ID_BYTES, "ContentId")?;

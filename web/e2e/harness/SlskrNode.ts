@@ -1,4 +1,5 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
@@ -12,9 +13,20 @@ export type NodeConfig = {
   appDir?: string;
   flags?: {
     noConnect?: boolean;
+    trustedMeshPeers?: TrustedMeshPeerConfig[];
+    peerPort?: number;
+    reservedPeerPorts?: number[];
+    endpointOverrides?: Record<string, string>;
   };
   nodeName: string;
   shareDir: string | string[]; // Single dir or array for multiple shares
+};
+
+export type TrustedMeshPeerConfig = {
+  peerId: string;
+  username: string;
+  overlayEndpoint: string;
+  certificateSha256: string;
 };
 
 export function nativePeerEnvironment(port: number): NodeJS.ProcessEnv {
@@ -245,6 +257,10 @@ export class SlskrNode {
     this.config = config;
   }
 
+  static allocateFreePort(): Promise<number> {
+    return findFreePort();
+  }
+
   /**
    * Get the repository root directory.
    */
@@ -404,14 +420,33 @@ export class SlskrNode {
     }
 
     // Allocate ephemeral port if not provided
+    const reservedPeerPorts = new Set(
+      this.config.flags?.reservedPeerPorts ?? [],
+    );
+    if (this.config.flags?.peerPort) {
+      reservedPeerPorts.add(this.config.flags.peerPort);
+      if (
+        !Number.isInteger(this.config.flags.peerPort) ||
+        this.config.flags.peerPort < 1 ||
+        this.config.flags.peerPort > 65535
+      ) {
+        throw new Error('Invalid native peer port');
+      }
+    }
     if (!this.config.apiPort) {
-      this.apiPort = await findFreePort();
+      do {
+        this.apiPort = await findFreePort();
+      } while (reservedPeerPorts.has(this.apiPort));
     } else {
       this.apiPort = this.config.apiPort;
+      if (reservedPeerPorts.has(this.apiPort)) {
+        throw new Error('API port overlaps a reserved native peer port');
+      }
     }
 
     // Allocate a unique Soulseek listen port per node (multi-instance needs this)
-    this.soulseekListenPort = await findFreePort();
+    this.soulseekListenPort =
+      this.config.flags?.peerPort ?? (await findFreePort());
     // Native peer TCP, DHT, and both QUIC protocols share this numeric port.
 
     // Create isolated app directory
@@ -474,6 +509,21 @@ export class SlskrNode {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       ...nativePeerEnvironment(this.soulseekListenPort),
+      SLSKR_ADVANCED_NETWORKING_JSON: JSON.stringify({
+        mesh: {
+          enabled: true,
+          enableOverlay: true,
+          enableDht: false,
+          enable_soulseek_capability_handshake: true,
+          enable_soulseek_rendezvous: true,
+          probe_soulseek_rendezvous_capabilities: true,
+        },
+        feature: {
+          mesh: true,
+          pods: true,
+          virtualSoulfind: true,
+        },
+      }),
       SLSKD_APP_DIR: this.appDir,
       SLSKD_CONTENT_PATH: contentPath,
       SLSKD_DOWNLOADS_DIR: downloadsDir,
@@ -505,6 +555,18 @@ export class SlskrNode {
     }
     if (noConnect) {
       env.SLSKD_NO_CONNECT = 'true';
+    }
+    if (this.config.flags?.trustedMeshPeers?.length) {
+      env.SLSKR_TRUSTED_MESH_PEERS = JSON.stringify(
+        this.config.flags.trustedMeshPeers,
+      );
+    }
+    if (this.config.flags?.endpointOverrides) {
+      env.SLSKR_TEST_USER_ENDPOINT_OVERRIDES = Object.entries(
+        this.config.flags.endpointOverrides,
+      )
+        .map(([username, endpoint]) => `${username}=${endpoint}`)
+        .join(';');
     }
 
     // Write stdout/stderr to files for debugging
@@ -758,6 +820,22 @@ export class SlskrNode {
       baseUrl: this.apiUrl,
       password: nodeCreds.password,
       username: nodeCreds.username,
+    };
+  }
+
+  async trustedMeshPeerConfig(): Promise<TrustedMeshPeerConfig> {
+    if (!this.appDir || this.soulseekListenPort < 1) {
+      throw new Error('Node must be started before exporting mesh trust');
+    }
+    const certificate = await fs.readFile(
+      path.join(this.appDir, 'overlay-certificate.der'),
+    );
+    const username = this.nodeCfg.username;
+    return {
+      peerId: username,
+      username,
+      overlayEndpoint: `127.0.0.1:${this.soulseekListenPort}`,
+      certificateSha256: createHash('sha256').update(certificate).digest('hex'),
     };
   }
 

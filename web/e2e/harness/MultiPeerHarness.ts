@@ -6,6 +6,7 @@ import { NodeConfig, SlskrNode } from './SlskrNode';
  */
 export class MultiPeerHarness {
   private nodes: Map<string, SlskrNode> = new Map();
+  private peerPorts: Map<string, number> = new Map();
 
   /**
    * Start a new test node.
@@ -16,10 +17,23 @@ export class MultiPeerHarness {
   async startNode(
     name: string,
     shareDir: string | string[],
-    flags?: { noConnect?: boolean },
+    flags?: NonNullable<NodeConfig['flags']>,
   ): Promise<SlskrNode> {
     if (this.nodes.has(name)) {
       throw new Error(`Node ${name} already exists`);
+    }
+
+    if (this.peerPorts.size === 0) {
+      const names = new Set(['A', 'B', 'C', name]);
+      const ports = await Promise.all(
+        [...names].map(async (peerName) => [
+          peerName,
+          await SlskrNode.allocateFreePort(),
+        ] as const),
+      );
+      this.peerPorts = new Map(ports);
+    } else if (!this.peerPorts.has(name)) {
+      this.peerPorts.set(name, await SlskrNode.allocateFreePort());
     }
 
     // Small delay between starting nodes to avoid lock file conflicts
@@ -27,8 +41,22 @@ export class MultiPeerHarness {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
 
+    const endpointOverrides = Object.fromEntries(
+      [...this.peerPorts].map(([peerName, port]) => [
+        `node${peerName}`,
+        `127.0.0.1:${port}`,
+      ]),
+    );
     const node = new SlskrNode({
-      flags,
+      flags: {
+        ...flags,
+        peerPort: this.peerPorts.get(name),
+        reservedPeerPorts: [...this.peerPorts.values()],
+        endpointOverrides: {
+          ...endpointOverrides,
+          ...flags?.endpointOverrides,
+        },
+      },
       nodeName: name,
       shareDir,
     });

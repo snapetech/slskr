@@ -193,6 +193,7 @@ mod security_state;
 mod session_runtime;
 mod session_state;
 mod share_grant_store;
+mod share_backfill_controller;
 mod share_group_store;
 mod share_index_runtime;
 mod share_index_state;
