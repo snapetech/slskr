@@ -497,7 +497,10 @@ pub(super) async fn controller_api_differential_multisource_residuals() {
 
     let download_body = r#"{"filename":"Track.flac","fileSize":42,"sources":[{"username":"alice","fullPath":"Albums/Track.flac"},{"username":"bob","fullPath":"Music/Track.flac"}]}"#;
     let file_body = r#"{"filename":"Track.flac","size":42}"#;
-    let swarm_body = r#"{"filename":"Track.flac","size":42,"skipVerification":true}"#;
+    // Verified execution is required even by the versioned compatibility route.
+    // Unspecified-address sources are rejected before HTTP I/O;
+    // this exercises a real bounded execution failure without external peers.
+    let swarm_body = r#"{"filename":"Track.flac","size":42,"expectedHash":"0000000000000000000000000000000000000000000000000000000000000000","sources":[{"username":"alice","url":"http://0.0.0.0:1/content"},{"username":"bob","url":"http://0.0.0.0:2/content"}]}"#;
     let verify_body = r#"{"filename":"Track.flac","fileSize":42,"usernames":["alice","bob"]}"#;
     let test_body = r#"{"searchText":"ambient"}"#;
 
@@ -836,6 +839,24 @@ pub(super) async fn controller_api_differential_multisource_residuals() {
         ("/api/v0/multisource/swarm", swarm_body),
         ("/api/v0/multisource/swarm/async", swarm_body),
     ] {
+        let expected_status = if route.ends_with("async") {
+            "202 Accepted"
+        } else {
+            "200 OK"
+        };
+        let bypass_state = test_state_with_env(base_env.clone()).0;
+        let bypass = crate::route_http_request(
+            "POST",
+            route,
+            None,
+            r#"{"filename":"Track.flac","size":42,"skipVerification":true}"#,
+            &bypass_state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(bypass.status, "400 Bad Request");
+        assert!(bypass.body.contains("expectedHash is required"));
+        assert!(bypass_state.multisource.read().await.list().is_empty());
         let valid_state = test_state_with_env(base_env.clone()).0;
         seed_search(valid_state.clone()).await;
         let valid = crate::route_http_request("POST", route, None, body, &valid_state)
@@ -846,13 +867,37 @@ pub(super) async fn controller_api_differential_multisource_residuals() {
             "POST",
             route,
             "nominal-status-headers-body",
-            valid.status == "200 OK"
+            valid.status == expected_status
                 && if route.ends_with("async") {
-                    valid_json["jobId"].is_string()
+                    valid_json["id"].is_string() && valid_json["status"] == "queued"
                 } else {
-                    valid_json["mode"] == "SWARM"
+                    valid_json["success"] == false
+                        && valid_json["error"]
+                            .as_str()
+                            .is_some_and(|error| error.contains("blocked network"))
                 }
         );
+        if route.ends_with("async") {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if valid_state
+                        .multisource
+                        .read()
+                        .await
+                        .list()
+                        .iter()
+                        .all(|job| job.status == "failed")
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("bounded swarm worker completes");
+        }
+        fs::remove_dir_all(&valid_state.config.state_dir).expect("remove valid swarm state");
+        fs::remove_dir_all(&bypass_state.config.state_dir).expect("remove bypass swarm state");
         let malformed = crate::route_http_request(
             "POST",
             route,
@@ -893,7 +938,7 @@ pub(super) async fn controller_api_differential_multisource_residuals() {
             let response = crate::route_http_request("POST", route, None, body, &state)
                 .await
                 .unwrap();
-            record!("POST", route, case, response.status == "200 OK");
+            record!("POST", route, case, response.status == expected_status);
         }
         let concurrent_state = test_state_with_env(base_env.clone()).0;
         seed_search(concurrent_state.clone()).await;
@@ -909,7 +954,7 @@ pub(super) async fn controller_api_differential_multisource_residuals() {
             responses.iter().all(|response| {
                 response
                     .as_ref()
-                    .is_ok_and(|response| response.status == "200 OK")
+                    .is_ok_and(|response| response.status == expected_status)
             })
         );
     }

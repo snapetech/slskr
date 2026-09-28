@@ -1766,7 +1766,8 @@ pub(super) async fn controller_api_differential_pod_and_jury_stats() {
     )
     .await
     .expect("verify bad channel id");
-    let bad_channel_pass = bad_channel_verified.body
+    let bad_channel_pass = serde_json::from_str::<serde_json::Value>(&bad_channel_verified.body)
+        .expect("bad-channel verification JSON")
         == serde_json::json!({
             "isValid": false,
             "isFromValidMember": false,

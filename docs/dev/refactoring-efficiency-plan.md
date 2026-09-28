@@ -6116,3 +6116,17 @@ all-targets Web Clippy, and the locked WASM-target compile pass. This is an
 internal-only ownership move. Across tracked Rust files, the largest remaining
 source is daemon `config.rs` at 4,703 lines; RF-024 stays open while broader
 ownership and bounded execution gates continue.
+
+## RF-024 Bounded API Group 3 Fixture Repair (2026-09-28 UTC)
+
+The owned group 3 run exposed stale MultiSource success expectations for
+`skipVerification` requests. Verified swarm execution already requires an
+expected hash. The differential now checks that bypass requests return 400
+without queuing a job, and uses verified requests with blocked unspecified
+source addresses for bounded failure execution without HTTP I/O. Async
+responses retain the existing 202/queued/id contract; the initial worker is
+waited to completion before its fixture directory is removed. A PodCore
+bad-channel check also compared a body string directly with a JSON object;
+it now parses the response before comparing the existing error contract.
+Bounded API group 3 passes through the extracted owners. These are internal-only
+fixture repairs; no production behavior changes in this checkpoint.
