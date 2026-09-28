@@ -220,6 +220,8 @@ pub(super) fn test_state_with_env_parts_full(
         external_visualizer_processes: Arc::new(crate::Semaphore::new(
             crate::MAX_EXTERNAL_VISUALIZER_PROCESSES,
         )),
+        visualizer_children:
+            crate::external_visualizer_processes::ExternalVisualizerProcesses::default(),
         songid_run_slots: Arc::new(crate::Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
         )),

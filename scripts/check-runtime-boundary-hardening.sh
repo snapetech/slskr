@@ -6,6 +6,7 @@ cd "$repo_root"
 
 source_files=(
   crates/slskr/src/lib.rs
+  crates/slskr/src/app_state.rs
   crates/slskr/src/activitypub_controller.rs
   crates/slskr/src/session_runtime.rs
   crates/slskr/src/session_runtime_owners/*.rs
@@ -19,6 +20,7 @@ source_files=(
   crates/slskr/src/musicbrainz_controller.rs
   crates/slskr/src/virtual_soulfind_v2_controller.rs
   crates/slskr/src/daemon_serve.rs
+  crates/slskr/src/external_visualizer_processes.rs
   crates/slskr/src/soulfind_bridge_runtime.rs
   crates/slskr/src/legacy_route_dispatch.rs
   crates/slskr/src/legacy_route_dispatch_group_00.rs
@@ -204,6 +206,10 @@ for anchor in \
   'browse_errors_redact_internal_details' \
   'browse_failure_events_redact_internal_details' \
   'external_visualizer_launch_errors_redact_command_details' \
+  'external visualizer admission is closed' \
+  'visualizer_children.shutdown().await' \
+  'caps_children_and_joins_them_before_rejecting_late_launch' \
+  'completed_and_failed_children_release_capacity' \
   'options_config_location_is_the_confined_compatibility_file' \
   'toml_config_sanitizes_secrets_and_storage_paths' \
   'lidarr_projections_redact_endpoint_and_errors' \

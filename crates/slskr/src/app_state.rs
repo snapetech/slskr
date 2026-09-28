@@ -85,6 +85,7 @@ pub(super) struct AppState {
     pub(super) ftp_uploads: ftp::FtpUploadQueue,
     pub(super) relay_cleanup: relay::ConnectionCleanup,
     pub(super) external_visualizer_processes: Arc<Semaphore>,
+    pub(super) visualizer_children: external_visualizer_processes::ExternalVisualizerProcesses,
     pub(super) songid_run_slots: Arc<Semaphore>,
     pub(super) songid_jobs: Option<mpsc::Sender<SongIdJob>>,
     pub(super) collections: RwLock<CollectionStore>,
@@ -352,6 +353,7 @@ impl AppState {
     pub(super) async fn shutdown_managed_tasks(&self) {
         self.ftp_uploads.close();
         self.relay_cleanup.close();
+        self.visualizer_children.shutdown().await;
         self.managed_background_tasks.shutdown().await;
         if let Some(database) = self.db.as_ref() {
             let _turn = self.webhook_persistence_lock.lock().await;

@@ -182,7 +182,7 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Per-grant concurrency and recipient backfill acceptance remain open. | In progress, optional-media gap |
+| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Per-grant concurrency and recipient backfill acceptance remain open. | In progress; recipient backfill and per-grant concurrency open |
 | RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
@@ -7529,3 +7529,40 @@ output is not counted as lint proof. Actual Windows command-tree cleanup and
 fresh hosted utility completion remain required; the local POSIX receipt does
 not establish those. Source originals remain in ignored
 `target/rf-e2e-command-owner-source-backup` and Git history.
+
+## RF-006 External Visualizer Child Ownership (2026-09-28 UTC)
+
+The blocking-work inventory found an unbounded detached `child.wait()` for
+external visualizers in both production dispatch and the opt-in legacy oracle.
+A dedicated child registry now owns Tokio children, keeps the existing four
+semaphore permits, reaps exited children every second in a managed supervisor,
+and closes admission under the same lock used to launch. Shutdown kills and
+waits for its direct children before aborting managed tasks; the reap wait has
+a five-second deadline with logged failure and kill-on-drop fallback. No detached
+blocking wait remains in either visualizer dispatcher. Independent descendants
+are not claimed as owned or reaped by this direct-child registry.
+
+Original sources remain in ignored `target/rf-visualizer-owner-source-backup`
+and Git. Full-controller semaphore saturation fixtures retain their original
+capacity assertions. The remaining filesystem blocking-worker inventory is
+separate: bounded byte counts and awaited request futures do not prove that
+already running blocking work is joined when those requests are canceled.
+
+## RF-035 Hosted Web Lint Correction (2026-09-28 UTC)
+
+CI run `36402572470` at `e7d0dd6a` passed its new actionlint step but the Rust job
+failed at web lint. The invite decoder's ASCII-control regular expression
+violated `no-control-regex`. Equivalent character-code validation now preserves
+rejection of every code from 0 through 31 and 127, with explicit regressions for
+all 33 codes. This is an internal validation correction; invite permissions,
+verification status, payload bounds, username bounds, and expiry checks retain
+their existing behavior. Fresh hosted completion remains required.
+
+Visualiser validation checkpoint: 710 daemon tests pass (one ignored mounted
+fixture), strict all-targets Clippy passes, and full-controller/legacy all-targets
+compilation passes. Three actual all-enabled single-peer-port shutdown cycles
+pass on the rebuilt debug daemon. Web lint and all 47 invite tests pass. Actual
+proof and source/log hashes are retained in
+`benchmarks/artifacts/20260928-rf-visualizer-child-owner.json`. The eight remaining
+production blocking-worker call sites and precise cancellation limits are in
+`docs/dev/blocking-work-ownership.md`; RF-006 is not marked complete.

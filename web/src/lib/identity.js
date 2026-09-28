@@ -30,7 +30,10 @@ export function inviteContactUsername(inviteLink) {
   const username = invite?.Profile?.DisplayName;
   const expiry = Date.parse(invite?.ExpiresAt);
   if (invite?.InviteVersion !== 1 || typeof username !== 'string'
-      || !username.trim() || username.length > 255 || /[\u0000-\u001f\u007f]/u.test(username)
+      || !username.trim() || username.length > 255 || Array.from(username).some((character) => {
+        const code = character.codePointAt(0);
+        return code < 32 || code === 127;
+      })
       || !Number.isFinite(expiry) || expiry <= Date.now()) {
     throw new Error('Invalid or expired invite');
   }

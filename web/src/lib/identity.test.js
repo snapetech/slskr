@@ -23,6 +23,14 @@ describe('invite contact adapter', () => {
     expect(inviteContactUsername(link({ ...invite(), Profile: { DisplayName: '音楽' } }))).toBe('音楽');
   });
 
+  it.each([...Array.from({ length: 32 }, (_, code) => code), 127])(
+    'rejects ASCII control code %i before posting', (code) => {
+      const inviteLink = link({ ...invite(), Profile: { DisplayName: `a${String.fromCodePoint(code)}b` } });
+      expect(() => addContactFromInvite({ inviteLink, nickname: 'friend' })).toThrow();
+      expect(api.post).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     null, '', 'https://example.org/invite', 'slskdn://invite/%%%','slskdn://invite/bm90LWpzb24',
     'slskdn://invite/' + 'a'.repeat(65536),

@@ -1064,6 +1064,8 @@ pub(super) async fn configured_api_token_protects_api_routes_impl() {
         external_visualizer_processes: Arc::new(crate::Semaphore::new(
             crate::MAX_EXTERNAL_VISUALIZER_PROCESSES,
         )),
+        visualizer_children:
+            crate::external_visualizer_processes::ExternalVisualizerProcesses::default(),
         songid_run_slots: Arc::new(crate::Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
         )),
@@ -1418,6 +1420,8 @@ pub(super) async fn configured_api_token_protects_api_routes_impl() {
         external_visualizer_processes: Arc::new(crate::Semaphore::new(
             crate::MAX_EXTERNAL_VISUALIZER_PROCESSES,
         )),
+        visualizer_children:
+            crate::external_visualizer_processes::ExternalVisualizerProcesses::default(),
         songid_run_slots: Arc::new(crate::Semaphore::new(
             cookie_enabled_config
                 .media_services

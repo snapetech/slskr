@@ -74,6 +74,7 @@ mod logging;
 mod managed_blacklist_runtime;
 mod lifecycle_controller;
 mod managed_tasks;
+mod external_visualizer_processes;
 mod mediacore_controller;
 mod mesh_dht;
 mod mesh_dht_runtime;

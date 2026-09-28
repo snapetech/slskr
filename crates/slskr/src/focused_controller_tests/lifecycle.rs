@@ -1,6 +1,32 @@
 use super::fixtures::*;
 
 #[tokio::test]
+async fn external_visualizer_route_rejects_admission_after_daemon_shutdown() {
+    for profile in ["slskd", "slskdn"] {
+        let command = if cfg!(windows) { "where.exe" } else { "true" };
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_CONTROLLER_PROFILE", profile)
+                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
+                .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+        );
+        state.shutdown_managed_tasks().await;
+        let response = crate::route_http_request(
+            "POST",
+            "/api/player/external-visualizer/launch",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("admission is closed"));
+        fs::remove_dir_all(&state.config.state_dir).unwrap();
+    }
+}
+
+#[tokio::test]
 async fn lifecycle_command_delay_is_owned_and_rejects_after_shutdown() {
     let (mut state, _session) = test_state_with_env(MapEnv::default());
     let (sender, mut receiver) = tokio::sync::mpsc::channel(1);

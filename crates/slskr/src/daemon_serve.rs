@@ -808,6 +808,7 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         ftp_uploads: crate::ftp::FtpUploadQueue::default(),
         relay_cleanup: crate::relay::ConnectionCleanup::default(),
         external_visualizer_processes: Arc::new(Semaphore::new(MAX_EXTERNAL_VISUALIZER_PROCESSES)),
+        visualizer_children: external_visualizer_processes::ExternalVisualizerProcesses::default(),
         songid_run_slots: Arc::new(Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
         )),
@@ -877,6 +878,14 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pod_dht_failed_publish_count: std::sync::atomic::AtomicU64::new(0),
         pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
         podcore_runtime_stats: PodCoreRuntimeStats::default(),
+    });
+    let visualizer_state = Arc::clone(&state);
+    state.spawn_managed_task(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            visualizer_state.visualizer_children.reap_finished();
+        }
     });
     state.spawn_managed_task(run_distributed_persistence_worker(
         state.db.clone(),
