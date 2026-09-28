@@ -437,7 +437,7 @@ async fn shared_tcp_gateway_does_not_bind_a_second_public_tcp_socket() {
 }
 
 #[tokio::test]
-async fn outbound_overlay_metadata_is_removed_when_guard_drops() {
+async fn outbound_overlay_metadata_is_removed_when_guard_drops_outside_runtime() {
     let root = temporary_directory("gateway-outbound-session");
     let gateway = Arc::new(
         Gateway::load_or_create_with_quic("127.0.0.1:0".parse().unwrap(), &root, None)
@@ -460,8 +460,12 @@ async fn outbound_overlay_metadata_is_removed_when_guard_drops() {
     assert_eq!(connections[0].address, "192.0.2.10");
     assert_eq!(connections[0].port, 2234);
     assert!(connections[0].is_outbound);
-    drop(guard);
-    tokio::task::yield_now().await;
+    std::thread::spawn(move || {
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        drop(guard);
+    })
+    .join()
+    .unwrap();
     assert!(gateway.active_overlay_connections().await.is_empty());
     fs::remove_dir_all(root).unwrap();
 }
@@ -645,4 +649,139 @@ async fn gateway_admission_is_released_when_managed_task_is_rejected() {
         std::future::pending::<()>().await;
     }));
     assert_eq!(limiter.stats().total_connections, 0);
+}
+
+#[tokio::test]
+async fn proxy_session_worker_stops_with_session_or_managed_shutdown() {
+    for stop_with_session in [true, false] {
+        let tasks = crate::managed_tasks::ManagedTaskRegistry::default();
+        let public = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let backend = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote = public.local_addr().unwrap();
+        let admission = QuicProxyAdmissionGate::default();
+        let session = QuicProxySession::new(
+            remote,
+            backend.local_addr().unwrap(),
+            public,
+            admission.try_acquire(remote).unwrap(),
+            &tasks,
+        )
+        .await
+        .unwrap();
+        let worker = session.worker_abort.clone();
+        session.sender.send(b"fixture".to_vec()).await.unwrap();
+        let mut packet = [0; 16];
+        let (length, forwarding_address) =
+            timeout(Duration::from_secs(2), backend.recv_from(&mut packet))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(&packet[..length], b"fixture");
+        if stop_with_session {
+            drop(session);
+            timeout(Duration::from_secs(2), async {
+                while !worker.is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("dropped session cancels worker");
+            tasks.shutdown().await;
+        } else {
+            tasks.shutdown().await;
+            assert!(session.sender.is_closed());
+            drop(session);
+        }
+        assert!(worker.is_finished());
+        assert_eq!(admission.state.lock().unwrap().active_sessions, 0);
+        let rebound = UdpSocket::bind(forwarding_address)
+            .await
+            .expect("joined worker releases backend socket");
+        drop(rebound);
+    }
+}
+
+#[tokio::test]
+async fn proxy_session_admission_after_shutdown_releases_its_lease() {
+    let tasks = crate::managed_tasks::ManagedTaskRegistry::default();
+    tasks.shutdown().await;
+    let public = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let remote = public.local_addr().unwrap();
+    let admission = QuicProxyAdmissionGate::default();
+    let result = QuicProxySession::new(
+        remote,
+        remote,
+        public,
+        admission.try_acquire(remote).unwrap(),
+        &tasks,
+    )
+    .await;
+    assert!(matches!(result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted));
+    assert_eq!(admission.state.lock().unwrap().active_sessions, 0);
+}
+
+#[tokio::test]
+async fn managed_tunnel_reader_shutdown_releases_destination_socket() {
+    let root = temporary_directory("gateway-child-shutdown");
+    let gateway = Gateway::load_or_create_with_quic("127.0.0.1:0".parse().unwrap(), &root, None)
+        .await
+        .unwrap();
+    gateway
+        .register_outbound_overlay(
+            "remote".to_owned(),
+            "192.0.2.10:2234".parse().unwrap(),
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            OVERLAY_VERSION,
+            None,
+        )
+        .await
+        .unwrap();
+    let tasks = crate::managed_tasks::ManagedTaskRegistry::default();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (client, accepted) = timeout(Duration::from_secs(2), async {
+        tokio::join!(
+            TcpStream::connect(listener.local_addr().unwrap()),
+            listener.accept()
+        )
+    })
+    .await
+    .unwrap();
+    let mut client = client.unwrap();
+    let (mut reader, writer) = accepted.unwrap().0.into_split();
+    let (_tx, incoming_rx) = mpsc::channel(1);
+    let reader_abort = tasks
+        .try_spawn_with_abort(async move {
+            let mut buffer = [0; 1];
+            let _ = reader.read(&mut buffer).await;
+        })
+        .unwrap();
+    let tunnel = Tunnel {
+        owner: "owner".to_owned(),
+        connection_id: "connection".to_owned(),
+        pod_id: "pod".to_owned(),
+        writer: Mutex::new(writer),
+        incoming: Mutex::new(incoming_rx),
+        reader_abort,
+    };
+    let reader_abort = tunnel.reader_abort.clone();
+    gateway
+        .tunnels
+        .write()
+        .await
+        .insert("tunnel".to_owned(), Arc::new(tunnel));
+    tasks.shutdown().await;
+    assert!(reader_abort.is_finished());
+    gateway.clear_runtime_connections().await;
+    assert_eq!(gateway.active_connection_count().await, 0);
+    assert!(gateway.active_overlay_connections().await.is_empty());
+    let mut byte = [0; 1];
+    assert_eq!(
+        timeout(Duration::from_secs(2), client.read(&mut byte))
+            .await
+            .unwrap()
+            .unwrap(),
+        0
+    );
+    drop(gateway);
+    fs::remove_dir_all(root).unwrap();
 }

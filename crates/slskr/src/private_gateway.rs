@@ -90,7 +90,9 @@ mod gateway_models;
 pub use self::gateway_models::{
     Gateway, OutboundOverlayGuard, OverlayConnectionMetadata, QuicDataPolicy,
 };
-use self::gateway_models::{GatewayConnectionAdmission, OverlayLiveness, Tunnel};
+use self::gateway_models::{
+    GatewayConnectionAdmission, OverlayLiveness, OverlayMetadataGuard, Tunnel,
+};
 #[path = "private_gateway_owners/gateway_services.rs"]
 mod gateway_services;
 #[path = "private_gateway_owners/gateway_transport.rs"]

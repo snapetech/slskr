@@ -561,4 +561,14 @@ if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
 
+# Gateway children belong to local cancellation owners and the daemon join set.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/private_gateway_owners/gateway_models.rs \
+  crates/slskr/src/private_gateway_owners/gateway_services.rs \
+  crates/slskr/src/private_gateway_owners/gateway_transport.rs \
+  crates/slskr/src/private_gateway_owners/quic_proxy.rs; then
+  printf 'runtime boundary hardening failed: detached gateway task\n' >&2
+  exit 1
+fi
+
 printf 'runtime boundary hardening check passed\n'

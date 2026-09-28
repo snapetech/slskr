@@ -314,7 +314,7 @@ impl Gateway {
             quic_data_policy: quic_data_policy.map(Arc::new),
             connections: Arc::new(Semaphore::new(MAX_GATEWAY_CONNECTIONS)),
             tunnels: RwLock::new(BTreeMap::new()),
-            overlay_connections: RwLock::new(BTreeMap::new()),
+            overlay_connections: StdRwLock::new(BTreeMap::new()),
             replay_nonces: Mutex::new(BTreeMap::new()),
             overlay_rate_limiter: Arc::new(OverlayRateLimiter::new()),
             dht_service: crate::mesh_dht::DhtServiceState::default(),
@@ -396,7 +396,7 @@ impl Gateway {
     pub async fn active_overlay_connections(&self) -> Vec<OverlayConnectionMetadata> {
         self.overlay_connections
             .read()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .cloned()
             .collect()
@@ -427,7 +427,10 @@ impl Gateway {
         {
             return Err("outbound overlay metadata is invalid".to_owned());
         }
-        let mut connections = self.overlay_connections.write().await;
+        let mut connections = self
+            .overlay_connections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if connections.len() >= MAX_GATEWAY_CONNECTIONS {
             return Err("overlay connection capacity is full".to_owned());
         }
@@ -451,7 +454,23 @@ impl Gateway {
     }
 
     pub async fn remove_overlay_connection(&self, connection_id: &str) {
-        self.overlay_connections.write().await.remove(connection_id);
+        self.remove_overlay_metadata(connection_id);
+    }
+
+    pub(super) fn remove_overlay_metadata(&self, connection_id: &str) {
+        self.overlay_connections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(connection_id);
+    }
+
+    pub(crate) async fn clear_runtime_connections(&self) {
+        self.tunnels.write().await.clear();
+        self.overlay_connections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.replay_nonces.lock().await.clear();
     }
 
     pub async fn register_outbound_guard(
@@ -595,6 +614,7 @@ impl Gateway {
                     quic_backend,
                     Arc::clone(&public_socket),
                     admission_lease,
+                    &state.managed_background_tasks,
                 )
                 .await
                 {
@@ -949,6 +969,10 @@ impl Gateway {
     ) {
         let remote = connection.remote_address();
         let connection_id = uuid::Uuid::new_v4().simple().to_string();
+        let _metadata = OverlayMetadataGuard {
+            gateway: self,
+            connection_id: connection_id.clone(),
+        };
         loop {
             if !self
                 .overlay_rate_limiter

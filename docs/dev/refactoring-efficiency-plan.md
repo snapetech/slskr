@@ -6598,3 +6598,27 @@ The browser ledger regeneration is progressing in Chromium under the bounded
 cgroup; complete UI evidence remains pending. Evidence is retained in
 `benchmarks/artifacts/20260928-rf-nested-process-memory-guards.json`. Rust
 commands continue to use Cargo directly without these wrappers.
+
+
+## RF-006 Joined Gateway Child Resources (2026-09-28 UTC)
+
+The managed registry now exposes an abort handle while retaining each task in
+its join set. Tunnel readers use this admission path, and their existing local
+Drop cancellation remains intact. QUIC proxy workers use the same registry;
+session Drop cancels the worker, and closed daemon admission rejects creation
+while releasing the session lease and socket. No production gateway owner
+contains a detached `tokio::spawn`; the runtime boundary gate enforces this.
+
+Overlay metadata uses short synchronous lock operations that never span an
+await. Guards remove metadata directly, including on threads without a Tokio
+runtime. Inbound TLS and QUIC guards also clear peer limiter state on cancelled
+handlers. After joining workers, daemon shutdown clears gateway tunnels,
+metadata, and replay entries.
+
+All 667 daemon tests, strict all-targets Clippy, and full-controller/legacy
+all-targets compilation pass. Bounded regressions verify session/daemon
+cancellation, real UDP socket rebind, admission lease release, late rejection,
+tunnel reader joining with TCP EOF, gateway record cleanup, and metadata Drop
+outside Tokio. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-managed-gateway-child-resources.json`.
+No production port was added. Broader RF-006 clean-runner coverage remains open.

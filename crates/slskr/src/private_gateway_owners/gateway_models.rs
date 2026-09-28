@@ -61,7 +61,7 @@ pub struct Gateway {
     pub(super) quic_data_relays: Arc<Semaphore>,
     pub(super) connections: Arc<Semaphore>,
     pub(super) tunnels: RwLock<BTreeMap<String, Arc<Tunnel>>>,
-    pub(super) overlay_connections: RwLock<BTreeMap<String, OverlayConnectionMetadata>>,
+    pub(super) overlay_connections: StdRwLock<BTreeMap<String, OverlayConnectionMetadata>>,
     pub(super) replay_nonces: Mutex<BTreeMap<(String, String), u64>>,
     pub(super) overlay_rate_limiter: Arc<OverlayRateLimiter>,
     pub(super) dht_service: crate::mesh_dht::DhtServiceState,
@@ -124,13 +124,7 @@ pub struct OutboundOverlayGuard {
 
 impl Drop for OutboundOverlayGuard {
     fn drop(&mut self) {
-        let gateway = Arc::clone(&self.gateway);
-        let connection_id = self.connection_id.clone();
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::spawn(async move {
-                gateway.remove_overlay_connection(&connection_id).await;
-            });
-        }
+        self.gateway.remove_overlay_metadata(&self.connection_id);
     }
 }
 
@@ -143,5 +137,20 @@ pub(super) struct GatewayConnectionAdmission {
 impl Drop for GatewayConnectionAdmission {
     fn drop(&mut self) {
         self.limiter.record_disconnection(self.remote_ip);
+    }
+}
+
+/// Metadata access never holds this synchronous lock across an await.
+pub(super) struct OverlayMetadataGuard<'a> {
+    pub(super) gateway: &'a Gateway,
+    pub(super) connection_id: String,
+}
+
+impl Drop for OverlayMetadataGuard<'_> {
+    fn drop(&mut self) {
+        self.gateway.remove_overlay_metadata(&self.connection_id);
+        self.gateway
+            .overlay_rate_limiter
+            .remove_connection(&self.connection_id);
     }
 }

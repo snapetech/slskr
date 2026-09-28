@@ -61,20 +61,27 @@ impl Gateway {
             overlay_port: Some(self.bind().port()),
             nonce_echo: hello.nonce,
         };
-        self.overlay_connections.write().await.insert(
-            connection_id.clone(),
-            OverlayConnectionMetadata {
-                username: hello.username.clone(),
-                address: remote_address.ip().to_string(),
-                port: remote_address.port(),
-                features: hello.features.clone(),
-                connected_at: overlay_timestamp(),
-                last_activity: overlay_timestamp(),
-                certificate_thumbprint,
-                version: hello.version,
-                is_outbound: false,
-            },
-        );
+        let _metadata = OverlayMetadataGuard {
+            gateway: self,
+            connection_id: connection_id.clone(),
+        };
+        self.overlay_connections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                connection_id.clone(),
+                OverlayConnectionMetadata {
+                    username: hello.username.clone(),
+                    address: remote_address.ip().to_string(),
+                    port: remote_address.port(),
+                    features: hello.features.clone(),
+                    connected_at: overlay_timestamp(),
+                    last_activity: overlay_timestamp(),
+                    certificate_thumbprint,
+                    version: hello.version,
+                    is_outbound: false,
+                },
+            );
 
         let result = async {
             framer
@@ -193,7 +200,7 @@ impl Gateway {
         self.remove_connection_tunnels(&connection_id).await;
         self.overlay_connections
             .write()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&connection_id);
         result
     }
@@ -654,16 +661,17 @@ impl Gateway {
         {
             return Err((6, "Tunnel capacity is full".to_owned()));
         }
-        let reader_task = tokio::spawn(async move {
-            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-            while let Ok(read) = reader.read(&mut buffer).await {
-                if read == 0 || incoming_tx.send(buffer[..read].to_vec()).await.is_err() {
-                    break;
+        let reader_abort = state
+            .managed_background_tasks
+            .try_spawn_with_abort(async move {
+                let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+                while let Ok(read) = reader.read(&mut buffer).await {
+                    if read == 0 || incoming_tx.send(buffer[..read].to_vec()).await.is_err() {
+                        break;
+                    }
                 }
-            }
-        });
-        let reader_abort = reader_task.abort_handle();
-        drop(reader_task);
+            })
+            .ok_or_else(|| (6, "Daemon is shutting down".to_owned()))?;
         tunnels.insert(
             tunnel_id.clone(),
             Arc::new(Tunnel {
@@ -775,7 +783,7 @@ impl Gateway {
         if let Some(connection) = self
             .overlay_connections
             .write()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get_mut(connection_id)
         {
             connection.last_activity = overlay_timestamp();

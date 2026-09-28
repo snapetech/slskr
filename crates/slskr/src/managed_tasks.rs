@@ -1,6 +1,10 @@
 use std::{future::Future, sync::Arc};
 
-use tokio::{sync::Semaphore, task::JoinSet, time};
+use tokio::{
+    sync::Semaphore,
+    task::{AbortHandle, JoinSet},
+    time,
+};
 
 use std::sync::Mutex;
 
@@ -33,16 +37,23 @@ impl ManagedTaskRegistry {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.try_spawn_with_abort(future).is_some()
+    }
+
+    /// Keeps the task joined at shutdown while allowing its local owner to cancel it.
+    pub(super) fn try_spawn_with_abort<F>(&self, future: F) -> Option<AbortHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let mut tasks = self
             .tasks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(tasks) = tasks.as_mut() {
             while tasks.try_join_next().is_some() {}
-            tasks.spawn(future);
-            return true;
+            return Some(tasks.spawn(future));
         }
-        false
+        None
     }
 
     pub(super) fn spawn_bounded_http<F>(&self, connections: &Arc<Semaphore>, future: F) -> bool

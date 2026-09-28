@@ -5,6 +5,7 @@ pub(super) struct QuicProxySession {
     pub(super) last_activity: Arc<AtomicU64>,
     pub(super) address_validated: Arc<AtomicBool>,
     pub(super) _admission_lease: QuicProxyAdmissionLease,
+    pub(super) worker_abort: AbortHandle,
 }
 
 impl QuicProxySession {
@@ -13,6 +14,7 @@ impl QuicProxySession {
         backend: SocketAddr,
         public_socket: Arc<UdpSocket>,
         admission_lease: QuicProxyAdmissionLease,
+        tasks: &crate::managed_tasks::ManagedTaskRegistry,
     ) -> Result<Self, std::io::Error> {
         let bind = match backend {
             SocketAddr::V4(_) => "0.0.0.0:0",
@@ -24,37 +26,48 @@ impl QuicProxySession {
         let address_validated = Arc::new(AtomicBool::new(false));
         let task_last_activity = Arc::clone(&last_activity);
         let task_address_validated = Arc::clone(&address_validated);
-        tokio::spawn(async move {
-            let mut response = vec![0_u8; 65_536];
-            loop {
-                tokio::select! {
-                    packet = receiver.recv() => {
-                        let Some(packet) = packet else { return; };
-                        if backend_socket.send_to(&packet, backend).await.is_err() {
-                            return;
+        let worker_abort = tasks
+            .try_spawn_with_abort(async move {
+                let mut response = vec![0_u8; 65_536];
+                loop {
+                    tokio::select! {
+                        packet = receiver.recv() => {
+                            let Some(packet) = packet else { return; };
+                            if backend_socket.send_to(&packet, backend).await.is_err() {
+                                return;
+                            }
+                            task_last_activity.store(crate::unix_timestamp(), Ordering::Relaxed);
                         }
-                        task_last_activity.store(crate::unix_timestamp(), Ordering::Relaxed);
-                    }
-                    received = backend_socket.recv_from(&mut response) => {
-                        let Ok((length, source)) = received else { return; };
-                        if source != backend {
-                            continue;
-                        }
-                        task_address_validated.store(true, Ordering::Relaxed);
-                        task_last_activity.store(crate::unix_timestamp(), Ordering::Relaxed);
-                        if public_socket.send_to(&response[..length], remote).await.is_err() {
-                            return;
+                        received = backend_socket.recv_from(&mut response) => {
+                            let Ok((length, source)) = received else { return; };
+                            if source != backend {
+                                continue;
+                            }
+                            task_address_validated.store(true, Ordering::Relaxed);
+                            task_last_activity.store(crate::unix_timestamp(), Ordering::Relaxed);
+                            if public_socket.send_to(&response[..length], remote).await.is_err() {
+                                return;
+                            }
                         }
                     }
                 }
-            }
-        });
+            })
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Interrupted, "daemon is shutting down")
+            })?;
         Ok(Self {
             sender,
             last_activity,
             address_validated,
             _admission_lease: admission_lease,
+            worker_abort,
         })
+    }
+}
+
+impl Drop for QuicProxySession {
+    fn drop(&mut self) {
+        self.worker_abort.abort();
     }
 }
 
