@@ -29,6 +29,7 @@ python3 scripts/test-reproducibility-metadata.py
 python3 scripts/test-shared-tcp-shutdown-proof.py
 python3 scripts/test-react-nightly-audit.py
 python3 scripts/test-rf-delayed-filesystem-proof.py
+python3 scripts/test-chocolatey-workflow-checksum.py
 python3 scripts/test-native-style-owners.py
 scripts/with-process-memory-guard.sh python3 scripts/test-react-audit-launch-cleanup.py
 scripts/with-process-memory-guard.sh python3 scripts/test-controller-inventory-order.py

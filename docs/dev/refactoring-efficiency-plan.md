@@ -6851,3 +6851,17 @@ It retains the nupkg, checksums, and source/tag/archive/package-bound receipt
 for 30 days. A 20-minute job deadline bounds this package runner. Local
 workflow/package policy and PowerShell parser checks pass. A clean Windows
 validation-only run remains required before RF-028 is closed.
+
+
+## RF-028 Published Checksum Prefix Regression (2026-09-28 UTC)
+
+The first clean Windows validation-only run failed before packing: the
+actual `release-v0.2.40` SHA256SUMS entry prefixes the Windows filename with
+`./`, while the existing workflow required a bare basename. The verifier
+now accepts exactly the bare basename or its root-relative `./` spelling,
+with an optional checksum binary marker. It still requires one unique match
+and verifies the actual archive digest. Eight regressions execute the real
+workflow PowerShell block, covering both valid spellings, the binary marker,
+and missing, duplicated, wrong-hash, foreign-directory, and suffix entries.
+A fresh hosted validation remains required; the first failure is not credited
+as successful package proof.
