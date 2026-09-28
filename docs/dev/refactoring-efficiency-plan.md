@@ -7715,3 +7715,35 @@ are retained in
 `benchmarks/artifacts/20260928-rf-diagnostic-child-stream-ownership.json`.
 Original sources are retained in Git and ignored
 `target/rf-core-dump-owner-source-backup`.
+
+## RF-001 Shared Listen-Port Alias and RF-006 Script Wait Ownership (2026-09-28 UTC)
+
+A native/current obfuscation listen-port alias equal to the regular physical
+bind was accepted but retained a nonzero obfuscation listen-port projection.
+VPN synchronization consequently did not recognize that listener as shared.
+The accepted alias now projects the zero shared-listener sentinel; its physical
+port does not override the common public advertised port under a NAT mapping.
+An explicit conflicting public obfuscated advertisement remains rejected.
+The existing mapped-port regression now covers the accepted physical alias.
+
+Integration script cleanup now disarms its process-group guard only after a
+successful wait result. A wait error returns through the still-owned group
+cleanup path. There is no await between successful reaping and disarming.
+
+RF-066 recipient backfill is tracked as Hindsight initiative
+`kp-e3b71f5570544b1ead2175eb45199054`: reuse the authenticated, certificate-pinned
+mesh service on the shared native peer TCP port, with grant/recipient/permission
+checks, bounded confined writes and exact size/SHA-256 verification. The current
+HTTP owner endpoint is only an acknowledgement and does not create recipient
+bytes. That capability remains unimplemented and RF-066 remains open. No
+dedicated listener or global HTTP network-filter exception is planned.
+
+The shared-alias/script-wait batch passes 722 daemon tests (one ignored mount
+fixture), strict all-target Clippy, full-controller/legacy all-target compile
+and three newly rebuilt all-enabled single-peer-port shutdown cycles. The
+public-port alias regression and actual transport proof, with source/log hashes,
+are retained in
+`benchmarks/artifacts/20260928-rf-shared-peer-alias-wait-ownership.json`.
+Original sources remain in Git and ignored `target/rf-shared-alias-source-backup`.
+The projection check is not deployed VPN proof, and no kernel wait error is
+injected by the existing actual script cancellation tests.

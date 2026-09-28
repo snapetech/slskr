@@ -132,10 +132,12 @@ async fn run_with_timeout(
             read_script_output(&mut stdout, "stdout"),
             read_script_output(&mut stderr, "stderr"),
         )?;
-        let status = child.wait().await;
+        let status = child
+            .wait()
+            .await
+            .map_err(|error| format!("failed to wait for script: {error}"))?;
         // There is no await between reaping and disarming the numeric ID.
         process_group.completed();
-        let status = status.map_err(|error| format!("failed to wait for script: {error}"))?;
         Ok::<_, String>((status, stdout, stderr))
     })
     .await

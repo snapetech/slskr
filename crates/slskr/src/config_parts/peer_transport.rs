@@ -621,6 +621,8 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
                 "SLSKR_OBFUSCATED_ADVERTISED_PORT",
                 listeners_obfuscated_advertised_port,
             )?
+        } else if current_upstream_behavior {
+            listeners_obfuscated_advertised_port.or(Some(advertised_port))
         } else {
             upstream_obfuscated_port
                 .filter(|port| *port != 0)
@@ -736,7 +738,11 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         (
             enabled,
             mode,
-            u32::from(upstream_obfuscated_port.unwrap_or_default()),
+            if current_upstream_behavior {
+                0
+            } else {
+                u32::from(upstream_obfuscated_port.unwrap_or_default())
+            },
             advertise_regular_port,
             prefer_outbound,
         )

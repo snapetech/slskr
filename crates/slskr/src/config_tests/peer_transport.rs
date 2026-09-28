@@ -942,6 +942,16 @@ fn current_native_advertises_one_mapped_peer_port_and_rejects_conflicts() {
     assert_eq!(mapped.advertised_port, 52000);
     assert_eq!(mapped.obfuscated_advertised_port, Some(52000));
     assert!(mapped.obfuscated_listener_bind.is_none());
+    let shared_alias = crate::config::AppConfig::from_layers(
+        None,
+        crate::config::FileConfig::default(),
+        &env.clone()
+            .with("SLSKD_SLSK_OBFUSCATION_LISTEN_PORT", "50300"),
+    )
+    .unwrap();
+    assert!(shared_alias.obfuscated_listener_bind.is_none());
+    assert_eq!(shared_alias.obfuscated_advertised_port, Some(52000));
+    assert_eq!(shared_alias.obfuscation_listen_port, 0);
     for explicit in ["52000", "50300"] {
         let result = crate::config::AppConfig::from_layers(
             None,
