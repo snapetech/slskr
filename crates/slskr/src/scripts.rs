@@ -178,6 +178,7 @@ where
 }
 
 pub(crate) fn dispatch(
+    tasks: &crate::managed_tasks::ManagedTaskRegistry,
     scripts: std::collections::BTreeMap<String, ScriptIntegrationSettings>,
     script_directory: std::path::PathBuf,
     target: ControllerProfile,
@@ -212,7 +213,7 @@ pub(crate) fn dispatch(
         let payload = payload.clone();
         let directory = script_directory.clone();
         let event_name = event_name.to_owned();
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let _permit = permit;
             match run(&script, &directory, target, &payload).await {
                 Ok(output) => eprintln!(
@@ -363,7 +364,9 @@ mod tests {
                 },
             },
         );
+        let tasks = crate::managed_tasks::ManagedTaskRegistry::default();
         dispatch(
+            &tasks,
             scripts,
             directory.clone(),
             ControllerProfile::Native,
@@ -381,6 +384,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        tasks.shutdown().await;
         let payload = payload.expect("script event payload was not written as valid JSON");
         assert_eq!(payload["type"], "DownloadFileComplete");
         assert_eq!(payload["version"], 0);
@@ -388,5 +392,31 @@ mod tests {
         assert!(payload["id"].is_string());
         assert!(payload["timestamp"].is_string());
         tokio::fs::remove_dir_all(directory).await.unwrap();
+    }
+    #[tokio::test]
+    async fn script_dispatch_rejects_work_after_registry_shutdown() {
+        let tasks = crate::managed_tasks::ManagedTaskRegistry::default();
+        tasks.shutdown().await;
+        let directory =
+            std::env::temp_dir().join(format!("slskr-script-stopped-{}", uuid::Uuid::new_v4()));
+        let mut integration = script(ScriptRunSettings {
+            executable: "/bin/sh".to_owned(),
+            arglist: Some(vec!["-c".to_owned(), "touch should-not-run".to_owned()]),
+            ..Default::default()
+        });
+        integration.on = vec!["Any".to_owned()];
+        dispatch(
+            &tasks,
+            std::collections::BTreeMap::from([("stopped".to_owned(), integration)]),
+            directory.clone(),
+            ControllerProfile::Native,
+            "DownloadFileComplete",
+            &serde_json::json!({}),
+        );
+        tokio::task::yield_now().await;
+        assert!(
+            !directory.exists(),
+            "closed script registry must not create a process or directory"
+        );
     }
 }

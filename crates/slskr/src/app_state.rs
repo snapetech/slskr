@@ -349,6 +349,7 @@ impl AppState {
 
     pub(super) async fn shutdown_managed_tasks(&self) {
         self.managed_background_tasks.shutdown().await;
+        self.port_forwarding.shutdown().await;
         if let Some(gateway) = self.private_gateway.as_ref() {
             gateway.clear_runtime_connections().await;
         }

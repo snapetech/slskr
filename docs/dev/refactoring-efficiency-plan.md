@@ -7026,3 +7026,38 @@ Exact source/binary/harness hashes and worktree provenance are retained in
 and `benchmarks/artifacts/20260928-rf-single-quic-endpoint-dht-disabled-proof.json`.
 This closes the native fragmented-ALPN selection limitation; broader RF-001
 TCP/legacy boundaries and RF-006 service inventory remain open.
+
+
+## RF-006 Forwarding and Administrative Job Ownership (2026-09-28 UTC)
+
+Forwarding listeners now own a joined connection set under the existing
+128-rule/128-connection limits. The listener handle aborts on owner drop;
+forced listener cancellation drops its child set. Bidirectional tunnel pumps
+are scoped futures, so cancellation drops both pumps and their socket halves
+before remote tunnel cleanup. Activity accounting uses a drop guard, avoiding
+stale counters when a handler is aborted. Normal stop permits bounded remote
+cleanup and joins children; manager shutdown closes admission, drains rules
+concurrently, and is part of `AppState` shutdown. The standalone optional
+forwarding feature retains its explicitly requested loopback listeners; no
+native peer transport port is added by this lifecycle change.
+
+Share-rescan, both maintained administrative webhook routes, script event
+workers, and completed-download FTP jobs now register with daemon task
+ownership. Script dispatch preserves its existing concurrent-run permits and
+cannot create work after registry shutdown. The retained legacy dispatcher
+receives the same script registry parameter for diagnostic compilation.
+Forwarding tests now have a separate owner, preserving the full previous
+suite. Originals are backed up under ignored `target/rf-forwarding-source-backup`.
+
+Regressions exercise normal shutdown and forced cancellation during a stalled
+real gateway TCP/TLS setup, closure of local/gateway sockets, reclaimed
+connection permits and activity counts, listener rebinding, daemon-level
+forwarding shutdown, and rejected late script/rule admission. The forwarding
+filter runs 12 matching tests including unchanged existing data-path coverage;
+the complete daemon suite passes 684 tests with one separately exercised
+mount fixture ignored by default. Strict daemon Clippy, full-controller/legacy
+all-targets compilation, and the three-cycle all-enabled shared-peer live
+proof pass. Source hashes, test/check outcomes, and the retained live result
+are in `benchmarks/artifacts/20260928-rf-forwarding-and-service-ownership.json`.
+FTP concurrency policy, script descendant-process cleanup, remaining service
+ownership, and fresh hosted service proof remain open; this is not RF-006 closure.

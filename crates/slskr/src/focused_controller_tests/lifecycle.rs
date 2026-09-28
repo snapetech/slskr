@@ -965,3 +965,36 @@ async fn shared_gateway_rejects_stalled_tls_handshake_after_shutdown() {
     drop(gateway);
     fs::remove_dir_all(&state.config.state_dir).unwrap();
 }
+
+#[tokio::test]
+async fn daemon_shutdown_closes_forwarding_listener_and_rejects_late_rules() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = reserved.local_addr().unwrap().port();
+    drop(reserved);
+    let request = crate::port_forwarding::StartRequest {
+        local_port: port,
+        pod_id: "pod:test".into(),
+        destination_host: "service".into(),
+        destination_port: 80,
+        service_name: None,
+        gateway_username: "gateway".into(),
+        gateway_endpoints: vec!["127.0.0.1:9".parse().unwrap()],
+        gateway_certificate_sha256: [7; 32],
+        local_username: "local".into(),
+        authentication_key: Arc::new(ed25519_dalek::SigningKey::from_bytes(&[9; 32])),
+    };
+    state.port_forwarding.start(request.clone()).await.unwrap();
+    state.shutdown_managed_tasks().await;
+    assert!(state.port_forwarding.statuses().await.is_empty());
+    assert!(state
+        .port_forwarding
+        .start(request)
+        .await
+        .unwrap_err()
+        .contains("shut down"));
+    let rebound = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .unwrap();
+    drop(rebound);
+}

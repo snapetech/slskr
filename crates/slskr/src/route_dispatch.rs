@@ -318,7 +318,7 @@ fn versioned_share_rescan_response(state: &AppState, state_arc: Arc<AppState>) -
             };
         }
     };
-    tokio::spawn(async move {
+    state.spawn_managed_task(async move {
         match rebuild_share_index_with_permit(&state_arc, permit).await {
             Ok(snapshot) => {
                 record_event(

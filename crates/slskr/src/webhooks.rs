@@ -1260,6 +1260,7 @@ pub(super) async fn dispatch_webhook_event(
 ) {
     let frozen_event_name = frozen_webhook_event_name(event);
     scripts::dispatch(
+        &state.managed_background_tasks,
         state.integration_settings.read().await.scripts.clone(),
         state.config.state_dir.join("scripts"),
         state.config.controller_profile,

@@ -582,6 +582,27 @@ if rg -n 'tokio::(task::)?spawn\(' \
   exit 1
 fi
 
+# Administrative jobs share daemon shutdown ownership; forwarding has one
+# explicitly owned listener task and a bounded child join set.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/route_dispatch.rs \
+  crates/slskr/src/route_dispatch_group_1_events.rs \
+  crates/slskr/src/route_dispatch_group_3_admin_controls.rs \
+  crates/slskr/src/transfer_completion.rs \
+  crates/slskr/src/scripts.rs; then
+  printf 'runtime boundary hardening failed: detached administrative worker\n' >&2
+  exit 1
+fi
+python3 - <<'PYFORWARD'
+from pathlib import Path
+source = Path('crates/slskr/src/port_forwarding.rs').read_text()
+if source.count('tokio::spawn(') != 1 or 'Some(ListenerTask(task))' not in source:
+    raise SystemExit('runtime boundary hardening failed: forwarding listener ownership changed')
+for anchor in ('connections.spawn(', 'connections.shutdown().await', 'impl Drop for ListenerTask', 'impl Drop for ActiveConnection'):
+    if anchor not in source:
+        raise SystemExit(f'runtime boundary hardening failed: missing forwarding owner {anchor}')
+PYFORWARD
+
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'
 from pathlib import Path
