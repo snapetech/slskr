@@ -6348,3 +6348,21 @@ Web tests, strict all-targets Clippy, and the locked WASM check pass. Hygiene
 forbids the old flat include and caps owners at 1,000 lines. This checkpoint
 is internal-only. Five tracked Rust files remain above 2,500 lines; broader
 RF-024 scope remains open.
+
+## RF-024 Visualizer and Live Web Runtime Owners (2026-09-28 UTC)
+
+Replaced the 2,802-line `rustymilk_ui.rs` flat include with twelve real
+WASM-only owners for browser controls, library projection/storage/actions,
+playlists, preset editing, automation, file imports, audio analysis, live
+player and route refresh, and HTTP request caching. The largest owner is
+417 lines. Request-cache ownership stays together, and the original target
+and method guards remain intact.
+
+`benchmarks/artifacts/20260928-rf-rustymilk-ui-owner-extraction.json`
+accounts for every original byte and all 88 items, with exact reconstruction
+and reversed visibility relocations. All 84 function/method declarations
+remain present. All 86 Web tests, strict all-targets Clippy, and the locked
+WASM check pass. Hygiene forbids the old flat include and caps owners at
+1,000 lines. This checkpoint is internal-only. Four tracked Rust files
+remain above 2,500 lines: private gateway, session runtime, CLI smoke/soak,
+and file-transfer runtime. Broader RF-024 scope remains open.

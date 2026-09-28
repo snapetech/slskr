@@ -150,7 +150,66 @@ use self::workspace_action_mounting::*;
 mod workspace_table_controls;
 #[cfg(target_arch = "wasm32")]
 use self::workspace_table_controls::*;
-include!("rustymilk_ui.rs");
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/browser_http_requests.rs"]
+mod browser_http_requests;
+#[cfg(target_arch = "wasm32")]
+use self::browser_http_requests::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/live_player_refresh.rs"]
+mod live_player_refresh;
+#[cfg(target_arch = "wasm32")]
+use self::live_player_refresh::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/live_route_refresh.rs"]
+mod live_route_refresh;
+#[cfg(target_arch = "wasm32")]
+use self::live_route_refresh::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_audio_analysis.rs"]
+mod visualizer_audio_analysis;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_audio_analysis::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_automation.rs"]
+mod visualizer_automation;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_automation::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_browser_controls.rs"]
+mod visualizer_browser_controls;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_browser_controls::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_file_imports.rs"]
+mod visualizer_file_imports;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_file_imports::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_library_actions.rs"]
+mod visualizer_library_actions;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_library_actions::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_library_projection.rs"]
+mod visualizer_library_projection;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_library_projection::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_library_storage.rs"]
+mod visualizer_library_storage;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_library_storage::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_playlist_actions.rs"]
+mod visualizer_playlist_actions;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_playlist_actions::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "rustymilk_ui_owners/visualizer_preset_editor.rs"]
+mod visualizer_preset_editor;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_preset_editor::*;
 #[cfg(test)]
 #[path = "web_tests.rs"]
 mod tests;
