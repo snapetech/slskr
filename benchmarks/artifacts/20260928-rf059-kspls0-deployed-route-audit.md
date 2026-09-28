@@ -43,6 +43,16 @@ The rebuilt bundle emitted a 9.38 KiB `System` entry chunk, an 87.08 KiB
 `Integrations` chunk, and a 156.74 KiB `MediaCore` chunk. Aggregate budgets
 remain covered by the existing local build gate.
 
+## Follow-up source correction
+
+The static handler put a per-response nonce in the CSP header but only added
+the nonce meta tag when runtime-profile disclosure was enabled. First-party
+CodeMirror styles read the nonce from that meta tag. HTML now receives the CSP
+nonce meta tag independently, while runtime-profile disclosure remains
+opt-in. The targeted Rust regression passes locally. The correction has not
+been deployed for a repeat browser audit; resolution of the four original CSP
+errors remains unverified at the deployed level.
+
 ## Restoration
 
 The running slskdn service is healthy again and serves HTTP 200 on port 5030.
@@ -51,4 +61,3 @@ four original config/state/media bind mounts. Its container ID changed during
 the swap because the original container had Docker auto-remove enabled; the
 replacement container is `944675c603307cf588d8e34cf92fe19e72fbd6188fa49bc615adadaf7100449f`.
 The original config file and persistent state/media paths were not modified.
-

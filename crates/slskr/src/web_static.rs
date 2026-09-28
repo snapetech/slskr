@@ -19,16 +19,30 @@ fn web_static_content_type(path: &Path) -> &'static str {
     }
 }
 
-fn inject_web_runtime_profile(
+fn inject_web_runtime_metadata(
     bytes: Vec<u8>,
     file: &Path,
     runtime_profile: ControllerProfile,
     expose_runtime_profile: bool,
     csp_nonce: Option<&str>,
 ) -> Vec<u8> {
-    if !expose_runtime_profile
-        || file.file_name().and_then(|name| name.to_str()) != Some("index.html")
-    {
+    if file.file_name().and_then(|name| name.to_str()) != Some("index.html") {
+        return bytes;
+    }
+
+    let mut metadata = String::new();
+    if expose_runtime_profile {
+        metadata.push_str(&format!(
+            "<meta name=\"slskr-runtime-profile\" content=\"{}\">",
+            runtime_profile.as_str()
+        ));
+    }
+    if let Some(csp_nonce) = csp_nonce {
+        metadata.push_str(&format!(
+            "<meta name=\"csp-nonce\" content=\"{csp_nonce}\">"
+        ));
+    }
+    if metadata.is_empty() {
         return bytes;
     }
 
@@ -40,15 +54,6 @@ fn inject_web_runtime_profile(
         return bytes;
     };
     let insertion_point = marker_start + marker.len();
-    let mut metadata = format!(
-        "<meta name=\"slskr-runtime-profile\" content=\"{}\">",
-        runtime_profile.as_str()
-    );
-    if let Some(csp_nonce) = csp_nonce {
-        metadata.push_str(&format!(
-            "<meta name=\"csp-nonce\" content=\"{csp_nonce}\">"
-        ));
-    }
     let mut output = Vec::with_capacity(bytes.len() + metadata.len());
     output.extend_from_slice(&bytes[..insertion_point]);
     output.extend_from_slice(metadata.as_bytes());
@@ -356,7 +361,7 @@ pub(super) async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     } else {
         None
     };
-    let bytes = inject_web_runtime_profile(
+    let bytes = inject_web_runtime_metadata(
         read_bounded_web_static_file_under_root(&root, &file)?,
         &file,
         runtime_profile,
@@ -386,6 +391,38 @@ pub(super) async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     .await
     .map_err(|_| "static response write deadline exceeded".to_owned())??;
     Ok(Some(bytes.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csp_nonce_is_exposed_without_disclosing_runtime_profile() {
+        let html = inject_web_runtime_metadata(
+            b"<html><head></head><body></body></html>".to_vec(),
+            Path::new("index.html"),
+            crate::config::ControllerProfile::Native,
+            false,
+            Some("test-nonce"),
+        );
+        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
+
+        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
+        assert!(!html.contains("slskr-runtime-profile"));
+
+        let html = inject_web_runtime_metadata(
+            b"<html><head></head><body></body></html>".to_vec(),
+            Path::new("index.html"),
+            crate::config::ControllerProfile::Native,
+            true,
+            Some("test-nonce"),
+        );
+        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
+
+        assert!(html.contains("<meta name=\"slskr-runtime-profile\" content=\"native\">"));
+        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
+    }
 }
 
 pub(super) fn fallback_dashboard_html() -> String {
