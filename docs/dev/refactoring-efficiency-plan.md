@@ -101,7 +101,7 @@ structural improvement to execute only after higher-priority work is stable.
 | --- | --- | --- | --- | --- |
 | RF-008 | `.gitlab-ci.yml:21-26` previously invoked three nonexistent Rust guard scripts. The current batch uses checked-in process guards and direct Cargo commands. | The GitLab Rust job previously could not start on a clean runner. | Static workflow policy and shell/YAML checks pass. On 2026-09-27, GitLab rejected both a normal and `--no-thin` push of `902574ad` while unpacking existing-base blob `272d9b69` (`scripts/check-controller-options-differential.sh`); local `git cat-file` reads it and GitHub accepted the tip. Clean-runner proof needs the GitLab repository repaired and the tip pushed. | In progress; GitLab remote unpack failure |
 | RF-009 | `.gitlab-ci.yml:162-174` previously created a GitHub release while `.github/workflows/release.yml` already owned tag publication. The current batch removes the duplicate publisher. | One tag previously could race two release creators. | Workflow policy passes; a tag simulation/clean GitLab runner remains external proof, currently held by the RF-008 remote unpack failure. | In progress |
-| RF-010 | `release-publish.yml:128-168` previously validated AUR hashes and `.SRCINFO` but did not run a clean `makepkg` source/prepare smoke. The release gate and AUR publish job now invoke `check-aur-package-smoke.sh`. | AUR source/package breakage is now exercised before publication on supported runners. | Host `makepkg` smoke passes for both source and binary PKGBUILDs; clean publication runner remains external. | Verified locally, external runner open |
+| RF-010 | `release-publish.yml:128-168` previously validated AUR hashes and `.SRCINFO` but did not run a clean `makepkg` source/prepare smoke. The release gate and AUR publish job now invoke `check-aur-package-smoke.sh`. | AUR source/package breakage is now exercised before publication on supported runners. | Actual hosted Docker makepkg verifies and extracts both PKGBUILDs in CI `36405007921` at `7a064d37`; retained full matrix and execution markers establish source/prepare smoke. | Verified hosted smoke at `7a064d37`; publication separate |
 | RF-011 | `windows-smoke.yml` previously filtered dashboard/client-ts changes while only building Web assets; the current filters align the job with the Rust/Web checks it actually executes. | SDK/dashboard-only changes no longer imply coverage from a Rust/Web-only job. | Workflow policy passes; Windows runner proof remains external. | Verified named Windows Smoke at `e7d0dd6a`; newer source matrix open |
 | RF-012 | `client-ts/package.json` now allowlists `dist`/README publication files and the SDK gate builds, diffs, and dry-runs `npm pack`. | Published TypeScript artifacts cannot silently drift or include tests/configuration. | TypeScript package check passes with 26 allowlisted files; registry publication remains external. | Verified locally |
 | RF-013 | `check-python-client-quality.sh` now runs Black, Flake8, and mypy from a pinned temporary environment when needed; the aggregate SDK gate installs its venv before quality checks. | Python quality regressions no longer pass because host tooling is absent or the gate invokes checks in the wrong order. | Quality, 49 tests, and package gates pass. | Verified locally |
@@ -141,7 +141,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-032 | `docs/full-network-test-plan.md` mixed a historical all-pass result with a newer missing-artifact plan; `REMEDIATION.md` was a stale snapshot that said daemon tests were excluded even though CI runs them. | Operators could not tell current release evidence from archived history. | The network plan labels dated results historical and points operators to current release/live gates; REMEDIATION is explicitly historical with active-plan links. A scoped local-link and referenced-script audit found no broken current paths; absent script names appear only as proposed work. The server-code count is corrected to the 103-code validated inventory, and docs freshness passes. | Verified locally; fresh live certification remains separate |
 | RF-033 | Council counts had drifted across `docs/dev/council-scan-inventory.md`, `.council/latest-candidate-counts.md`, and the active backlog; benchmark comparison/profile tests were not invoked; frontend configs lacked coverage thresholds. | Audit numbers drift and executable performance/coverage checks are absent. | The generated report now stamps date/commit provenance; active-backlog, inventory-closure, and council-freshness gates validate synchronized copies. Dashboard V8 coverage remains ratcheted in CI/release. CI and release now run the seven benchmark comparison/SQLite profiler unit tests and a focused Web API/session/event-lifecycle coverage gate at 84% statements, 75% branches, 72% functions, and 86% lines; the focused 50-test run passes at 85.54%, 78.13%, 73.91%, and 87.38%. | Verified locally |
 | RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS and Linux hosted archives passed, and Windows archive construction, verification, and packaged-binary smoke passed at `339e6812`; all seven hosted archive jobs reuse one verified Web artifact and the complete CI/package workflow passes at `47440cfb`, with retained job/artifact metadata; SDK checks use one canonical TypeScript package build. | Verified locally and hosted archive matrix |
-| RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Retain clean-runner/actionlint evidence before external closure. | Verified locally, external runner open |
+| RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Hosted `Lint GitHub workflows` executes actionlint successfully in clean CI `36405007921` at `7a064d37`; full job/step receipt and locked metadata retained. | Verified hosted workflow/dependency gates at `7a064d37` |
 | RF-036 | `crates/slskr-protocol/src/server.rs` repeated server-code variants, inventory metadata, numeric conversion, and direction-specific matches. | Adding a protocol code can update one table and miss another. | A declarative macro owns the variants, numeric values, inventory order, names, and numeric decoding. The 103-code two-direction test inventory classifies every code as typed or opaque and fails if dispatch drifts. All 25 server protocol tests pass. | Verified locally |
 | RF-037 | `crates/slskr-client/src/overlay.rs` combines framing, handshake DTOs, validation, service DTOs, and request lifecycle in about 2,200 lines. | Unrelated changes share one review/compile boundary. | Framing, protocol messages/validation, and TLS/client lifecycle now have separate private modules; `overlay` preserves the public re-exports. The complete locked client package test suite passes. | Verified locally |
 | RF-038 | `crates/slskr/src/storage.rs` and the production compatibility parser duplicated file-entry decoding and allocated joined cache strings through `format!`, `replace`, and `Vec<String>`. | Large share lists pay avoidable allocations and parser behavior can drift. | The production parser now uses one bounded file-entry decoder, both cache writers append escaped fields into one buffer, and malformed-count/output/escaping tests pass with the full daemon library suite. Quantitative allocation benchmarking remains separate. | Verified locally; benchmark separate |
@@ -7643,3 +7643,43 @@ focused migration/persistence/reset/rollback regression passes again. Actual
 logs and source hashes are retained in
 `benchmarks/artifacts/20260928-rf-harness-log-owner.json`. Originals remain in
 ignored `target/rf-harness-log-owner-source-backup` and Git history.
+
+## RF-006/RF-010/RF-035 Completed Hosted Ownership and Packaging Matrix (2026-09-28 UTC)
+
+CI `36405007921` at exact clean commit `7a064d37` completed all eleven jobs.
+Downloaded Rust artifact `10962112931` contains three disabled and three
+all-enabled single-peer-port shutdown cycles. Proof hashes match metadata;
+transport source, seven lockfile and three configuration hashes independently
+match `git show` at that source. The all-enabled cycles use one peer TCP
+listener and UDP on the same numeric port, close clients and rebind sockets.
+
+The actual package job `108882375286` downloaded the Arch Linux Docker image
+and ran both source and binary makepkg invocations through validation,
+extraction and sources-ready. This replaces the earlier stdin false positive.
+It proves source/prepare smoke, not full package compilation or publication.
+The hosted workflow lint step executed actionlint successfully. Complete
+job/step receipts, metadata, both transport proofs, package-log hash and actual
+execution markers are retained in
+`benchmarks/artifacts/20260928-rf-hosted-7a-complete-matrix.json`. Later stream
+limit and harness log changes require their own hosted matrix. RF-006 blocking
+filesystem cancellation and external acceptance items remain open.
+
+## RF-001 Single Public Peer-Port Advertisement (2026-09-28 UTC)
+
+Native/current already rejects a dedicated obfuscation bind, but its default
+obfuscated advertised port used the local listen port rather than the public
+regular advertised port. A configured NAT mapping could therefore direct
+obfuscated peers to the wrong port. Both now advertise the same public port;
+conflicting explicit obfuscated advertisement settings fail configuration
+validation. No new listener is introduced. Frozen compatibility and remote
+peers' advertised transport ports remain separate contracts.
+
+Four current-native configuration regressions, 717 daemon tests (one ignored
+mounted-filesystem fixture), strict Clippy and three actual all-enabled
+single-peer-port shutdown cycles pass. The harness uses the platform temporary
+directory instead of hard-coded `/tmp`; its ten lifecycle tests and targeted
+TypeScript check pass locally. Sources, log hashes and the complete real socket
+proof are retained in
+`benchmarks/artifacts/20260928-rf-shared-peer-advertisement.json`. Originals
+remain in Git and ignored `target/rf-shared-advertisement-source-backup`. This
+fix does not resolve the previously retained dual-valid legacy wire ambiguity.

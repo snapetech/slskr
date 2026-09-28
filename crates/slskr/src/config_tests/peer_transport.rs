@@ -926,3 +926,39 @@ fn current_native_rejects_dedicated_obfuscation_and_normalizes_the_shared_bind()
     .unwrap();
     assert!(shared.obfuscated_listener_bind.is_none());
 }
+
+#[test]
+fn current_native_advertises_one_mapped_peer_port_and_rejects_conflicts() {
+    let env = MapEnv::default()
+        .with("SLSKR_CONTROLLER_PROFILE", "native")
+        .with("SLSKR_PARITY_PROFILE", "current")
+        .with("SLSKD_NO_CONNECT", "true")
+        .with("SLSKR_AUTH_DISABLED", "true")
+        .with("SLSKR_ADVERTISED_PORT", "52000");
+    let mapped =
+        crate::config::AppConfig::from_layers(None, crate::config::FileConfig::default(), &env)
+            .unwrap();
+    assert_eq!(mapped.listen_port, 50300);
+    assert_eq!(mapped.advertised_port, 52000);
+    assert_eq!(mapped.obfuscated_advertised_port, Some(52000));
+    assert!(mapped.obfuscated_listener_bind.is_none());
+    for explicit in ["52000", "50300"] {
+        let result = crate::config::AppConfig::from_layers(
+            None,
+            crate::config::FileConfig::default(),
+            &env.clone()
+                .with("SLSKR_OBFUSCATED_ADVERTISED_PORT", explicit),
+        );
+        if explicit == "52000" {
+            assert_eq!(result.unwrap().obfuscated_advertised_port, Some(52000));
+        } else {
+            assert!(result.unwrap_err().contains("must share the advertised"));
+        }
+    }
+    let file = serde_yaml::from_str::<crate::config::FileConfig>(
+        "listeners:\n  obfuscated_advertised_port: 50301\n",
+    )
+    .unwrap();
+    let error = crate::config::AppConfig::from_layers(None, file, &env).unwrap_err();
+    assert!(error.contains("must share the advertised"));
+}

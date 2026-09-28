@@ -2,6 +2,7 @@ import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
+import { tmpdir } from 'node:os';
 import { NodeProcessLogs } from './NodeProcessLogs';
 import { runOwnedCommand, SharedBuildOwner } from './BuildOwner';
 import { ensureFixtures, getRepoRootFromCwd } from '../fixtures/ensure-fixtures';
@@ -425,7 +426,7 @@ export class SlskrNode {
         );
         await fs.mkdir(this.appDir, { recursive: true });
       } else {
-        this.appDir = await fs.mkdtemp(path.join('/tmp', 'slskr-test-'));
+        this.appDir = await fs.mkdtemp(path.join(tmpdir(), 'slskr-test-'));
       }
     } else {
       this.appDir = this.config.appDir;

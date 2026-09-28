@@ -634,7 +634,7 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
                 })
                 .or_else(|| {
                     if current_upstream_behavior {
-                        Some(listen_port)
+                        Some(advertised_port)
                     } else {
                         (listen_port < 65_535).then_some(listen_port + 1)
                     }
@@ -643,6 +643,14 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     } else {
         None
     };
+    if supports_soulseek_obfuscation
+        && current_upstream_behavior
+        && obfuscated_advertised_port != Some(advertised_port)
+    {
+        return Err(
+            "native/current obfuscation must share the advertised Soulseek peer port".to_owned(),
+        );
+    }
     let explicit_overlay_bind = env.var("SLSKR_OVERLAY_BIND").or(listeners_overlay_bind);
     let overlay_bind = explicit_overlay_bind
         .clone()
