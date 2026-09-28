@@ -7887,3 +7887,18 @@ output before comparing. A synthetic CRLF copy passes the local gate alongside
 the ordinary LF source. Windows Smoke run
 [36466395263](https://github.com/snapetech/slskr/actions/runs/36466395263) on
 `d4d185cc` subsequently passed its Rust tests, WASM check, and Web build.
+
+## RF-059 kspls0 Temporary Deployed Route Audit (2026-09-28 UTC)
+
+The current source and Web bundle were served temporarily from kspls0 on the
+existing loopback HTTP slot and the shared peer/mesh/DHT port. The isolated
+instance skipped share scanning and disabled transfers; no host media or
+slskd state was mounted writable. Eight live desktop/mobile route views loaded
+with HTTP 200, all 178 observed API responses were 200, and no tested controls
+overlapped. The strict browser audit did report four blocked-inline-style CSP
+console errors on System and Integrations; they remain open for follow-up. The
+container, source revision, route counts, CSP finding, and restoration record
+are retained in
+[`20260928-rf059-kspls0-deployed-route-audit.md`](../../benchmarks/artifacts/20260928-rf059-kspls0-deployed-route-audit.md).
+RF-059 remains in progress pending device-performance evidence and resolution
+of the deployed CSP finding.
