@@ -104,6 +104,7 @@ pub(super) struct AppState {
     pub(super) backfill_connections: Arc<Semaphore>,
     pub(super) pending_backfill_transfers: RwLock<BTreeMap<u32, PendingBackfillTransfer>>,
     pub(super) security: RwLock<SecurityState>,
+    pub(super) share_stream_limits: share_stream_limits::ShareStreamLimits,
     pub(super) share_grants: RwLock<ShareGrantStore>,
     pub(super) share_access_tokens: RwLock<ShareAccessTokenStore>,
     pub(super) incoming_shares: RwLock<IncomingShareStore>,
@@ -351,6 +352,7 @@ impl AppState {
     }
 
     pub(super) async fn shutdown_managed_tasks(&self) {
+        self.share_stream_limits.close();
         self.ftp_uploads.close();
         self.relay_cleanup.close();
         self.visualizer_children.shutdown().await;

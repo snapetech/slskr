@@ -1238,6 +1238,7 @@ async fn share_grant_creation_rechecks_collection_after_waiting_for_grant_store(
         username: "recipient".to_owned(),
         shared_at: 1,
         permissions: "read".to_owned(),
+        max_concurrent_streams: None,
     };
     assert!(db.upsert_share_grant(&orphan).await.is_err());
     assert!(db
@@ -1559,4 +1560,120 @@ async fn collection_delete_precedes_queued_share_token_creation() {
     db.close_for_test().await;
     fs::remove_dir_all(root).expect("remove collection token-order directory");
     let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn explicit_share_stream_limits_migrate_persist_reset_and_rollback() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-share-stream-limit-migration-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let db_path = root.join("slskr.db");
+    let previous = sqlx_sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            sqlx_sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    sqlx_core::query::query("CREATE TABLE share_grants (id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, username TEXT NOT NULL, shared_at INTEGER NOT NULL, permissions TEXT NOT NULL)")
+        .execute(&previous).await.unwrap();
+    previous.close().await;
+    let db = crate::persistence::DatabaseManager::new(db_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let (state, _receiver) = test_state_with_db(MapEnv::default(), db.clone());
+    let collection = crate::route_http_request(
+        "POST",
+        "/api/v0/collections",
+        None,
+        r#"{"title":"Limited streams"}"#,
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(collection.status, "201 Created");
+    let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let body = serde_json::json!({"collectionId": collection_id, "username":"recipient", "permissions":"stream", "allowDownload":false, "allowStream":true, "allowReshare":false, "maxConcurrentStreams":1}).to_string();
+    let created = crate::route_http_request("POST", "/api/v0/share-grants", None, &body, &state)
+        .await
+        .unwrap();
+    assert_eq!(created.status, "201 Created");
+    let grant = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+    assert_eq!(grant["maxConcurrentStreams"], 1);
+    let id = grant["id"].as_str().unwrap();
+    let path = format!("/api/v0/share-grants/{id}");
+    let rows = db.list_share_grants(10, 0).await.unwrap();
+    assert_eq!(rows[0].max_concurrent_streams, Some(1));
+    for invalid in ["0", "65", "-1", "1.5", "true", "\"1\""] {
+        let body = format!("{{\"maxConcurrentStreams\":{invalid}}}");
+        let response = crate::route_http_request("PUT", &path, None, &body, &state)
+            .await
+            .unwrap();
+        assert_eq!(response.status, "400 Bad Request");
+        assert_eq!(
+            state
+                .share_grants
+                .read()
+                .await
+                .get(id)
+                .unwrap()
+                .max_concurrent_streams,
+            Some(1)
+        );
+    }
+    for (body, expected) in [
+        (r#"{"maxConcurrentStreams":2}"#, Some(2)),
+        (r#"{"maxConcurrentStreams":null}"#, None),
+        (r#"{"maxConcurrentStreams":2}"#, Some(2)),
+    ] {
+        let response = crate::route_http_request("PUT", &path, None, body, &state)
+            .await
+            .unwrap();
+        assert_eq!(response.status, "200 OK");
+        let grant = state.share_grants.read().await.get(id).unwrap();
+        assert_eq!(grant.max_concurrent_streams, expected);
+        assert_eq!(grant.permissions, "stream");
+        assert!(!crate::share_grant_allows_download(&grant.permissions));
+        assert_eq!(
+            db.list_share_grants(10, 0).await.unwrap()[0].max_concurrent_streams,
+            expected.map(i64::from)
+        );
+    }
+    db.close_for_test().await;
+    let failed =
+        crate::route_http_request("PUT", &path, None, r#"{"maxConcurrentStreams":3}"#, &state)
+            .await
+            .unwrap();
+    assert_eq!(failed.status, "503 Service Unavailable");
+    assert_eq!(
+        state
+            .share_grants
+            .read()
+            .await
+            .get(id)
+            .unwrap()
+            .max_concurrent_streams,
+        Some(2)
+    );
+    let reopened = crate::persistence::DatabaseManager::new(db_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let rows = reopened.list_share_grants(10, 0).await.unwrap();
+    let mut invalid = rows[0].clone();
+    invalid.id = "invalid-policy".to_owned();
+    invalid.max_concurrent_streams = Some(65);
+    let restored = crate::ShareGrantStore::from_persisted(vec![rows[0].clone(), invalid]);
+    assert_eq!(restored.records.len(), 1);
+    assert_eq!(restored.get(id).unwrap().max_concurrent_streams, Some(2));
+    reopened.close_for_test().await;
+    state.shutdown_managed_tasks().await;
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+    fs::remove_dir_all(root).unwrap();
 }

@@ -21,6 +21,7 @@ source_files=(
   crates/slskr/src/virtual_soulfind_v2_controller.rs
   crates/slskr/src/daemon_serve.rs
   crates/slskr/src/external_visualizer_processes.rs
+  crates/slskr/src/share_stream_limits.rs
   crates/slskr/src/soulfind_bridge_runtime.rs
   crates/slskr/src/legacy_route_dispatch.rs
   crates/slskr/src/legacy_route_dispatch_group_00.rs
@@ -210,6 +211,10 @@ for anchor in \
   'visualizer_children.shutdown().await' \
   'caps_children_and_joins_them_before_rejecting_late_launch' \
   'completed_and_failed_children_release_capacity' \
+  'cancelled_stream_task_releases_its_lease' \
+  'unconfigured_streams_count_when_an_explicit_limit_is_added' \
+  'maxConcurrentStreams must be null or an integer from 1 through 64' \
+  'explicit_share_stream_limits_migrate_persist_reset_and_rollback' \
   'options_config_location_is_the_confined_compatibility_file' \
   'toml_config_sanitizes_secrets_and_storage_paths' \
   'lidarr_projections_redact_endpoint_and_errors' \

@@ -74,6 +74,7 @@ mod logging;
 mod managed_blacklist_runtime;
 mod lifecycle_controller;
 mod managed_tasks;
+mod share_stream_limits;
 mod external_visualizer_processes;
 mod mediacore_controller;
 mod mesh_dht;

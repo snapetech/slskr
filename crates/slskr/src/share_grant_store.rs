@@ -14,11 +14,12 @@ pub(crate) struct ShareGrantRecord {
     pub(crate) username: String,
     pub(crate) shared_at: u64,
     pub(crate) permissions: String,
+    pub(crate) max_concurrent_streams: Option<u32>,
 }
 
 impl ShareGrantRecord {
     pub(crate) fn json(&self) -> String {
-        format!(
+        let mut json = format!(
             "{{\"id\":\"{}\",\"collection_id\":\"{}\",\"collectionId\":\"{}\",\"username\":\"{}\",\"shared_at\":{},\"permissions\":\"{}\",\"allow_download\":{},\"allow_stream\":{},\"allow_reshare\":{}}}",
             json_escape(&self.id),
             json_escape(&self.collection_id),
@@ -29,7 +30,12 @@ impl ShareGrantRecord {
             share_grant_allows_download(&self.permissions),
             share_grant_allows_stream(&self.permissions),
             share_grant_allows_reshare(&self.permissions)
-        )
+        );
+        if let Some(limit) = self.max_concurrent_streams {
+            json.pop();
+            json.push_str(&format!(",\"maxConcurrentStreams\":{limit}}}"));
+        }
+        json
     }
 }
 
@@ -169,6 +175,12 @@ impl ShareGrantStore {
         let records = records
             .into_iter()
             .filter_map(|record| {
+                if record.max_concurrent_streams.is_some_and(|limit| {
+                    !(1..=i64::from(crate::share_stream_limits::MAX_EXPLICIT_STREAM_LIMIT))
+                        .contains(&limit)
+                }) {
+                    return None;
+                }
                 let username = normalize_share_grant_username(&record.username)?;
                 (seen_ids.insert(record.id.clone())
                     && seen_grants
@@ -185,6 +197,13 @@ impl ShareGrantStore {
                     username,
                     shared_at,
                     permissions: bounded_share_grant_permissions(&record.permissions),
+                    max_concurrent_streams: record
+                        .max_concurrent_streams
+                        .and_then(|limit| u32::try_from(limit).ok())
+                        .filter(|limit| {
+                            (1..=crate::share_stream_limits::MAX_EXPLICIT_STREAM_LIMIT)
+                                .contains(limit)
+                        }),
                 }
             })
             .collect();
@@ -231,6 +250,7 @@ impl ShareGrantStore {
             username,
             shared_at: now,
             permissions: bounded_share_grant_permissions(permissions),
+            max_concurrent_streams: None,
         };
         self.records.push(record.clone());
         self.updated_at = now;
@@ -265,6 +285,17 @@ impl ShareGrantStore {
     pub(crate) fn update(&mut self, id: &str, permissions: String) -> Option<ShareGrantRecord> {
         let record = self.records.iter_mut().find(|r| r.id == id)?;
         record.permissions = bounded_share_grant_permissions(&permissions);
+        self.updated_at = unix_timestamp();
+        Some(record.clone())
+    }
+
+    pub(crate) fn set_stream_limit(
+        &mut self,
+        id: &str,
+        limit: Option<u32>,
+    ) -> Option<ShareGrantRecord> {
+        let record = self.records.iter_mut().find(|record| record.id == id)?;
+        record.max_concurrent_streams = limit;
         self.updated_at = unix_timestamp();
         Some(record.clone())
     }
@@ -364,6 +395,7 @@ pub(super) async fn persist_share_grant(
         username: record.username.clone(),
         shared_at: i64::try_from(record.shared_at).unwrap_or(i64::MAX),
         permissions: record.permissions.clone(),
+        max_concurrent_streams: record.max_concurrent_streams.map(i64::from),
     };
     db.upsert_share_grant(&persisted)
         .await

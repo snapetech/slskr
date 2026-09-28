@@ -712,6 +712,7 @@ pub(super) fn share_grants_bound_and_deduplicate_collection_users() {
             username: format!("  {}  ", "é".repeat(crate::MAX_USER_USERNAME_BYTES)),
             shared_at: 1,
             permissions: "x".repeat(crate::MAX_SHARE_GRANT_PERMISSIONS_BYTES + 1),
+            max_concurrent_streams: None,
         },
         crate::persistence::ShareGrantRecord {
             id: "grant-2".to_owned(),
@@ -719,6 +720,7 @@ pub(super) fn share_grants_bound_and_deduplicate_collection_users() {
             username: "   ".to_owned(),
             shared_at: 2,
             permissions: "write".to_owned(),
+            max_concurrent_streams: None,
         },
     ]);
     assert_eq!(hydrated.records.len(), 1);

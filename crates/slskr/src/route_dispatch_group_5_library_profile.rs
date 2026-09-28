@@ -106,7 +106,27 @@ async fn route_dispatch_group_5_library_profile(
                 return Ok(routing::not_found_response());
             }
             let previous = grants.clone();
+            let requested_limit = match crate::share_stream_limits::request_limit(body) {
+                Ok(limit) => limit,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
+            let permissions = if requested_limit.is_some()
+                && extract_json_string_field(body, "permissions").is_none()
+            {
+                grants
+                    .get(id)
+                    .map(|record| record.permissions)
+                    .unwrap_or(permissions)
+            } else {
+                permissions
+            };
             if let Some(record) = grants.update(id, permissions) {
+                let record = match requested_limit {
+                    Some(limit) => grants
+                        .set_stream_limit(id, limit)
+                        .expect("updated grant remains owned"),
+                    None => record,
+                };
                 let json = record.json();
                 let mutated = grants.clone();
                 drop(grants);

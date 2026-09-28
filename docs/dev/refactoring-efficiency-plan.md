@@ -102,7 +102,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-008 | `.gitlab-ci.yml:21-26` previously invoked three nonexistent Rust guard scripts. The current batch uses checked-in process guards and direct Cargo commands. | The GitLab Rust job previously could not start on a clean runner. | Static workflow policy and shell/YAML checks pass. On 2026-09-27, GitLab rejected both a normal and `--no-thin` push of `902574ad` while unpacking existing-base blob `272d9b69` (`scripts/check-controller-options-differential.sh`); local `git cat-file` reads it and GitHub accepted the tip. Clean-runner proof needs the GitLab repository repaired and the tip pushed. | In progress; GitLab remote unpack failure |
 | RF-009 | `.gitlab-ci.yml:162-174` previously created a GitHub release while `.github/workflows/release.yml` already owned tag publication. The current batch removes the duplicate publisher. | One tag previously could race two release creators. | Workflow policy passes; a tag simulation/clean GitLab runner remains external proof, currently held by the RF-008 remote unpack failure. | In progress |
 | RF-010 | `release-publish.yml:128-168` previously validated AUR hashes and `.SRCINFO` but did not run a clean `makepkg` source/prepare smoke. The release gate and AUR publish job now invoke `check-aur-package-smoke.sh`. | AUR source/package breakage is now exercised before publication on supported runners. | Host `makepkg` smoke passes for both source and binary PKGBUILDs; clean publication runner remains external. | Verified locally, external runner open |
-| RF-011 | `windows-smoke.yml` previously filtered dashboard/client-ts changes while only building Web assets; the current filters align the job with the Rust/Web checks it actually executes. | SDK/dashboard-only changes no longer imply coverage from a Rust/Web-only job. | Workflow policy passes; Windows runner proof remains external. | Verified locally, external runner open |
+| RF-011 | `windows-smoke.yml` previously filtered dashboard/client-ts changes while only building Web assets; the current filters align the job with the Rust/Web checks it actually executes. | SDK/dashboard-only changes no longer imply coverage from a Rust/Web-only job. | Workflow policy passes; Windows runner proof remains external. | Verified named Windows Smoke at `e7d0dd6a`; newer source matrix open |
 | RF-012 | `client-ts/package.json` now allowlists `dist`/README publication files and the SDK gate builds, diffs, and dry-runs `npm pack`. | Published TypeScript artifacts cannot silently drift or include tests/configuration. | TypeScript package check passes with 26 allowlisted files; registry publication remains external. | Verified locally |
 | RF-013 | `check-python-client-quality.sh` now runs Black, Flake8, and mypy from a pinned temporary environment when needed; the aggregate SDK gate installs its venv before quality checks. | Python quality regressions no longer pass because host tooling is absent or the gate invokes checks in the wrong order. | Quality, 49 tests, and package gates pass. | Verified locally |
 | RF-014 | Python SDK now declares Python 3.10–3.13 support, bounded runtime/dev dependencies, `pyproject.toml`, constraints, and a package build/import check. | SDK builds and supported-runtime expectations are explicit and reproducible. | sdist/wheel build/import and `pip check` pass; clean cross-platform matrix remains external. | Verified locally |
@@ -182,7 +182,7 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Per-grant concurrency and recipient backfill acceptance remain open. | In progress; recipient backfill and per-grant concurrency open |
+| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Per-grant concurrency and recipient backfill acceptance remain open. | In progress; eight real media cases passed, recipient backfill open |
 | RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
@@ -7566,3 +7566,51 @@ proof and source/log hashes are retained in
 `benchmarks/artifacts/20260928-rf-visualizer-child-owner.json`. The eight remaining
 production blocking-worker call sites and precise cancellation limits are in
 `docs/dev/blocking-work-ownership.md`; RF-006 is not marked complete.
+
+## RF-011 Completed Named Windows Smoke (2026-09-28 UTC)
+
+Windows Smoke run `36402974583` completed successfully at `e7d0dd6a`. The
+native-cwd memory regression, pinned Rust setup, shared full-Perl helper, Rust
+format gate, and actual workspace tests all passed on Windows. The full
+job/step receipt and source/log hashes are retained in
+`benchmarks/artifacts/20260928-rf-named-windows-smoke-success.json`. This validates
+the named workflow and its setup fixes at that exact source; later runtime/share
+changes continue to require their own complete hosted matrix.
+
+## RF-066 Enforced Owner Share Stream Concurrency (2026-09-28 UTC)
+
+Owner grants previously ignored `maxConcurrentStreams` even though the E2E
+case expected it. Explicit limits from 1 through 64 now persist with the grant
+through an idempotent SQLite column migration. Existing grants default to no
+explicit limit, preserving their response contract and behavior; null clears
+an explicit limit. Limit-only updates retain the original permissions, and
+persistence failure restores only an unchanged transaction candidate, including
+its stream policy. Invalid persisted limits discard the grant rather than
+silently turning it into an unlimited grant.
+
+A bounded grant-count registry holds leases through ticketed HTTP responses.
+It tracks unlimited ticketed responses too, so setting a limit while a response
+is already active counts that response. Lowered limits deny new work until
+capacity becomes available; completion, error, and cancellation release leases.
+Capacity is scoped to the grant, and shutdown closes registry admission.
+No native transport listener or peer port is added.
+
+The repaired concurrency E2E creates an actual owner grant and exchanges its
+header bearer token for a content-bound ticket. A real paused socket holds the
+77,410,288-byte Sintel response open: the next GET returns 429, and after socket
+close a subsequent range GET returns 206. No query bearer token, ignored
+share-group payload, or SPA `/__routes` response is used. All eight real sharing
+and streaming cases pass together, including decoded movie frames. The ninth,
+recipient backfill, remains open; its owner-side metadata receipt does not
+write the recipient's downloads directory.
+
+Validation passes 716 daemon tests (one ignored mounted fixture), strict
+all-targets Clippy, full-controller/legacy compilation, targeted E2E TypeScript,
+and three actual all-enabled shared-peer-port shutdown cycles. Old E2E helper
+null handling and URL predicates were corrected without weakening assertions.
+The run also exposed harness log FileHandle cleanup and late contact-response
+registration; those remain follow-up ownership/test work. Actual proof and
+source/log hashes are retained in
+`benchmarks/artifacts/20260928-rf-owner-share-stream-concurrency.json`.
+Source originals remain in ignored `target/rf-share-stream-limit-source-backup`
+and Git. Fresh hosted completion remains separate acceptance work.

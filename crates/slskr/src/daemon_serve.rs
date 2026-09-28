@@ -840,6 +840,7 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pending_backfill_transfers: RwLock::new(BTreeMap::new()),
         security_ban_persistence_lock: AsyncMutex::new(()),
         security: RwLock::new(security_state),
+        share_stream_limits: crate::share_stream_limits::ShareStreamLimits::default(),
         share_grants: RwLock::new(share_grant_store),
         share_access_tokens: RwLock::new(share_access_token_store),
         incoming_shares: RwLock::new(IncomingShareStore::default()),

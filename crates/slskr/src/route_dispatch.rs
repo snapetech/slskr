@@ -25,6 +25,7 @@ pub(super) fn share_grant_store_matches(
                     && current.username == expected.username
                     && current.shared_at == expected.shared_at
                     && current.permissions == expected.permissions
+                    && current.max_concurrent_streams == expected.max_concurrent_streams
             })
 }
 

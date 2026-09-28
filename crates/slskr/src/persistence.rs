@@ -359,6 +359,8 @@ pub struct ShareGrantRecord {
     pub username: String,
     pub shared_at: i64,
     pub permissions: String,
+    #[serde(default)]
+    pub max_concurrent_streams: Option<i64>,
 }
 
 /// Durable delegated-share token verifier. The raw bearer token is never stored.
@@ -864,6 +866,7 @@ impl<'r> FromRow<'r, SqliteRow> for ShareGrantRecord {
             username: row.try_get("username")?,
             shared_at: row.try_get("shared_at")?,
             permissions: row.try_get("permissions")?,
+            max_concurrent_streams: row.try_get("max_concurrent_streams")?,
         })
     }
 }
@@ -1609,6 +1612,12 @@ impl DatabaseManager {
         )
         .execute(&self.pool)
         .await?;
+
+        // Idempotent migration: old grants have no explicit stream limit.
+        if let Err(error) = query("ALTER TABLE share_grants ADD COLUMN max_concurrent_streams INTEGER CHECK(max_concurrent_streams IS NULL OR max_concurrent_streams BETWEEN 1 AND 64)")
+            .execute(&self.pool).await {
+            if !error.to_string().contains("duplicate column name") { return Err(Box::new(error)); }
+        }
 
         query(
             r#"

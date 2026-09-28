@@ -752,6 +752,33 @@ where
             };
         }
 
+        // Keep the grant lease in request scope through file writes and disconnects.
+        let mut _share_stream_lease = None;
+        if method == "GET" && response.status == "200 OK" {
+            if let Some(stream_id) = primary_stream_id(path) {
+                match crate::share_stream_limits::acquire_ticket_stream(
+                    &state,
+                    &stream_id,
+                    req.query.as_deref(),
+                )
+                .await
+                {
+                    Ok(lease) => _share_stream_lease = lease,
+                    Err(crate::share_stream_limits::AdmissionError::Unauthorized) => {
+                        response = routing::unauthorized_response();
+                    }
+                    Err(crate::share_stream_limits::AdmissionError::Busy) => {
+                        response = routing::HttpResponse {
+                            status: "429 Too Many Requests",
+                            content_type: "application/json",
+                            body: "{\"error\":\"share stream concurrency limit reached\"}"
+                                .to_owned(),
+                        };
+                    }
+                }
+            }
+        }
+
         let application_dump = application_dump_request(method, path, &state.config);
         let listening_party_path = listening_party_stream_path(path);
         if listening_party_path.is_some()

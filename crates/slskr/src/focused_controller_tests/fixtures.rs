@@ -238,6 +238,7 @@ pub(super) fn test_state_with_env_and_db(
         pending_backfill_transfers: RwLock::new(BTreeMap::new()),
         security_ban_persistence_lock: tokio::sync::Mutex::new(()),
         security: RwLock::new(crate::SecurityState::new()),
+        share_stream_limits: crate::share_stream_limits::ShareStreamLimits::default(),
         share_grants: RwLock::new(crate::ShareGrantStore::new()),
         share_access_tokens: RwLock::new(crate::ShareAccessTokenStore::default()),
         incoming_shares: RwLock::new(crate::IncomingShareStore::default()),
