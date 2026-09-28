@@ -124,7 +124,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-027 | `web/e2e/README.md:58-60` previously used `cd src/web` and referenced absent fixture scripts/schema. The current batch adds a root wrapper, schema checker, corruption regression, updates E2E paths, serializes real-node workers, and permits a cold optimized build to finish. | Documented E2E setup previously was broken and zero-download fixture fetch could report success. | Serialized E2E passes 14 tests; 9 media-dependent tests skip because optional media is absent. | Verified with optional-media gap |
 | RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Validate workflow policy and a clean package runner before marking verified. | In progress |
 | RF-029 | `.github/workflows/release-publish.yml:625-638` intentionally targets the existing `snapetech/homebrew-slskdn` compatibility tap, while `docs/dev/release-channels.md:15-18` named `snapetech/homebrew-slskr`. | Channel documentation was stale, but the publication target was not shown to be wrong. | Release-channel documentation now names the actual compatibility tap and preserves the explicit target boundary. | Verified locally, docs |
-| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. Nightly artifact retention remains open. | In progress; browser evidence retained, nightly pending |
+| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. A daily/manual workflow now retains four real-browser mock scenarios, screenshots, and source-bound receipts for 30 days under memory/swap/task/runtime limits. Its hosted retained result remains pending. | In progress; nightly retention wired |
 | RF-031 | The release gate invokes the remediation baseline and differential checks, but the universal replacement acceptance document points to retained local artifacts and the release path does not run the full live transport/lifecycle manifest. | Historical acceptance evidence could be mistaken for fresh release evidence. | The acceptance document now explicitly labels the 2026-08-20 closure as historical and requires fresh release-gate/live artifacts for current certification. | Verified locally, policy explicit |
 
 ### P2 Efficiency And Structural Boundaries
@@ -6729,3 +6729,28 @@ with immutable run and artifact links, in
 `benchmarks/artifacts/20260928-rf-hosted-reproducibility-receipt.json`.
 RF-071 main-gate hosted metadata retention is verified. This receipt does not
 certify the later single-port change or substitute for its hosted execution.
+
+
+## RF-030 Bounded Nightly React Evidence (2026-09-28 UTC)
+
+The dedicated `React Nightly Audit` workflow runs daily and supports manual
+dispatch without live credentials. Its four deterministic mock scenarios
+exercise the actual React UI through Chromium, with desktop/mobile success
+rendering and focused loading/empty, validation/error, and authorization/
+reconnect/restart workflows. It retains reports, screenshots, logs, and a
+source-bound receipt for 30 days. This is browser proof against mocks;
+it does not certify deployed devices or credentialed upstream interop.
+
+The runner clears inherited live-backend settings, tokens, endpoint sweeps,
+and route restrictions. It rejects missing, failed, swept, mismatched, or
+empty browser evidence and removes stale reports before every launch. Each
+build/audit command has a five-minute deadline. Timeout and interruption
+terminate the owned process group; a grace period lets the memory guard stop
+its external systemd service before hard cleanup. Six regressions include a
+real guarded-child timeout and confirm that child is reaped.
+
+Hosted browser work runs in an owned service with 4 GiB resident memory,
+zero swap allowance, 512 tasks, and a 15-minute deadline. The workflow itself
+has a 25-minute deadline, cleanup trap, pinned actions, read-only permissions,
+and a required artifact upload. Workflow policy guards this contract.
+The retained hosted result is still required before RF-030 is closed.

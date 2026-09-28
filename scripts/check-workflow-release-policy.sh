@@ -89,6 +89,22 @@ for expected in \
   fi
 done
 
+for expected in \
+  'schedule:' \
+  "cron: '43 8 * * *'" \
+  'timeout-minutes: 25' \
+  'python3 scripts/run-react-nightly-audit.py' \
+  '--property=MemoryMax=4G --property=MemorySwapMax=0' \
+  '--property=TasksMax=512 --property=RuntimeMaxSec=15min' \
+  'target/react-nightly-audit/**' \
+  'if-no-files-found: error' \
+  'retention-days: 30'; do
+  if ! rg -n -F -- "$expected" .github/workflows/react-nightly-audit.yml >/dev/null; then
+    printf 'workflow release policy check failed: React nightly contract missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
 if rg -n -F 'path: target/live-interop/**' .github/workflows/live-parity.yml; then
   printf 'workflow release policy check failed: live parity artifacts must exclude the credential file\n' >&2
   status=1
