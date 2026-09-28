@@ -7462,3 +7462,23 @@ stdin open (`docker run -i`). The script can therefore be skipped while the
 container exits successfully. That marker is not accepted as a real makepkg
 receipt; RF-010 remains open pending corrected container execution, working
 directory verification, and an actual fresh clean-runner result.
+
+## RF-010 Executed AUR Source/Prepare Smoke (2026-09-28 UTC)
+
+The Docker fallback now opens stdin with `-i`, changes into the copied package
+directory before invoking makepkg, and records the container ID for cleanup
+on success, failure, or interruption. Cleanup can remove only that validated
+ID. Both host and container paths use `--nobuild`; the previous simultaneous
+`--verifysource` flag exited before extraction and any `prepare()` function.
+Actual host makepkg now verifies and extracts both source and binary PKGBUILDs.
+
+Two offline regressions execute the actual heredoc Bash script with explicit
+Docker/package-manager doubles. They verify both makepkg calls, correct working
+directory, enabled extraction/preparation, suppression of false success on a
+failed binary package, and exact owned-container cleanup. They are part of the
+full audit-tooling gate, which passes. Source/log hashes and the doubles' limited
+scope are retained in
+`benchmarks/artifacts/20260928-rf-aur-container-smoke-execution.json`.
+Original smoke source is backed up in ignored `target/rf-aur-container-source-backup`.
+Fresh actual clean-runner Docker completion is still required for RF-010;
+the previous marker does not establish that completion.

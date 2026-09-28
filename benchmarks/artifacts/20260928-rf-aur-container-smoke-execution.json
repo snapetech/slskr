@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-010 real AUR container-script and source preparation validation",
+  "date": "2026-09-28",
+  "sourceSha256": {
+    "scripts/check-aur-package-smoke.sh": "f4c3d32d2e40024c4c8fcde54503f9c66db187f41f535002d54b96cdd75e4fc8",
+    "scripts/test-aur-container-smoke.py": "66502e38bd945306881c46e747956eb2eb64f253689442588e9d3357fbd1b90e",
+    "scripts/check-audit-tooling.sh": "9ce75c9eaf808db31d09085b5df2558219320e587aa418b9dad53d1e5be95c46"
+  },
+  "logSha256": {
+    "target/rf-aur-host-smoke.log": "7ae8d1ec2dcb0bb05b2b49d9d85a1863e1902a9b5a17fc01a1a7a9c3ab04284b",
+    "target/rf-aur-container-audit-tooling.log": "0b00b744ee54daa05ee012d0409d8aea310bfa5b323a6aa1e798700e1d15b5a8"
+  },
+  "validation": {
+    "offlineDockerScriptRegressions": 2,
+    "actualHostMakepkg": "both source and binary PKGBUILDs verified and extracted successfully with --nobuild, without --verifysource early exit",
+    "auditTooling": "passed",
+    "dockerDoubleScope": "executes the actual stdin Bash script; substitutes package-manager/user commands; checks working directory, both makepkg calls, no false success after failure, and exact owned-container cleanup"
+  },
+  "correction": "The previous cf37f4bd clean package log success marker is not accepted as a real container-script execution proof: docker run omitted -i. Combined --verifysource also exits before extraction/prepare.",
+  "scope": "Fresh actual clean-runner Docker proof remains pending. Offline tool doubles are not claimed as real Arch container execution."
+}

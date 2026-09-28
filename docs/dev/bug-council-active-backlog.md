@@ -6,7 +6,7 @@ records the active discovery piles that still need review, splitting, or
 burn-down.
 
 Scan date: 2026-09-28
-Source digest: 7c06ca1d9feb20c839ea70dd3e8a87e532d81c90fec637a87bce52d52af94102
+Source digest: 532285df816644a2f526101e3c1bdde4a5575f542237474b4af8ca3e6d944d98
 
 Every council scan candidate class must have a row below with the current
 candidate count. `scripts/check-council-active-backlog.sh` fails when a class is
