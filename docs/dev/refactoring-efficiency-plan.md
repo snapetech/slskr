@@ -6015,3 +6015,13 @@ entries, and a default focused regression checks both routes retain sequence
 zero and hide closed-pool details. All 650 default daemon library tests pass.
 The shared classifier also covers hash-database reads/writes that already use
 it. This behavior fix has a new release fragment.
+
+## RF-024 Retained Owned Mesh Differential Proof (2026-09-28 UTC)
+
+A fresh bounded API group 1 run at clean commit `84e42960` passes. All six
+owned mesh ledgers were rewritten during that run and contain 58 passing rows.
+`benchmarks/artifacts/20260928-rf-owned-mesh-bounded-differential.json` retains
+the rows, ledger digests, source commit, binary/module hashes, toolchain,
+platform, command, and timing metadata. This records real execution through
+the new module exports and the unavailable-storage rollback assertions.
+RF-024 remains open for the other controller include owners.
