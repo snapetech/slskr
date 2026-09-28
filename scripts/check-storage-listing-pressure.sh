@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
-controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests/segment_*.rs)
+controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests/*.rs)
 
 if ! rg -n 'SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES|SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES' crates/slskr/src/lib.rs >/dev/null; then
   printf 'storage listing pressure check failed: recursive storage listing budget constants are missing\n' >&2

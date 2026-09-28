@@ -5943,3 +5943,14 @@ or rejects its future before polling. The focused regression holds every
 search permit, schedules work, joins shutdown, and verifies both queued and
 subsequent rejected work leave a zero queue count. All 649 daemon library
 tests pass. Other service coverage remains open under RF-006.
+
+## RF-024 Media And Song Identification Test Ownership (2026-09-27)
+
+Nine media/analyzer/hash-database contract tests and eight song-identification
+contract tests now live in real `controller_tests::media_contracts` and
+`controller_tests::songid_contracts` modules. Their fixture imports are explicit,
+and implementation paths name the crate owner. The pre-edit source and audit
+in `target/rf-controller-media-before-modules/` account for 38,382 moved bytes
+and all 17 test bodies with exact reconstruction before formatting. The
+remaining full-controller includes still need ownership boundaries; this
+internal-only step does not close RF-024.

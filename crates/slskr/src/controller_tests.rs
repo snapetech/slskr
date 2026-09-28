@@ -1,4 +1,12 @@
 #[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/media_contracts.rs"]
+mod media_contracts;
+
+#[cfg(feature = "full-controller-tests")]
+#[path = "controller_tests/songid_contracts.rs"]
+mod songid_contracts;
+
+#[cfg(feature = "full-controller-tests")]
 #[path = "controller_tests/bridge_contracts.rs"]
 mod bridge_contracts;
 
