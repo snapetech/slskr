@@ -20,6 +20,8 @@ use crate::{
 
 pub const DEFAULT_INIT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+const PIERCE_FIREWALL_FRAME_LEN: usize = 1 + std::mem::size_of::<u32>();
+
 #[derive(Debug)]
 pub enum IncomingConnection<S> {
     PeerMessages(PeerMessageConnection<S>),
@@ -293,7 +295,7 @@ fn shared_candidate_has_known_header(encoded: &[u8], candidate: SharedFrameCandi
     };
     let length = candidate.encoded_len - prefix_len;
     match InitCode::try_from(code) {
-        Ok(InitCode::PierceFirewall) => length == 5,
+        Ok(InitCode::PierceFirewall) => length == PIERCE_FIREWALL_FRAME_LEN,
         Ok(InitCode::PeerInit) => (13..=MAX_PEER_INIT_FRAME_LEN).contains(&length),
         Err(_) => false,
     }
@@ -321,11 +323,13 @@ where
         .encoded_len
         .checked_sub(prefix_len)
         .expect("shared candidate includes its frame prefix");
-    if code == InitCode::PeerInit.as_u8() && length > MAX_PEER_INIT_FRAME_LEN {
-        return Err(ClientError::FrameTooLarge {
-            length,
-            max: MAX_PEER_INIT_FRAME_LEN,
-        });
+    let max = match InitCode::try_from(code) {
+        Ok(InitCode::PierceFirewall) => PIERCE_FIREWALL_FRAME_LEN,
+        Ok(InitCode::PeerInit) => MAX_PEER_INIT_FRAME_LEN,
+        Err(_) => return Ok(()),
+    };
+    if length > max {
+        return Err(ClientError::FrameTooLarge { length, max });
     }
     Ok(())
 }

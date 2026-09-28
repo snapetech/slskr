@@ -1443,7 +1443,10 @@ fn controller_transfer_state(status: &str) -> &str {
 }
 
 async fn content_discovery_error_response(state: &AppState, error: String) -> HttpResponse {
-    if error.starts_with("content discovery state ") {
+    if error.starts_with("content discovery state ")
+        || error.starts_with("hash database state unavailable:")
+        || error.starts_with("hash database storage unavailable:")
+    {
         update_session(state, |snapshot| {
             snapshot.last_error = Some(error);
         })

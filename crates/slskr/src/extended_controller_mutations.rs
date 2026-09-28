@@ -693,7 +693,7 @@ pub(crate) async fn extended_controller_mutation_response(
                     .to_string(),
                 )
             }
-            Err(error) => routing::bad_request_response(&error),
+            Err(error) => content_discovery_error_response(state, error).await,
         };
     }
     if method == "POST" && path == "/api/security/entropy/check" {

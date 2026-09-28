@@ -776,3 +776,23 @@ async fn shared_demux_preserves_unambiguous_unknown_frame_and_following_bytes() 
     stream.read_exact(&mut following).await.unwrap();
     assert_eq!(&following, b"sentinel");
 }
+
+#[tokio::test]
+async fn shared_demux_rejects_oversized_firewall_init_before_buffering_body() {
+    let length = slskr_client::io::DEFAULT_MAX_FRAME_LEN;
+    let mut plain_header = (length as u32).to_le_bytes().to_vec();
+    plain_header.extend_from_slice(&[InitCode::PierceFirewall.as_u8(), 0, 0, 0]);
+    let obfuscated_header = encode_rotated(&plain_header[..5], 0x8000_0000);
+    for header in [plain_header, obfuscated_header] {
+        let (mut client, server) = duplex(64);
+        client.write_all(&header).await.unwrap();
+        // Keep the sender open with no body: rejection must use only the header.
+        let error = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+            .await
+            .expect("reject firewall header without waiting for body")
+            .unwrap_err();
+        assert!(
+            matches!(error, ClientError::FrameTooLarge { length: actual, max: 5 } if actual == length)
+        );
+    }
+}

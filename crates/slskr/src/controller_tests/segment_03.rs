@@ -4832,10 +4832,10 @@ async fn controller_api_differential_search_mutation_lifecycle() {
     assert_eq!(
         db.get_search("1")
             .await
-            .expect("get cancelled search")
+            .expect("completed search remains terminal after cancellation")
             .unwrap()
             .status,
-        "cancelled"
+        "completed"
     );
 
     let updated = super::route_http_request(
@@ -4850,7 +4850,10 @@ async fn controller_api_differential_search_mutation_lifecycle() {
     assert_eq!(updated.status, "200 OK");
     let persisted = db.get_search("1").await.expect("get updated").unwrap();
     assert_eq!(persisted.query, "durable updated");
-    assert_eq!(persisted.status, "failed");
+    assert_eq!(
+        persisted.status, "completed",
+        "terminal status is preserved while metadata changes"
+    );
     assert!(persisted.completed_at.is_some());
 
     let deleted = super::route_http_request("DELETE", "/api/searches/1", None, "", &state)
@@ -4893,6 +4896,25 @@ async fn controller_api_differential_search_mutation_lifecycle() {
         .first()
         .map(|record| record.id.clone())
         .expect("clearable search id");
+    let cancelled_active = super::route_http_request(
+        "PUT",
+        &format!("/api/v0/searches/{clearable_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("cancel active versioned search");
+    assert_eq!(cancelled_active.status, "200 OK");
+    assert!(cancelled_active.body.is_empty());
+    assert_eq!(
+        db.get_search(&clearable_id)
+            .await
+            .expect("get actively cancelled search")
+            .unwrap()
+            .status,
+        "cancelled"
+    );
     let deleted_versioned = super::route_http_request(
         "DELETE",
         &format!("/api/v0/searches/{clearable_id}"),

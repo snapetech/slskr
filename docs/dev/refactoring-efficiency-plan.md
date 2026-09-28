@@ -5968,3 +5968,50 @@ disconnected distributed snapshot survives restart; a later committed depth-7
 child snapshot survives SIGKILL and another restart. The direct loopback HTTP
 adapter also passes hosted security scans at `47440cfb`. RF-003/RF-007 retain
 their verified local status; RF-006 still needs broader service coverage.
+
+## RF-024 Mesh Controller Test Ownership (2026-09-28 UTC)
+
+Eight mesh controller/runtime contract tests now live in an owned
+`controller_tests::mesh_contracts` module with explicit state/share/capability
+fixture imports. Six differential entry points remain available to bounded
+API group 1 through feature-gated exports. The pre-edit source and audit under
+`target/rf-controller-mesh-before-module/` account for all 59,932 moved bytes
+and all eight bodies, with only root-owner paths and bounded visibility
+adapted. The full-controller/legacy all-targets compile passes. This
+internal-only step leaves RF-024 open for the other include segments. The
+bounded API group 1 runner now passes after the separately documented fixture
+and storage-error corrections; all 58 rows in its six mesh ledgers pass.
+
+## RF-001 Fixed Firewall Initialization Bound (2026-09-28 UTC)
+
+Known firewall initialization has a five-byte body. The shared parser now
+checks that bound in its header validation, for both plain and obfuscated
+interpretations, before resizing the receive buffer. The regression advertises
+the maximum general frame length while sending only each header and keeping
+the connection open; rejection must arrive without reading a body. This
+closes the oversized known-firewall allocation defect on the existing shared
+port; all 33 listener tests pass. Broader legacy framing ambiguity remains
+open under RF-001.
+
+## Bounded Search Lifecycle Assertion Correction (2026-09-28 UTC)
+
+The bounded API group 1 run stopped before the extracted mesh cases because
+its old search lifecycle test expected cancellation and an explicit status
+update to overwrite an already completed search. `SearchStore` already rejects
+terminal-state changes. The test now checks that completed state survives both
+requests, that its metadata can still update, and that cancellation changes a
+separate active search to `cancelled` before deletion. This internal-only
+fixture correction retains cancellation persistence coverage.
+
+## Mesh Unavailable-Storage Response Classification (2026-09-28 UTC)
+
+The owned mesh differential exposed two stale runtime-failure assertions that
+expected success after closing durable storage. Rollback already occurred,
+but the hash-database error prefix was not classified as storage unavailability,
+and mesh merge bypassed the shared response classifier. Both paths now return
+a sanitized HTTP 503 for unavailable storage; validation errors keep their
+client-error response. The differential checks 503 and missing rolled-back
+entries, and a default focused regression checks both routes retain sequence
+zero and hide closed-pool details. All 650 default daemon library tests pass.
+The shared classifier also covers hash-database reads/writes that already use
+it. This behavior fix has a new release fragment.

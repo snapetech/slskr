@@ -1,3 +1,23 @@
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-1"
+))]
+#[path = "controller_tests/mesh_contracts.rs"]
+mod mesh_contracts;
+#[cfg(any(
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-1"
+))]
+use self::mesh_contracts::{
+    controller_api_differential_mesh_controller_edge_cases,
+    controller_api_differential_mesh_merge_publish_restart_and_concurrency,
+    controller_api_differential_mesh_message_runtime,
+    controller_api_differential_mesh_runtime_and_nat_lifecycle,
+    controller_api_differential_mesh_stats_reflect_real_merge_activity_not_hardcoded_zeros,
+    controller_api_differential_mesh_sync_failure_and_concurrency_contracts,
+};
+
 #[cfg(feature = "full-controller-tests")]
 #[path = "controller_tests/media_contracts.rs"]
 mod media_contracts;

@@ -1015,3 +1015,47 @@ async fn library_snapshot_update_and_delete_share_one_persistence_order() {
     db.close_for_test().await;
     let _ = fs::remove_dir_all(&state.config.state_dir);
 }
+
+#[tokio::test]
+async fn mesh_storage_failure_returns_unavailable_and_rolls_back_hashes() {
+    let db = crate::persistence::DatabaseManager::in_memory()
+        .await
+        .unwrap();
+    let (state, _receiver) = test_state_with_db(
+        MapEnv::default()
+            .with("SLSKR_PERSISTENCE_ENABLED", "true")
+            .with("SLSKR_CONTROLLER_PROFILE", "native"),
+        db.clone(),
+    );
+    db.close_for_test().await;
+    let entry = serde_json::json!({
+        "flacKey": "unavailable-hash", "byteHash": "1".repeat(64), "size": 4096,
+    });
+    for (path, payload) in [
+        (
+            "/api/v0/mesh/merge?fromUser=peer",
+            serde_json::json!({"entries": [entry.clone()]}),
+        ),
+        ("/api/v0/mesh/publish", entry),
+    ] {
+        let response = crate::route_http_request("POST", path, None, &payload.to_string(), &state)
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status, "503 Service Unavailable",
+            "{}",
+            response.body
+        );
+        assert!(response
+            .body
+            .contains("content discovery storage is unavailable"));
+        assert!(!response.body.contains("closed pool"));
+        let discovery = state.content_discovery.read().await;
+        assert!(discovery.lookup_hash("unavailable-hash").is_none());
+        assert_eq!(discovery.latest_seq(), 0);
+    }
+    state.shutdown_managed_tasks().await;
+    let state_dir = state.config.state_dir.clone();
+    drop(state);
+    fs::remove_dir_all(state_dir).expect("remove isolated mesh storage fixture");
+}
