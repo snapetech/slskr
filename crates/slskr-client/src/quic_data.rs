@@ -161,8 +161,8 @@ impl QuicDataServer {
 
 /// One accepted QUIC data connection.
 pub struct QuicDataConnection {
-    connection: quinn::Connection,
-    max_payload_bytes: usize,
+    pub(crate) connection: quinn::Connection,
+    pub(crate) max_payload_bytes: usize,
 }
 
 impl QuicDataConnection {

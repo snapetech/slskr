@@ -116,6 +116,7 @@ def main():
             Path('crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs'),
             Path('crates/slskr/src/dht.rs'), Path('crates/slskr/src/quic_alpn.rs'),
             Path('crates/slskr-client/src/shared_udp.rs'),
+            Path('crates/slskr-client/src/shared_quic_server.rs'),
             Path('crates/slskr-client/src/quic_control.rs'),
             Path('crates/slskr-client/src/quic_data.rs'), Path('vendor/mainline/src/lib.rs'),
             Path('vendor/mainline/src/dht.rs'), Path('vendor/mainline/src/rpc/config.rs'),

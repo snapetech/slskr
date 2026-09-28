@@ -37,11 +37,14 @@ Native/current peer services use one public TCP/UDP port. QUIC control and data
 send directly through that UDP socket and receive classified packets through
 bounded in-process queues, with no loopback backend listeners or per-peer
 forwarding sockets. GRO boundaries, remote addresses, destination IP, and ECN
-are preserved. Actual pinned handshakes exercise both ALPNs together; the
-selector is checked against independently encrypted rustls v1/v2 Initials.
-Binary short headers beginning with `d` are distinguished from valid DHT
-messages. Unknown or incomplete ALPN selection is rejected rather than routed
-to another protocol. Frozen compatibility configuration remains distinct.
+are preserved. One QUIC endpoint negotiates both ALPNs after authenticated
+TLS reassembly, then dispatches control/data connections. Real certificate-
+verified fragmented handshakes exercise both ALPNs from one peer socket;
+native gateway tests independently verify pinned control/data and DHT routing.
+The frozen relay selector is checked against independently encrypted rustls
+v1/v2 Initials. Binary short headers beginning with `d` are distinguished from
+valid DHT messages. Disabled ALPNs are rejected by TLS. Frozen compatibility
+configuration remains distinct.
 
 The shared-UDP implementation gives mainline a clone of the existing public
 socket and delivers DHT-shaped packets through a bounded in-process queue.

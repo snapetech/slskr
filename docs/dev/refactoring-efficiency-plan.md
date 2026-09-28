@@ -6987,3 +6987,42 @@ RF-006 remains open for its broader service ownership inventory. RF-001 still
 needs complete shared-protocol proof; this selector admits a complete known
 Initial ALPN and rejects ambiguous/incomplete selection. It does not claim
 fragmented ClientHello or every legacy transport boundary is verified.
+
+
+## RF-001/RF-006 Negotiated Shared QUIC Endpoint (2026-09-28 UTC)
+
+This supersedes the prior native first-Initial ALPN-selection limitation.
+Native QUIC now has one endpoint for both control/data ALPNs. Quinn owns
+connection IDs and handshake reassembly; dispatch uses the TLS-negotiated
+protocol after a completed handshake. No Initial decryption or ALPN sniffing
+is needed in the native gateway. Multiple connections from one peer UDP
+socket can use different ALPNs without selecting conflicting backend routes.
+Disabled protocols fail at TLS negotiation. Frozen relay inspection remains
+separate and retains the corrected v1/v2 encrypted-packet regression coverage.
+
+Pending endpoint handshakes are capped at 128, each pending buffer at 64 KiB,
+and their aggregate at 8 MiB. The single ingress queue retains its 128-packet
+bound; inbound stream limits and data payload limits remain explicit. The
+existing peer/prefix attempt caps, periodic session sweep, managed accept and
+connection workers, certificate validation/pins, and shared public socket
+remain in force.
+
+Two new client regressions perform real certificate-verified handshakes with
+large ALPN offers that fragment CRYPTO across Initial datagrams. They verify
+both protocols and exact control/data payloads from the same client UDP
+endpoint, and reject a disabled data ALPN. Native daemon integration separately
+checks concurrent pinned control/data sends, DHT reply identity, and socket
+closure/rebinding with DHT enabled and disabled. All 90 client and 681 daemon
+tests pass (the separately exercised mount fixture remains ignored by
+default), strict client/daemon Clippy passes, and the full-controller/legacy
+compile and source/tooling/release gates pass. The static runtime guard rejects
+native first-ALPN inspection and detached QUIC cleanup workers.
+
+Three fresh all-enabled live cycles and three DHT/QUIC-disabled cycles retain
+one peer TCP/UDP port, no backend/forwarding socket, completed CLI probes,
+clean exits at about 0.114 seconds, closed stalled clients, and rebinding.
+Exact source/binary/harness hashes and worktree provenance are retained in
+`benchmarks/artifacts/20260928-rf-single-quic-endpoint-all-enabled-proof.json`
+and `benchmarks/artifacts/20260928-rf-single-quic-endpoint-dht-disabled-proof.json`.
+This closes the native fragmented-ALPN selection limitation; broader RF-001
+TCP/legacy boundaries and RF-006 service inventory remain open.

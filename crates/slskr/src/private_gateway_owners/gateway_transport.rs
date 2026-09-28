@@ -246,81 +246,55 @@ impl Gateway {
         } else {
             None
         };
-        let (control_ingress, control_socket) = shared_socket
+        let (shared_ingress, shared_endpoint_socket) = shared_socket
             .as_ref()
-            .filter(|_| quic_bind.is_some())
+            .filter(|_| quic_bind.is_some() || quic_data_bind.is_some())
             .map(|socket| socket.endpoint())
             .map_or((None, None), |(ingress, socket)| {
                 (Some(ingress), Some(socket))
             });
-        let (data_ingress, data_socket) = shared_socket
-            .as_ref()
-            .filter(|_| quic_data_bind.is_some())
-            .map(|socket| socket.endpoint())
-            .map_or((None, None), |(ingress, socket)| {
-                (Some(ingress), Some(socket))
-            });
-        let quic_listener = match quic_bind {
-            Some(bind) => {
-                let result = match control_socket {
-                    Some(socket) => QuicControlServer::with_socket(
-                        socket,
-                        certificate.clone(),
-                        private_key.clone_key(),
-                    ),
-                    None => {
-                        QuicControlServer::bind(bind, certificate.clone(), private_key.clone_key())
-                    }
-                };
-                match result {
-                    Ok(listener) => Some(listener),
-                    Err(error) if shared_tcp => {
-                        return Err(format!("overlay QUIC control listener failed: {error}"))
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, ?bind, "overlay QUIC control listener unavailable");
-                        None
-                    }
-                }
-            }
-            None => None,
-        };
         let stream_limit = u32::try_from(max_concurrent_streams).unwrap_or(u32::MAX);
-        let quic_data_listener = match quic_data_bind {
-            Some(bind) => {
-                let result = match data_socket {
-                    Some(socket) => QuicDataServer::with_socket(
-                        socket,
-                        certificate,
-                        private_key,
-                        QUIC_DATA_MAX_PAYLOAD_BYTES,
-                        stream_limit,
-                    ),
-                    None => QuicDataServer::bind_with_limits(
-                        bind,
-                        certificate,
-                        private_key,
-                        QUIC_DATA_MAX_PAYLOAD_BYTES,
-                        stream_limit,
-                    ),
-                };
-                match result {
-                    Ok(listener) => Some(listener),
-                    Err(error) if shared_tcp => {
-                        return Err(format!("overlay QUIC data listener failed: {error}"))
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, ?bind, "overlay QUIC data listener unavailable");
-                        None
-                    }
+        let shared_quic_listener = shared_endpoint_socket
+            .map(|socket| {
+                slskr_client::shared_quic_server::SharedQuicServer::with_socket(
+                    socket,
+                    certificate.clone(),
+                    private_key.clone_key(),
+                    quic_bind.is_some(),
+                    quic_data_bind.is_some(),
+                    QUIC_DATA_MAX_PAYLOAD_BYTES,
+                    stream_limit,
+                )
+            })
+            .transpose()
+            .map_err(|error| format!("shared QUIC listener failed: {error}"))?;
+        let quic_listener = quic_bind.filter(|_| !shared_tcp).and_then(|bind| {
+            match QuicControlServer::bind(bind, certificate.clone(), private_key.clone_key()) {
+                Ok(listener) => Some(listener),
+                Err(error) => {
+                    tracing::warn!(%error, ?bind, "overlay QUIC control listener unavailable");
+                    None
                 }
             }
-            None => None,
-        };
+        });
+        let quic_data_listener = quic_data_bind.filter(|_| !shared_tcp).and_then(|bind| {
+            match QuicDataServer::bind_with_limits(
+                bind,
+                certificate,
+                private_key,
+                QUIC_DATA_MAX_PAYLOAD_BYTES,
+                stream_limit,
+            ) {
+                Ok(listener) => Some(listener),
+                Err(error) => {
+                    tracing::warn!(%error, ?bind, "overlay QUIC data listener unavailable");
+                    None
+                }
+            }
+        });
         let shared_quic = shared_socket.map(|socket| SharedQuicTransport {
             socket,
-            control: control_ingress,
-            data: data_ingress,
+            ingress: shared_ingress,
             validated: StdMutex::new(HashMap::new()),
         });
         let listener = if shared_tcp {
@@ -382,6 +356,7 @@ impl Gateway {
             quic_listener: Mutex::new(quic_listener),
             quic_data_listener: Mutex::new(quic_data_listener),
             shared_quic,
+            shared_quic_listener: Mutex::new(shared_quic_listener),
             quic_proxy_backend: (!shared_tcp)
                 .then_some(quic_proxy_bind)
                 .flatten()
@@ -603,6 +578,13 @@ impl Gateway {
                         quic_data_proxy_backend,
                     )
                     .await;
+            });
+        }
+        if let Some(listener) = self.shared_quic_listener.lock().await.take() {
+            let gateway = Arc::clone(&self);
+            let quic_state = Arc::clone(&state);
+            state.managed_background_tasks.spawn(async move {
+                gateway.run_shared_quic(listener, quic_state).await;
             });
         }
         if let Some(quic_listener) = self.quic_listener.lock().await.take() {

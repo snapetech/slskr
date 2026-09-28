@@ -585,11 +585,14 @@ fi
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'
 from pathlib import Path
-for name in ('quic_control.rs', 'quic_data.rs', 'shared_udp.rs'):
+for name in ('quic_control.rs', 'quic_data.rs', 'shared_udp.rs', 'shared_quic_server.rs'):
     path = Path('crates/slskr-client/src') / name
     production = path.read_text().split('#[cfg(test)]', 1)[0]
     if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
         raise SystemExit(f'runtime boundary hardening failed: detached QUIC worker in {path}')
+route = Path('crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs').read_text()
+if 'first_alpn(' in route:
+    raise SystemExit('runtime boundary hardening failed: native QUIC must negotiate ALPN after reassembly')
 PYCODE
 
 printf 'runtime boundary hardening check passed\n'

@@ -4,8 +4,7 @@ use std::sync::Weak;
 
 pub(super) struct SharedQuicTransport {
     pub(super) socket: SharedUdpSocket,
-    pub(super) control: Option<SharedQuicIngress>,
-    pub(super) data: Option<SharedQuicIngress>,
+    pub(super) ingress: Option<SharedQuicIngress>,
     pub(super) validated: StdMutex<HashMap<SocketAddr, Weak<AtomicBool>>>,
 }
 
@@ -38,17 +37,60 @@ impl SharedQuicTransport {
             peers.retain(|remote, flag| sessions.contains_key(remote) && flag.strong_count() > 0);
         }
     }
-
-    fn select(&self, packet: &[u8]) -> Option<SharedQuicIngress> {
-        match quic_alpn::first_alpn(packet).as_deref() {
-            Some("slskdn-overlay") => self.control.clone(),
-            Some("slskdn-overlay-data") => self.data.clone(),
-            _ => None,
-        }
-    }
 }
 
 impl Gateway {
+    pub(super) async fn run_shared_quic(
+        self: Arc<Self>,
+        server: slskr_client::shared_quic_server::SharedQuicServer,
+        state: Arc<crate::AppState>,
+    ) {
+        while let Some(connection) = server.accept().await {
+            let connection = match connection {
+                Ok(connection) => connection,
+                Err(error) => {
+                    tracing::debug!(%error, "shared QUIC connection rejected");
+                    continue;
+                }
+            };
+            let remote = connection.remote_address();
+            if let Some(shared) = self.shared_quic.as_ref() {
+                shared.mark_validated(remote);
+            }
+            if !self
+                .overlay_rate_limiter
+                .check_connection(remote.ip())
+                .allowed
+            {
+                continue;
+            }
+            let Ok(permit) = Arc::clone(&self.connections).try_acquire_owned() else {
+                self.overlay_rate_limiter.record_disconnection(remote.ip());
+                continue;
+            };
+            let admission = GatewayConnectionAdmission {
+                limiter: Arc::clone(&self.overlay_rate_limiter),
+                remote_ip: remote.ip(),
+            };
+            let gateway = Arc::clone(&self);
+            let connection_state = Arc::clone(&state);
+            state.managed_background_tasks.spawn(async move {
+                let _permit = permit;
+                let _admission = admission;
+                match connection {
+                    slskr_client::shared_quic_server::SharedQuicConnection::Control(connection) => {
+                        gateway
+                            .handle_quic_connection(connection, connection_state)
+                            .await;
+                    }
+                    slskr_client::shared_quic_server::SharedQuicConnection::Data(connection) => {
+                        gateway.handle_quic_data_connection(connection).await;
+                    }
+                }
+            });
+        }
+    }
+
     pub(super) async fn run_shared_udp_control(
         &self,
         shared: &SharedQuicTransport,
@@ -106,11 +148,11 @@ impl Gateway {
                     {
                         continue;
                     }
-                    // Bound inspection attempts before decrypting a new Initial.
+                    // Bound new peer attempts before handing Initials to Quinn.
                     let Some(lease) = admission.try_acquire(meta.addr) else {
                         continue;
                     };
-                    let Some(ingress) = shared.select(packet) else {
+                    let Some(ingress) = shared.ingress.clone() else {
                         continue;
                     };
                     let validated = Arc::new(AtomicBool::new(false));
@@ -184,8 +226,7 @@ mod tests {
         let (ingress, _endpoint) = socket.endpoint();
         let shared = SharedQuicTransport {
             socket,
-            control: Some(ingress.clone()),
-            data: None,
+            ingress: Some(ingress.clone()),
             validated: StdMutex::new(HashMap::new()),
         };
         let gate = QuicProxyAdmissionGate::default();

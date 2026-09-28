@@ -55,6 +55,8 @@ pub struct Gateway {
     pub(super) quic_listener: Mutex<Option<QuicControlServer>>,
     pub(super) quic_data_listener: Mutex<Option<QuicDataServer>>,
     pub(super) shared_quic: Option<SharedQuicTransport>,
+    pub(super) shared_quic_listener:
+        Mutex<Option<slskr_client::shared_quic_server::SharedQuicServer>>,
     pub(super) quic_proxy_backend: Option<SocketAddr>,
     pub(super) quic_data_proxy_backend: Option<SocketAddr>,
     pub(super) quic_data_policy: Option<Arc<QuicDataPolicy>>,

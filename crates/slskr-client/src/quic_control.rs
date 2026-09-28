@@ -345,7 +345,7 @@ impl QuicControlServer {
 
 /// One accepted QUIC control connection.
 pub struct QuicControlConnection {
-    connection: quinn::Connection,
+    pub(crate) connection: quinn::Connection,
 }
 
 impl QuicControlConnection {
