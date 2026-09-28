@@ -92,7 +92,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-003 | Distributed mutations previously held `distributed_network` guards across SQLite work, and tree metadata plus child rows used separate transactions. Runtime updates now publish revisioned snapshots; one worker coalesces to the latest bounded snapshot after the state guard is released. `DatabaseManager` loads both tables in one read transaction and replaces both in one write transaction. Graceful shutdown now writes the latest snapshot after managed producers stop. | Database latency previously blocked distributed-state readers, and a failed child replacement could leave branch metadata and child depths from different states. | The current 622-test daemon library suite passes, including cross-table rollback, latest-snapshot persistence, file-backed reopen, startup hydration, and a shutdown-overlap regression proving a registered task is dropped before the final runtime revision reopens from SQLite. A clean-worktree native process proof at `6fb4d2f6` drives a distributed child through the existing peer listener while a real share scan is active. Graceful SIGTERM closes the child and persists the final disconnected tree; after a committed depth-7 update, SIGKILL/restart preserves both tree and child rows with SQLite integrity `ok`. The source/binary/harness-bound artifact is `benchmarks/artifacts/20260927-rf-distributed-shutdown-crash-restart.json`. | Verified locally, retained live shutdown/crash proof |
 | RF-004 | `crates/slskr/src/persistence.rs:4114-4184` was the remaining unbatched ignored-result path; the current batch uses bounded search/identity/result batches, preserves `fallback_attempts`, and adds metadata plus failure-injection rollback regressions. The production `serve` path now calls the shared `load_wishlist_store` startup helper. | Search metadata and large ignored-result updates were previously at risk. | The current 622-test daemon library suite passes. A file-backed close/reopen regression loads through the production startup helper and verifies the rehydrated ignore rule through API reads and search filtering. | Verified locally |
 | RF-005 | `crates/slskr-client/src/manager.rs:179-224` previously held the server mutex while awaiting an unbounded `send_server_message`; the first implementation batch now bounds the send and marks the session unusable after timeout/error. | A backpressured server previously blocked every indirect request and could strand the manager. | Full manager suite passes with the non-reading peer and subsequent-request regression. | Verified |
-| RF-006 | `AppState` owns a `ManagedTaskRegistry` backed by a `JoinSet`; long-lived workers, schedulers, listener managers, bridge/relay services, overlay gateway, DHT, signal/version services, Unix/HTTPS accept loops, and their HTTPS/Unix HTTP handlers are registered for joined shutdown. Plain HTTP handlers use a joined request set. Distributed parent and child socket loops now also use the managed task registry. All three listener types share a 256-connection semaphore. | Accepted HTTP work is bounded and tied to listener lifecycle; retained live HTTP/share-scan shutdown proof passes, while clean-runner coverage for other managed services remains absent. | Focused regression proves HTTPS/Unix handlers share capacity and are aborted/joined with the managed registry; existing shutdown-flush and share-scan overlap regressions pass. The retained `55be6aec` live HTTP/share-scan overlap proof passes. Downloaded clean-runner artifacts at `f9a25f9d` and `a43155de` verify shared peer TCP/UDP listener ownership, TLS capacity, client closure, and socket reuse; the latter includes three all-enabled DHT/control/data QUIC cycles with no extra UDP port. Forwarding, script, WebSocket, CLI-probe, and bounded FTP ownership have subsequent local checkpoints; remaining webhook/relay lifecycle work and fresh hosted coverage remain. | In progress; shared gateway hosted proof verified |
+| RF-006 | `AppState` owns a `ManagedTaskRegistry` backed by a `JoinSet`; long-lived workers, schedulers, listener managers, bridge/relay services, overlay gateway, DHT, signal/version services, Unix/HTTPS accept loops, and their HTTPS/Unix HTTP handlers are registered for joined shutdown. Plain HTTP handlers use a joined request set. Distributed parent and child socket loops now also use the managed task registry. All three listener types share a 256-connection semaphore. | Accepted HTTP work is bounded and tied to listener lifecycle; retained live HTTP/share-scan shutdown proof passes, while clean-runner coverage for other managed services remains absent. | Focused regression proves HTTPS/Unix handlers share capacity and are aborted/joined with the managed registry; existing shutdown-flush and share-scan overlap regressions pass. The retained `55be6aec` live HTTP/share-scan overlap proof passes. Downloaded clean-runner artifacts at `f9a25f9d` and `a43155de` verify shared peer TCP/UDP listener ownership, TLS capacity, client closure, and socket reuse; the latter includes three all-enabled DHT/control/data QUIC cycles with no extra UDP port. Forwarding, script, WebSocket, CLI-probe, and bounded FTP ownership have subsequent local checkpoints; joined relay cancellation cleanup and interrupted webhook outcomes have additional local checkpoints; complete service-inventory review and fresh hosted coverage remain. | In progress; shared gateway hosted proof verified |
 | RF-007 | The share-index worker owns the cancellation token with the scan permit, checks it during filesystem traversal, returns `SHARE_SCAN_CANCELLED_ERROR`, and refuses to publish partial snapshots. Configuration reloads and runtime share-setting changes now share an index persistence turn; generation checks reject completed scans built from older settings before SQLite replacement or live publication. | Cancelled or stale rebuilds cannot replace a newer live or durable share index, and a settings reload preserves its pending-rescan state. | Focused shutdown and watched-reload regressions pass. A clean-worktree native process run at `55be6aec` observed a real 20,000-file scan during SIGTERM, returned 503 to the in-flight scan request, exited zero in 0.114 seconds, retained zero partial SQLite share rows, and reopened with zero files. The retained source/binary/harness-bound proof is `benchmarks/artifacts/20260927-rf-shutdown-overlap.json`. | Verified locally, retained live shutdown proof |
 
 ### P1 CI, Release, And Packaging
@@ -7246,3 +7246,40 @@ Validation: 701 daemon tests pass with one default-ignored mount fixture;
 strict daemon Clippy and full-controller/legacy all-targets compilation pass.
 Source/log hashes, reservation limit, and cancellation scope are retained in
 `benchmarks/artifacts/20260928-rf-relay-connection-cleanup.json`.
+
+## RF-006 Interrupted Webhook Outcome Reconciliation (2026-09-28 UTC)
+
+After joined delivery-worker shutdown, queued webhook records are reconciled
+as failed with an explicit unknown-outcome reason. Startup performs the same
+reconciliation after startup validation and before accepting work, covering
+unclean interruption. The `no-start` path returns before reconciliation.
+This records that local confirmation did not complete; it does not assert
+that the remote endpoint received nothing and does not send another request.
+Confirmed success/failure records, attempts, response data, and timestamps
+are retained. A partial index contains only queued records, avoiding a scan
+through archived delivery outcomes on shutdown/restart.
+
+A real SQLite reopen regression verifies interrupted record recovery,
+idempotence, preserved terminal outcomes/data/attempts, and use of the queued
+index in the query plan. A daemon-state regression verifies worker cancellation
+before reconciliation and the persisted shutdown reason. Original sources
+are backed up under ignored `target/rf-webhook-reconciliation-source-backup`.
+This closes the local cancelled-delivery persistence gap identified by the
+webhook ownership checkpoint. Fresh hosted service evidence and the complete
+RF-006 audit remain separate work; no native transport port is added.
+
+Validation: 703 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and recovery scope are retained in
+`benchmarks/artifacts/20260928-rf-webhook-outcome-reconciliation.json`.
+
+## RF-006 Completed Hosted Single-Port Matrix (2026-09-28 UTC)
+
+CI run `36390159596` at `a43155de` completed successfully across all eleven
+jobs: Rust, production web, Linux AArch64, Linux/musl x64/arm64, macOS
+x64/arm64, Windows x64, and package/deployment surfaces. The exact GitHub
+job/step receipt and link/hash to the downloaded all-enabled single-port
+artifact are retained in
+`benchmarks/artifacts/20260928-rf-hosted-a431-complete-matrix.json`.
+This is a definitive successful matrix for the shared-QUIC/DHT and forwarding
+source; subsequent lifecycle commits require their own hosted completion.

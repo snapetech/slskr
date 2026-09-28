@@ -2042,6 +2042,10 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
+        query("CREATE INDEX IF NOT EXISTS idx_webhook_logs_queued ON webhook_logs(status) WHERE status = 'queued'")
+            .execute(&self.pool)
+            .await?;
+
         query(
             "CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_timestamp ON webhook_logs(webhook_id, timestamp DESC)",
         )

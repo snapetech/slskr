@@ -353,6 +353,17 @@ impl AppState {
         self.ftp_uploads.close();
         self.relay_cleanup.close();
         self.managed_background_tasks.shutdown().await;
+        if let Some(database) = self.db.as_ref() {
+            let _turn = self.webhook_persistence_lock.lock().await;
+            if let Err(error) = database
+                .fail_unconfirmed_webhook_logs(
+                    "delivery outcome unknown: daemon shut down before confirmation",
+                )
+                .await
+            {
+                eprintln!("[WEBHOOK] Failed to reconcile cancelled deliveries: {error}");
+            }
+        }
         self.relay.write().await.protocol.shutdown_connections();
         self.port_forwarding.shutdown().await;
         if let Some(gateway) = self.private_gateway.as_ref() {

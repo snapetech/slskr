@@ -200,6 +200,21 @@ impl DatabaseManager {
         Ok(result.rows_affected())
     }
 
+    /// Reconcile queued deliveries after all their workers have stopped.
+    /// Remote delivery may have happened; only its local outcome is unknown.
+    pub async fn fail_unconfirmed_webhook_logs(
+        &self,
+        reason: &str,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let result = query(
+            "UPDATE webhook_logs SET status = 'failed', error_message = ? WHERE status = 'queued'",
+        )
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Get webhook logs for a specific webhook
     pub async fn get_webhook_logs(
         &self,

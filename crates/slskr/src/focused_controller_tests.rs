@@ -31,3 +31,6 @@ mod ftp_admission;
 
 #[path = "focused_controller_tests/relay_cleanup.rs"]
 mod relay_cleanup;
+
+#[path = "focused_controller_tests/webhook_reconciliation.rs"]
+mod webhook_reconciliation;

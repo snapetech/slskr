@@ -124,6 +124,16 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         return Ok(());
     }
     config.validate_controller_startup_hardening()?;
+    if let Some(database) = db.as_ref() {
+        database
+            .fail_unconfirmed_webhook_logs(
+                "delivery outcome unknown: daemon restarted before confirmation",
+            )
+            .await
+            .map_err(|error| {
+                format!("failed to reconcile interrupted webhook deliveries: {error}")
+            })?;
+    }
     let share_index = if config.controller_no_share_scan {
         ShareIndexSnapshot::uninitialized(&config)
     } else if let Some(db) = db.as_ref() {

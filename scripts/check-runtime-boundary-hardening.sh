@@ -657,6 +657,19 @@ if 'protocol.shutdown_connections()' not in state:
     raise SystemExit('runtime boundary hardening failed: relay registrations must clear after shutdown')
 PYRELAY
 
+python3 - <<'PYWEBHOOK'
+from pathlib import Path
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('fail_unconfirmed_webhook_logs(') < state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: webhook outcomes must reconcile after joining workers')
+startup = Path('crates/slskr/src/daemon_serve.rs').read_text()
+if 'fail_unconfirmed_webhook_logs(' not in startup:
+    raise SystemExit('runtime boundary hardening failed: missing interrupted webhook recovery')
+schema = Path('crates/slskr/src/persistence.rs').read_text()
+if 'idx_webhook_logs_queued' not in schema:
+    raise SystemExit('runtime boundary hardening failed: missing queued webhook reconciliation index')
+PYWEBHOOK
+
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'
 from pathlib import Path
