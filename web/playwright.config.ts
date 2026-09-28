@@ -9,9 +9,9 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
 
   testDir: './e2e',
-  // A clean checkout may need one serialized optimized Rust build before the
-  // first real-node fixture can start. The workspace's pinned release profile
-  // can exceed five minutes on a cold runner.
+  // A clean checkout can need one shared debug Rust build before real nodes
+  // start. Each owned build command has a ten-minute deadline, with cleanup
+  // before the last canceled node's stop() returns.
   timeout: 900_000,
   use: {
     headless: process.env.HEADLESS !== 'false',
@@ -21,6 +21,6 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   // Each local worker can own a real Rust node; serialize them to avoid
-  // concurrent release builds and port/fixture ownership races.
+  // concurrent builds and port/fixture ownership races.
   workers: process.env.CI || shouldLaunchNodes() ? 1 : 2,
 });

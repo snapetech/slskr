@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-28",
+  "rf": [
+    "RF-006",
+    "RF-066"
+  ],
+  "baseCommit": "e7d0dd6a7c21cb2b04cf636d9da23f997e602603",
+  "sourceSha256": {
+    "web/e2e/harness/BuildOwner.ts": "466f447c3ab5431bf2d9d1ff89ae6c088957b1a94989e962fece94299f6a23f3",
+    "web/e2e/harness/SlskrNode.ts": "f9b7093886febc1ca4a02e6a937998928ed3e346508209ae5345530b3a53c076",
+    "web/e2e/harness-lifecycle.spec.ts": "ca43413eca027cba31192804c0a633b2c6694ef26d67a2ed5c6a1085fd44e081",
+    "web/playwright.config.ts": "61039c561ad1c8f3f561058f7f1346198b53132417e0e640429389e90bc94385"
+  },
+  "validation": {
+    "utilityTests": "11 passed",
+    "targetedTypeScript": "passed",
+    "eslint": "TypeScript harness files ignored; not counted",
+    "posixDescendant": "actual Node parent and descendant cancelled; descendant reaped before assertion",
+    "windowsCommandTree": "not yet validated on Windows",
+    "freshHosted": "pending"
+  },
+  "evidence": {
+    "target/rf-e2e-owned-build-utility.log": "6d3b2b50fa7e2d31d11ad941d1b5c22a30801c015861d6fee89ba22c305e26af",
+    "target/rf-e2e-owned-build-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "constraints": {
+    "nativePeerPort": "one numeric TCP/UDP peer port per node",
+    "commandDeadlineMs": 600000,
+    "posixKillEscalationMs": 5000,
+    "lastConsumer": "cancels and joins child close",
+    "otherConsumers": "build retained"
+  },
+  "remaining": "Complete blocking-work inventory, Windows command-tree proof, and later hosted acceptance remain open."
+}

@@ -1,10 +1,100 @@
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, utimes, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, utimes, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
 import { buildOutputIsFresh, nativePeerEnvironment, SlskrNode } from './harness/SlskrNode';
+import { runOwnedCommand, SharedBuildOwner } from './harness/BuildOwner';
+
+test('owned commands preserve failures, bound deadlines, and accept retries', async () => {
+  const signal = new AbortController().signal;
+  await expect(runOwnedCommand(process.execPath, ['-e', 'process.exit(7)'], process.cwd(), signal)).rejects.toThrow('code 7');
+  await expect(runOwnedCommand('slskr-intentionally-missing-command', [], process.cwd(), signal)).rejects.toThrow();
+  await expect(runOwnedCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], process.cwd(), signal, 100)).rejects.toThrow('build deadline');
+  await runOwnedCommand(process.execPath, ['-e', 'process.exit(0)'], process.cwd(), signal);
+});
+
+test('shared builds cancel only after their last consumer leaves and can rebuild', async () => {
+  const owner = new SharedBuildOwner();
+  const first = new AbortController();
+  const second = new AbortController();
+  let executions = 0;
+  let buildSignal: AbortSignal | undefined;
+  let complete!: () => void;
+  const build = async (signal: AbortSignal) => {
+    executions += 1;
+    buildSignal = signal;
+    await new Promise<void>((resolve) => { complete = resolve; });
+  };
+  const a = owner.run(first.signal, build);
+  const b = owner.run(second.signal, build);
+  const aRejected = expect(a).rejects.toThrow('first cancelled');
+  await expect.poll(() => executions).toBe(1);
+  first.abort(new Error('first cancelled'));
+  await aRejected;
+  expect(buildSignal?.aborted).toBe(false);
+  const bRejected = expect(b).rejects.toThrow('last cancelled');
+  second.abort(new Error('last cancelled'));
+  expect(buildSignal?.aborted).toBe(true);
+  let settled = false;
+  void b.catch(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(settled).toBe(false);
+  complete();
+  await bRejected;
+  await owner.run(new AbortController().signal, async () => { executions += 1; });
+  expect(executions).toBe(2);
+});
+
+test('stopping a node cancels and joins its actual pending build command', async () => {
+  const node = new SlskrNode({ nodeName: 'owned-build', shareDir: '' });
+  const root = await mkdtemp(path.join(tmpdir(), 'slskr-command-owner-'));
+  const pidFile = path.join(root, 'pid');
+  const internal = node as unknown as {
+    awaitBuild(owner: SharedBuildOwner, build: (signal: AbortSignal) => Promise<void>): Promise<void>;
+  };
+  const pending = internal.awaitBuild(new SharedBuildOwner(), (signal) => runOwnedCommand(process.execPath, ['-e', `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`], process.cwd(), signal));
+  const rejected = expect(pending).rejects.toThrow('Node stopped during build');
+  try {
+    await expect.poll(async () => {
+      try { return await readFile(pidFile, 'utf8'); } catch { return ''; }
+    }).not.toBe('');
+    const pid = Number(await readFile(pidFile, 'utf8'));
+    await node.stop();
+    await rejected;
+    expect(() => process.kill(pid, 0)).toThrow();
+    await node.stop();
+  } finally {
+    await node.stop();
+    await rejected;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('POSIX cancellation terminates the owned command descendant', async () => {
+  test.skip(process.platform === 'win32', 'POSIX process group proof; Windows uses taskkill /T');
+  const root = await mkdtemp(path.join(tmpdir(), 'slskr-command-tree-'));
+  const pidFile = path.join(root, 'descendant-pid');
+  const cancellation = new AbortController();
+  const descendant = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`;
+  const parent = `const {spawn} = require('child_process'); const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {stdio: 'inherit'}); process.on('SIGTERM', () => child.kill('SIGTERM')); child.on('close', () => process.exit(0));`;
+  const pending = runOwnedCommand(process.execPath, ['-e', parent], process.cwd(), cancellation.signal);
+  const rejected = expect(pending).rejects.toThrow('cancel tree');
+  try {
+    await expect.poll(async () => {
+      try { return await readFile(pidFile, 'utf8'); } catch { return ''; }
+    }).not.toBe('');
+    const pid = Number(await readFile(pidFile, 'utf8'));
+    cancellation.abort(new Error('cancel tree'));
+    await rejected;
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    cancellation.abort(new Error('cancel tree'));
+    await rejected;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('ignored build directories do not invalidate a fresh binary', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'slskr-build-freshness-'));

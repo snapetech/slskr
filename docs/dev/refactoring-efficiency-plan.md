@@ -7505,3 +7505,26 @@ The failed hosted receipt, source/log hashes, and local proof scope are retained
 in `benchmarks/artifacts/20260928-rf-windows-smoke-native-cwd.json`; originals
 remain in ignored `target/rf-windows-smoke-source-backup`. Fresh actual Windows
 Smoke and hosted actionlint completion are still required before closure.
+
+## RF-006/RF-066 Owned E2E Build Commands (2026-09-28 UTC)
+
+Shared Cargo/npm promises previously had no deadline or cancellation owner.
+`BuildOwner.ts` now owns commands with a ten-minute deadline, POSIX process-group
+termination (TERM then KILL after five seconds), and Windows PID-scoped
+`taskkill /T /F` on cancellation. Command promises settle after child close;
+POSIX completion also removes remaining descendants from the owned group.
+Each node owns a build cancellation signal and joins its pending build waits
+before stop returns. Sharing is limited to the running build: one canceled
+consumer leaves other consumers intact, while the last consumer cancels and
+waits for cleanup. A subsequent stale build can run again instead of reusing
+a permanently resolved static promise. Cargo still runs directly with the
+pinned workspace configuration; no compiler shim or memory cap is introduced.
+
+Eleven fixture/lifecycle utility regressions pass, including real child close,
+real POSIX descendant cancellation/reaping, command deadline/failure, shared
+consumer cancellation, retry, and build freshness. A targeted TypeScript check
+passes. ESLint does not cover these TypeScript harness files, so its ignored-file
+output is not counted as lint proof. Actual Windows command-tree cleanup and
+fresh hosted utility completion remain required; the local POSIX receipt does
+not establish those. Source originals remain in ignored
+`target/rf-e2e-command-owner-source-backup` and Git history.

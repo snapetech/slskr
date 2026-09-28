@@ -2,6 +2,7 @@ import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
+import { runOwnedCommand, SharedBuildOwner } from './BuildOwner';
 import { ensureFixtures, getRepoRootFromCwd } from '../fixtures/ensure-fixtures';
 
 export type NodeConfig = {
@@ -90,31 +91,6 @@ async function waitForTcpListen(
 function tail(text: string, lines: number = 200): string {
   const allLines = text.split('\n');
   return allLines.slice(-lines).join('\n');
-}
-
-async function runCommand(
-  command: string,
-  args: string[],
-  cwd: string,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: process.env,
-      stdio: 'inherit',
-    });
-
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(
-          new Error(`${command} ${args.join(' ')} exited with code ${code}`),
-        );
-      }
-    });
-  });
 }
 
 const BUILD_OUTPUT_DIRECTORIES = new Set([
@@ -233,9 +209,13 @@ async function getListenSummaryForPid(pid: number): Promise<string> {
  * - Optional flags (no_connect for CI determinism)
  */
 export class SlskrNode {
-  private static webBuildPromise: Promise<void> | null = null;
+  private static webBuildOwner = new SharedBuildOwner();
 
-  private static binaryBuildPromise: Promise<void> | null = null;
+  private static binaryBuildOwner = new SharedBuildOwner();
+
+  private buildCancellation = new AbortController();
+
+  private pendingBuilds = new Set<Promise<void>>();
 
   private process: ChildProcess | null = null;
 
@@ -297,24 +277,20 @@ export class SlskrNode {
     }
   }
 
-  private async ensureBinaryBuild(repoRoot: string): Promise<void> {
-    if (!SlskrNode.binaryBuildPromise) {
-      SlskrNode.binaryBuildPromise = (async () => {
-        try {
-          await runCommand(
-            'cargo',
-            ['build', '--locked', '--bin', 'slskr'],
-            repoRoot,
-          );
-        } catch (error) {
-          // Allow a retry if the first attempt fails.
-          SlskrNode.binaryBuildPromise = null;
-          throw error;
-        }
-      })();
+  private async awaitBuild(owner: SharedBuildOwner, build: (signal: AbortSignal) => Promise<void>): Promise<void> {
+    const pending = owner.run(this.buildCancellation.signal, build);
+    this.pendingBuilds.add(pending);
+    try {
+      await pending;
+    } finally {
+      this.pendingBuilds.delete(pending);
     }
+  }
 
-    await SlskrNode.binaryBuildPromise;
+  private async ensureBinaryBuild(repoRoot: string): Promise<void> {
+    await this.awaitBuild(SlskrNode.binaryBuildOwner, (signal) =>
+      runOwnedCommand('cargo', ['build', '--locked', '--bin', 'slskr'], repoRoot, signal),
+    );
   }
 
   /**
@@ -338,28 +314,16 @@ export class SlskrNode {
     }
 
     console.log('[E2E] Web source is newer than the available bundle; rebuilding web assets.');
-    if (!SlskrNode.webBuildPromise) {
-      SlskrNode.webBuildPromise = (async () => {
-        try {
-          const webRoot = path.join(repoRoot, 'web');
-          const nodeModulesPath = path.join(webRoot, 'node_modules');
-
-          try {
-            await fs.access(nodeModulesPath);
-          } catch {
-            await runCommand('npm', ['ci', '--legacy-peer-deps'], webRoot);
-          }
-
-          await runCommand('npm', ['run', 'build'], webRoot);
-        } catch (error) {
-          // Allow a retry if the first attempt fails.
-          SlskrNode.webBuildPromise = null;
-          throw error;
-        }
-      })();
-    }
-
-    await SlskrNode.webBuildPromise;
+    await this.awaitBuild(SlskrNode.webBuildOwner, async (signal) => {
+      const webRoot = path.join(repoRoot, 'web');
+      const nodeModulesPath = path.join(webRoot, 'node_modules');
+      try {
+        await fs.access(nodeModulesPath);
+      } catch {
+        await runOwnedCommand('npm', ['ci', '--legacy-peer-deps'], webRoot, signal);
+      }
+      await runOwnedCommand('npm', ['run', 'build'], webRoot, signal);
+    });
 
     try {
       await fs.access(webBuildPath);
@@ -925,6 +889,8 @@ export class SlskrNode {
    */
   async stop(): Promise<void> {
     this.stopRequested = true;
+    this.buildCancellation.abort(new Error('Node stopped during build'));
+    await Promise.allSettled([...this.pendingBuilds]);
     const child = this.process;
     if (child && child.exitCode === null && child.signalCode === null) {
       await new Promise<void>((resolve) => {
