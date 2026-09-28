@@ -21,6 +21,9 @@ source_files=(
   crates/slskr/src/virtual_soulfind_v2_controller.rs
   crates/slskr/src/daemon_serve.rs
   crates/slskr/src/external_visualizer_processes.rs
+  crates/slskr/src/core_dump_process.rs
+  crates/slskr/src/local_stream_file.rs
+  crates/slskr/src/script_process_group.rs
   crates/slskr/src/share_stream_limits.rs
   crates/slskr/src/soulfind_bridge_runtime.rs
   crates/slskr/src/legacy_route_dispatch.rs

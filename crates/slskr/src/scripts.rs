@@ -12,8 +12,7 @@ use tokio::{
     time,
 };
 
-#[path = "script_process_group.rs"]
-mod script_process_group;
+use crate::script_process_group;
 
 use crate::config::{ControllerProfile, ScriptIntegrationSettings};
 

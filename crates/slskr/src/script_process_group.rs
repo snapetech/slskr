@@ -7,6 +7,12 @@ pub(super) fn configure(command: &mut tokio::process::Command) {
     let _ = command;
 }
 
+#[cfg(target_os = "linux")]
+pub(super) fn configure_blocking(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
 pub(super) struct ProcessGroup {
     #[cfg(unix)]
     pid: Option<rustix::process::Pid>,

@@ -644,7 +644,7 @@ pub(super) async fn open_relay_controller_stream(
         file,
         length: metadata.len(),
         content_type: preview_stream_content_type(&filename).to_owned(),
-        cleanup_path: Some(path),
+        cleanup_path: Some(path.into()),
     })
 }
 

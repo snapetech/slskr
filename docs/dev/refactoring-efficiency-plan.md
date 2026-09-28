@@ -7683,3 +7683,35 @@ proof are retained in
 `benchmarks/artifacts/20260928-rf-shared-peer-advertisement.json`. Originals
 remain in Git and ignored `target/rf-shared-advertisement-source-backup`. This
 fix does not resolve the previously retained dual-valid legacy wire ambiguity.
+
+## RF-006 Owned Diagnostic Child and Temporary Stream Cleanup (2026-09-28 UTC)
+
+The Linux dump path returned directly on `try_wait()` error without killing
+or reaping the child or resetting its ptrace authorization. `core_dump_process.rs`
+now owns the child, process group, permission and partial output. Every failure
+return and unwind goes through cleanup; a reaped leader immediately disarms
+numeric process-group targeting. Successful output is explicitly retained.
+Integration scripts and dumps reuse the same process-group guard, with safe
+standard-library process-group creation and no unsafe code.
+
+Dump admission permits one blocking worker and stays inside that worker after
+HTTP requester cancellation. This also serializes Linux's process-wide ptrace
+authorization. The existing 60-second child deadline remains. Temporary local
+stream files now live in `local_stream_file.rs`; an owned cleanup path survives
+cloned consumers and removes abandoned output on final drop. It covers returned
+dump, mesh-preview and relay files without changing their response contracts.
+Cleanup failures are logged; mounted filesystem calls still have no finite
+completion proof, and running blocking workers remain outside daemon registry
+shutdown joins. RF-006 is not closed by these changes.
+
+Validation for the diagnostic/stream ownership batch passes 722 daemon tests
+(one ignored mounted-filesystem fixture), strict all-target Clippy and
+full-controller/legacy all-target compilation. Three freshly rebuilt actual
+all-enabled single-peer-port shutdown cycles pass. Five new regressions cover
+actual child reap/output ownership, cancellation retaining the blocking-worker
+permit and last-consumer temporary-file cleanup. They do not invoke real gcore
+or grant ptrace permission. Source/log hashes and the complete transport proof
+are retained in
+`benchmarks/artifacts/20260928-rf-diagnostic-child-stream-ownership.json`.
+Original sources are retained in Git and ignored
+`target/rf-core-dump-owner-source-backup`.

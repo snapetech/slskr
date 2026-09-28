@@ -31,6 +31,8 @@ mod controller_storage;
 mod controller_storage_preflight;
 mod controller_status;
 mod controller_yaml;
+#[cfg(target_os = "linux")]
+mod core_dump_process;
 mod credential_store;
 mod daemon_runtime_setup;
 mod daemon_serve;
@@ -56,6 +58,9 @@ mod hash_db_store;
 mod http_connection;
 mod http_server;
 mod incoming_share_store;
+mod local_stream_file;
+use local_stream_file::LocalStreamFile;
+mod script_process_group;
 mod integration_runtime_state;
 mod integration_target;
 mod interest_store;
@@ -2133,13 +2138,6 @@ fn conversation_messages_path(path: &str) -> Option<&str> {
     path.strip_prefix("/api/conversations/")?
         .strip_suffix("/messages")
         .filter(|username| !username.is_empty() && !username.contains('/'))
-}
-
-struct LocalStreamFile {
-    file: fs::File,
-    length: u64,
-    content_type: String,
-    cleanup_path: Option<PathBuf>,
 }
 
 fn search_target_static(target: &str) -> &'static str {
