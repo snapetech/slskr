@@ -6540,3 +6540,21 @@ admission. All 660 default daemon tests, strict all-targets Clippy, and the
 full-controller/legacy-route all-targets feature compile pass. The operator
 fragment records the lifecycle correction. Broader RF-006 clean-runner proof
 for the remaining managed services remains open.
+
+
+## Dashboard Hosted Coverage Gate Repair (2026-09-28 UTC)
+
+Hosted run `36369051212` failed only the dashboard branch coverage threshold:
+38 tests passed, but branch coverage was 54.21% against the required 55%.
+The webhook lifecycle suite now exercises loading, invalid envelopes, create
+validation and refresh, cancellation, confirmed deletion with encoded IDs,
+test delivery, and failed mutations preserving existing rows. Explicit DOM
+cleanup isolates the administrative page tests. The URL input and icon actions
+have accessible names; loading and errors expose status and alert semantics.
+
+All 48 dashboard tests pass. Coverage is 75.36% statements, 63.45% branches,
+71.2% functions, and 79.4% lines, with every threshold unchanged. Type checking,
+ESLint, production build, and bundle budgets pass. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-dashboard-webhook-lifecycle.json`; the release
+fragment records the accessible controls. This fixes the observed local
+reproduction; exact-tip hosted validation remains pending. No port was added.

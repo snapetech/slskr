@@ -157,7 +157,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
     }
   };
 
-  if (loading) return <div className="text-center text-gray-500">Loading webhooks...</div>;
+  if (loading) return <div role="status" className="text-center text-gray-500">Loading webhooks...</div>;
 
   return (
     <div className="space-y-6">
@@ -173,7 +173,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-red-800">{error}</p>
         </div>
       )}
@@ -183,8 +183,9 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
           <h3 className="text-lg font-semibold mb-4">Create Webhook</h3>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">URL</label>
+              <label htmlFor="webhook-url" className="block text-sm font-medium text-gray-700 mb-2">URL</label>
               <input
+                id="webhook-url"
                 type="url"
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
@@ -258,12 +259,14 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleTestWebhook(webhook.id)}
+                    aria-label={`Send test webhook to ${webhook.url}`}
                     className="p-2 hover:bg-blue-100 rounded text-blue-600"
                   >
                     <TestTube className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDeleteWebhook(webhook.id)}
+                    aria-label={`Delete webhook ${webhook.url}`}
                     className="p-2 hover:bg-red-100 rounded text-red-600"
                   >
                     <Trash2 className="w-4 h-4" />
