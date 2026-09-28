@@ -649,9 +649,7 @@ pub(super) fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         .or_else(|| {
             if controller_profile == ControllerProfile::Native
                 && current_upstream_behavior
-                && advanced_networking.dht.enabled
                 && advanced_networking.mesh.enabled
-                && advanced_networking.mesh.enable_dht
                 && advanced_networking.mesh.enable_overlay
             {
                 // Current upstream owns the mesh TCP handshake on the

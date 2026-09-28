@@ -187,7 +187,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
 | RF-070 | Council count files had no scan date/commit and checks regenerated only when a report was missing. | Stale counts could pass active-backlog checks. | `run-council-scan.sh` stamps the report; `check-council-freshness.sh` validates date and the SHA-256 digest of tracked scan inputs across the report, inventory, and backlog, with a negative test and all-phases/remediation wiring. Generated records are excluded so committing them cannot invalidate their own stamp, including on shallow CI checkouts. | Verified locally |
-| RF-071 | The audit PASS matrix records a SHA but not toolchain/node/npm versions, lock hashes, or retained artifact links. | A clean checkout cannot reproduce the evidence exactly. | The collector validates source/run identity, observed tool versions, required lock/config and artifact hashes, and worktree state. The GitHub Rust gate now retains metadata, coverage summary, and the Web entry point for 30 days with a direct job-summary link. Twelve regressions and local policy gates pass; retain its exact-tip hosted result. | In progress; hosted retention wired |
+| RF-071 | The audit PASS matrix records a SHA but not toolchain/node/npm versions, lock hashes, or retained artifact links. | A clean checkout cannot reproduce the evidence exactly. | The collector validates source/run identity, observed tool versions, required lock/config and artifact hashes, and worktree state. The GitHub Rust gate now retains metadata, coverage summary, and the Web entry point for 30 days with a direct job-summary link. Twelve regressions and local policy gates pass. The successful Rust job at `37f2e049` retained the artifact; downloaded metadata, artifact hashes, and all seven lock/three configuration hashes match that exact clean checkout. | Verified main-gate hosted retention |
 | RF-072 | `docs/live-interop-test-matrix.md:39,119` referenced absent `web/e2e/live-surfaces.spec.ts`; the current batch updates it to maintained specs and keeps historical results explicitly dated. | Operators previously could not reproduce the stated live matrix. | Docs freshness and maintained Playwright pass locally. A fresh 2026-09-27 live interop run passed four login, one local-peer, and two social probes; its sanitized result and raw TSV hashes are in `benchmarks/artifacts/20260927-live-interop-summary.md`. Retained hosted artifact links remain open. | In progress; local live matrix passed |
 | RF-073 | `scripts/run-release-gate.sh:69-74` makes the slskd API compatibility smoke opt-in; `docs/release.md:41-63` intentionally assigns that smoke to scheduled/manual Live Parity. The current batch now labels the skipped local check as a certification artifact requirement. | This is a policy boundary, not a code defect, but release certification could be misread if artifact freshness was not visible. | Keep the opt-in behavior and require a retained scheduled artifact for certification. | In progress, policy |
 
@@ -6692,3 +6692,40 @@ policy, and package matrix gates pass. Evidence is retained in
 `benchmarks/artifacts/20260928-rf-hosted-reproducibility-retention.json`.
 Exact-tip hosted artifact validation remains RF-071 work; this wiring is not
 yet a hosted receipt. No production port was added.
+
+
+## RF-006 Single-Port Gateway Without DHT (2026-09-28 UTC)
+
+Current native TCP sharing no longer depends on DHT enablement. Overlay bind
+selection, startup projection, and the shared-listener predicate agree when
+DHT or mesh DHT is disabled. The existing peer listener carries both ordinary
+peer initialization and mesh TLS; gateway UDP uses the same port number.
+Frozen profiles and explicit bind choices retain their existing contracts.
+
+The daemon library suite passes 668 tests, strict Clippy passes, and the full
+controller/legacy configuration compiles. The bounded live harness completes
+three isolated daemon cycles with DHT disabled: one peer TCP listener, UDP on
+that same port, established and partial TLS clients closed during graceful
+shutdown, exit zero, and immediate TCP/UDP rebind. Three completed TLS
+handshakes occupy the per-IP capacity and a fourth client is rejected. The
+fixture's existing HTTP API listener is separate from the peer transport;
+no new production port was introduced. Shutdown takes approximately 0.114
+seconds locally. Six helper regressions and audit/workflow policy gates pass.
+
+The harness always kills and reaps its owned daemon before saving logs on
+failure. CI now runs and retains the three-cycle proof inside the reproducibility
+artifact. Its hosted result remains pending. Evidence is retained under
+`benchmarks/artifacts/20260928-rf-shared-tcp-shutdown-proof.json`.
+Broader managed-service clean-runner coverage remains RF-006 work.
+
+## RF-071 Downloaded Hosted Receipt (2026-09-28 UTC)
+
+The Rust job at `37f2e049` completed successfully in run `36379384611`.
+The actual `ci-reproducibility-rust` artifact was downloaded and validated:
+metadata records a clean source checkout, all retained file hashes match,
+and seven lock plus three configuration hashes match that exact Git commit.
+Observed Cargo, Rust, Node, npm, and Python versions are retained, together
+with immutable run and artifact links, in
+`benchmarks/artifacts/20260928-rf-hosted-reproducibility-receipt.json`.
+RF-071 main-gate hosted metadata retention is verified. This receipt does not
+certify the later single-port change or substitute for its hosted execution.

@@ -123,6 +123,12 @@ jobs:
       - run: npm --prefix dashboard run test:coverage
       - run: npm --prefix dashboard run build
       - run: npm --prefix dashboard run test:bundle-budget
+      - name: Prove shared peer gateway shutdown
+        run: |
+          cargo build --locked -p slskr --bin slskr
+          python3 scripts/run-shared-tcp-shutdown-proof.py \
+            --output target/reproducibility/shared-tcp-shutdown.json \
+            --cycles 3
       - name: Collect reproducibility evidence
         run: |
           python3 scripts/collect-reproducibility-metadata.py \
@@ -130,6 +136,7 @@ jobs:
             --artifact-name ci-reproducibility-rust \
             --artifact dashboard/coverage/coverage-summary.json \
             --artifact web/build/index.html \
+            --artifact target/reproducibility/shared-tcp-shutdown.json \
             --validate
       - name: Retain reproducibility evidence
         id: reproducibility-artifact
@@ -138,6 +145,7 @@ jobs:
           name: ci-reproducibility-rust
           path: |
             target/reproducibility/ci-rust.json
+            target/reproducibility/shared-tcp-shutdown.json
             dashboard/coverage/coverage-summary.json
             web/build/index.html
           if-no-files-found: error

@@ -169,6 +169,34 @@ fn current_native_networking_defaults_consolidate_the_public_tcp_endpoint() {
 }
 
 #[test]
+fn current_native_tcp_sharing_is_independent_of_dht_enablement() {
+    for (dht_enabled, mesh_dht_enabled) in [(false, true), (true, false), (false, false)] {
+        let file: crate::config::FileConfig = serde_yaml::from_str(&format!(
+            "dht:\n  enabled: {dht_enabled}\nmesh:\n  enable_dht: {mesh_dht_enabled}\n"
+        ))
+        .unwrap();
+        let env = MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "native")
+            .with("SLSKR_PARITY_PROFILE", "current")
+            .with("SLSKD_NO_CONNECT", "true")
+            .with("SLSKR_AUTH_DISABLED", "true")
+            .with("SLSKR_LISTENER_BIND", "127.0.0.1:51000")
+            .with("SLSK_LISTEN_PORT", "51000");
+        let config = crate::config::AppConfig::from_layers(None, file, &env).unwrap();
+        assert_eq!(config.dht_enabled, dht_enabled);
+        assert_eq!(config.advanced_networking.mesh.enable_dht, mesh_dht_enabled);
+        assert_eq!(
+            config.overlay_bind,
+            Some("127.0.0.1:51000".parse().unwrap())
+        );
+        assert!(config.shared_mesh_tcp());
+        assert_eq!(config.advanced_networking.dht.overlay_port, 51000);
+        assert!(config.obfuscated_listener_bind.is_none());
+        assert_eq!(config.obfuscated_advertised_port, Some(51000));
+    }
+}
+
+#[test]
 fn native_rejects_loopback_listener_only_when_connecting() {
     let root = std::env::temp_dir().join(format!(
         "slskr-no-connect-validation-{}-{}",

@@ -264,9 +264,7 @@ impl AppConfig {
         )?;
         let current_shared_mesh_tcp = controller_profile == ControllerProfile::Native
             && current_upstream_behavior
-            && dht_enabled
             && advanced_networking.mesh.enabled
-            && advanced_networking.mesh.enable_dht
             && advanced_networking.mesh.enable_overlay
             && listener_bind
                 .as_deref()
@@ -710,9 +708,7 @@ impl AppConfig {
     pub fn shared_mesh_tcp(&self) -> bool {
         if self.controller_profile != ControllerProfile::Native
             || !self.current_upstream_behavior
-            || !self.dht_enabled
             || !self.advanced_networking.mesh.enabled
-            || !self.advanced_networking.mesh.enable_dht
             || !self.advanced_networking.mesh.enable_overlay
         {
             return false;
