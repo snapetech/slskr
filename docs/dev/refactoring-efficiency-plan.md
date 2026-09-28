@@ -6577,3 +6577,24 @@ port was added. The release fragment records the operational lifecycle fix.
 Tunnel readers, proxy-session workers, outbound metadata cleanup, and broader
 clean-runner service evidence remain RF-006 work; this checkpoint does not
 claim their completion.
+
+
+## Nested Audit Memory Guard Repair (2026-09-28 UTC)
+
+Regenerating the missing React browser ledger exposed a guard nesting defect:
+the Python audit already ran in a 4 GiB, zero-swap cgroup, but its guarded Node
+build also received a 4 GiB virtual-address ceiling. Node failed to reserve
+WebAssembly memory before compilation. A separately guarded build succeeded,
+confirming the nesting path caused the failure.
+
+Nested commands now reuse verified inherited limits. Linux validation checks
+the actual cgroup `memory.max` and `memory.swap.max`, rather than trusting a
+unit name or environment marker. Smaller nested requests still establish
+their requested limit. Spoofed-marker, fallback, tighter-nesting, environment,
+working-directory, Node heap, and real cgroup regressions pass; shell syntax,
+process policy, and the complete audit-tooling gate pass.
+
+The browser ledger regeneration is progressing in Chromium under the bounded
+cgroup; complete UI evidence remains pending. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-nested-process-memory-guards.json`. Rust
+commands continue to use Cargo directly without these wrappers.
