@@ -105,6 +105,20 @@ for expected in \
   fi
 done
 
+for expected in \
+  'publish:' \
+  'type: boolean' \
+  'default: true' \
+  'if: inputs.publish' \
+  'timeout-minutes: 20' \
+  'release-assets/chocolatey-validation.json' \
+  'retention-days: 30'; do
+  if ! rg -n -F -- "$expected" .github/workflows/publish-chocolatey.yml >/dev/null; then
+    printf 'workflow release policy check failed: Chocolatey validation contract missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
 if rg -n -F 'path: target/live-interop/**' .github/workflows/live-parity.yml; then
   printf 'workflow release policy check failed: live parity artifacts must exclude the credential file\n' >&2
   status=1

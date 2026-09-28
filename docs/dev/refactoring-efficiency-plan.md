@@ -124,7 +124,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-027 | `web/e2e/README.md:58-60` previously used `cd src/web` and referenced absent fixture scripts/schema. The current batch adds a root wrapper, schema checker, corruption regression, updates E2E paths, serializes real-node workers, and permits a cold optimized build to finish. | Documented E2E setup previously was broken and zero-download fixture fetch could report success. | Serialized E2E passes 14 tests; 9 media-dependent tests skip because optional media is absent. | Verified with optional-media gap |
 | RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Validate workflow policy and a clean package runner before marking verified. | In progress |
 | RF-029 | `.github/workflows/release-publish.yml:625-638` intentionally targets the existing `snapetech/homebrew-slskdn` compatibility tap, while `docs/dev/release-channels.md:15-18` named `snapetech/homebrew-slskr`. | Channel documentation was stale, but the publication target was not shown to be wrong. | Release-channel documentation now names the actual compatibility tap and preserves the explicit target boundary. | Verified locally, docs |
-| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. A daily/manual workflow now retains four real-browser mock scenarios, screenshots, and source-bound receipts for 30 days under memory/swap/task/runtime limits. Its hosted retained result remains pending. | In progress; nightly retention wired |
+| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. A daily/manual workflow now retains four real-browser mock scenarios, screenshots, and source-bound receipts for 30 days under memory/swap/task/runtime limits. The successful manual hosted run `36382238277` at `3f0b6010` retained all four reports and 84 screenshots; downloaded audit hashes match the clean checkout receipt. The same workflow is scheduled daily. | Verified hosted browser retention |
 | RF-031 | The release gate invokes the remediation baseline and differential checks, but the universal replacement acceptance document points to retained local artifacts and the release path does not run the full live transport/lifecycle manifest. | Historical acceptance evidence could be mistaken for fresh release evidence. | The acceptance document now explicitly labels the 2026-08-20 closure as historical and requires fresh release-gate/live artifacts for current certification. | Verified locally, policy explicit |
 
 ### P2 Efficiency And Structural Boundaries
@@ -6825,3 +6825,29 @@ The full daemon suite passes 672 tests with the separately exercised mounted
 filesystem test ignored by default; strict Clippy passes. The runtime guard
 rejects detached spawn calls in the three live-soak production owners.
 Broader RF-006 managed-service clean-runner coverage remains open.
+
+
+## RF-030 Downloaded Hosted Browser Receipt (2026-09-28 UTC)
+
+The manually dispatched daily-workflow runner at `3f0b6010` completed
+successfully in run `36382238277`. Its actual artifact was downloaded and
+verified: the receipt records the exact clean checkout, the harness hash
+matches that Git commit, and all four audit hashes match the downloaded
+reports. The success report has 84 desktop/mobile route checks and all 84
+referenced screenshots are present. Every scenario declares zero synthetic
+sweeps and no audit errors. The receipt and immutable artifact link are in
+`benchmarks/artifacts/20260928-rf-hosted-react-nightly-receipt.json`.
+RF-030's browser retention scope is verified. This manual execution of the
+daily workflow does not claim a scheduled event already occurred, deployed
+device proof, or credentialed interop certification.
+
+## RF-028 Validation-Only Chocolatey Dispatch (2026-09-28 UTC)
+
+The existing manual Chocolatey workflow gains a boolean `publish` input.
+Its default preserves the existing publication behavior; `publish=false`
+runs the same actual release download, checksum validation, tag/version
+rendering, `choco pack`, and nupkg smoke without executing the push step.
+It retains the nupkg, checksums, and source/tag/archive/package-bound receipt
+for 30 days. A 20-minute job deadline bounds this package runner. Local
+workflow/package policy and PowerShell parser checks pass. A clean Windows
+validation-only run remains required before RF-028 is closed.
