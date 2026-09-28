@@ -1,3 +1,4 @@
+#[cfg(target_arch = "wasm32")]
 use super::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -18,8 +19,13 @@ pub(super) async fn fetch_text(window: &web_sys::Window, url: &str) -> Result<St
     Ok(text.as_string().unwrap_or_default())
 }
 
-#[cfg(target_arch = "wasm32")]
-const TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS: f64 = 200.0;
+#[cfg(any(target_arch = "wasm32", test))]
+const TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS: f64 = 1_000.0;
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn transfer_speeds_request_can_be_reused(requested_at: f64, now: f64) -> bool {
+    now >= requested_at && now - requested_at < TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS
+}
 
 #[cfg(target_arch = "wasm32")]
 std::thread_local! {
@@ -38,7 +44,7 @@ pub(super) fn fetch_text_request(window: &web_sys::Window, url: &str) -> js_sys:
     TRANSFER_SPEEDS_REQUEST_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some((requested_at, request)) = cache.as_ref() {
-            if now >= *requested_at && now - *requested_at < TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS {
+            if transfer_speeds_request_can_be_reused(*requested_at, now) {
                 return request.clone();
             }
         }
@@ -90,4 +96,32 @@ pub(super) async fn fetch_text_with_method_and_headers(
     }
     let text = wasm_bindgen_futures::JsFuture::from(response.text()?).await?;
     Ok(text.as_string().unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn player_and_system_requests_share_a_bounded_initial_snapshot() {
+        assert!(transfer_speeds_request_can_be_reused(1_000.0, 1_000.0));
+        assert!(transfer_speeds_request_can_be_reused(1_000.0, 1_343.2));
+        assert!(transfer_speeds_request_can_be_reused(1_000.0, 1_999.0));
+        assert!(!transfer_speeds_request_can_be_reused(1_000.0, 2_000.0));
+        assert!(!transfer_speeds_request_can_be_reused(1_000.0, 20_000.0));
+    }
+
+    #[test]
+    fn request_cache_rejects_clock_reversal_and_non_finite_times() {
+        assert!(!transfer_speeds_request_can_be_reused(1_000.0, 999.0));
+        assert!(!transfer_speeds_request_can_be_reused(f64::NAN, 1_000.0));
+        assert!(!transfer_speeds_request_can_be_reused(
+            1_000.0,
+            f64::INFINITY
+        ));
+        assert!(!transfer_speeds_request_can_be_reused(
+            f64::INFINITY,
+            f64::INFINITY
+        ));
+    }
 }

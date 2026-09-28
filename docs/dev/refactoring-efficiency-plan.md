@@ -122,7 +122,7 @@ structural improvement to execute only after higher-priority work is stable.
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
 | RF-027 | `web/e2e/README.md:58-60` previously used `cd src/web` and referenced absent fixture scripts/schema. The current batch adds a root wrapper, schema checker, corruption regression, updates E2E paths, serializes real-node workers, and permits a cold optimized build to finish. | Documented E2E setup previously was broken and zero-download fixture fetch could report success. | Serialized E2E passes 14 tests; 9 media-dependent tests skip because optional media is absent. | Verified with optional-media gap |
-| RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Validate workflow policy and a clean package runner before marking verified. | In progress |
+| RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Workflow/package policy and eight actual PowerShell checksum regressions pass. Clean Windows validation-only run `36383308751` downloads and checks the actual `release-v0.2.40` asset, packs/smokes the nupkg, and retains it. Downloaded package/archive hashes, installer URL/checksum, and version are verified; no package was pushed. | Verified clean Windows package runner |
 | RF-029 | `.github/workflows/release-publish.yml:625-638` intentionally targets the existing `snapetech/homebrew-slskdn` compatibility tap, while `docs/dev/release-channels.md:15-18` named `snapetech/homebrew-slskr`. | Channel documentation was stale, but the publication target was not shown to be wrong. | Release-channel documentation now names the actual compatibility tap and preserves the explicit target boundary. | Verified locally, docs |
 | RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. A daily/manual workflow now retains four real-browser mock scenarios, screenshots, and source-bound receipts for 30 days under memory/swap/task/runtime limits. The successful manual hosted run `36382238277` at `3f0b6010` retained all four reports and 84 screenshots; downloaded audit hashes match the clean checkout receipt. The same workflow is scheduled daily. | Verified hosted browser retention |
 | RF-031 | The release gate invokes the remediation baseline and differential checks, but the universal replacement acceptance document points to retained local artifacts and the release path does not run the full live transport/lifecycle manifest. | Historical acceptance evidence could be mistaken for fresh release evidence. | The acceptance document now explicitly labels the 2026-08-20 closure as historical and requires fresh release-gate/live artifacts for current certification. | Verified locally, policy explicit |
@@ -6865,3 +6865,35 @@ workflow PowerShell block, covering both valid spellings, the binary marker,
 and missing, duplicated, wrong-hash, foreign-directory, and suffix entries.
 A fresh hosted validation remains required; the first failure is not credited
 as successful package proof.
+
+
+## RF-028 Downloaded Windows Package Receipt (2026-09-28 UTC)
+
+Validation-only run `36383308751` at workflow source `23e53097` passed on
+Windows against the actual existing `release-v0.2.40` release. The nupkg and
+receipt were downloaded. Its package hash matches; the independently
+downloaded Windows release archive matches the published SHA256SUMS entry;
+the packed installer contains the fully qualified tag/asset URL and exact
+archive hash, and the nuspec records version 0.2.40. The receipt reports
+`publishRequested=false`. Evidence and the immutable artifact link are in
+`benchmarks/artifacts/20260928-rf-hosted-chocolatey-validation-receipt.json`.
+RF-028 clean package-runner validation is verified. This is verification of
+an existing released asset, not publication or certification of a new release.
+
+## RF-063/RF-073 Native Speed Snapshot Sharing (2026-09-28 UTC)
+
+The first maintained Live Parity run found two requests for transfer speeds
+on System, at 240–343 ms intervals: the native player's initial request and
+the System endpoint catalogue load outlasted the 200 ms sharing window. The
+one-entry Promise cache now shares that initial speed snapshot for at most
+one second. It expires at the boundary and rejects reversed/non-finite time
+inputs. The product can display a cached speed snapshot for up to one second.
+
+Two temporal regressions execute in the native test target; the Rust Web
+suite passes 88 tests, strict Clippy and WASM compilation pass. A fresh actual
+Chromium audit passes all 15 desktop/mobile route pairs with zero errors:
+System makes exactly one speed request and stays at its unchanged 39-request
+budget on both viewports. Source-bound mock evidence is retained in
+`benchmarks/artifacts/20260928-rf-native-transfer-speed-request-sharing.json`.
+This does not close deployed accessibility or credentialed interop scope.
+A fresh retained Live Parity result is still required for RF-073.

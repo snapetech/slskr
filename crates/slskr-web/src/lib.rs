@@ -150,7 +150,7 @@ use self::workspace_action_mounting::*;
 mod workspace_table_controls;
 #[cfg(target_arch = "wasm32")]
 use self::workspace_table_controls::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 #[path = "rustymilk_ui_owners/browser_http_requests.rs"]
 mod browser_http_requests;
 #[cfg(target_arch = "wasm32")]
