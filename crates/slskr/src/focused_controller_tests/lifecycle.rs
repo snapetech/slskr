@@ -1,6 +1,87 @@
 use super::fixtures::*;
 
 #[tokio::test]
+async fn asynchronous_swarm_routes_reject_admission_after_shutdown() {
+    for profile in ["slskd", "slskdn"] {
+        let (state, _receiver) =
+            test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", profile));
+        state.shutdown_managed_tasks().await;
+        let body = serde_json::json!({
+            "filename": "stopped.flac", "size": 4,
+            "expectedHash": "00".repeat(32),
+            "sources": [
+                {"username": "first", "url": "http://0.0.0.0:1/file"},
+                {"username": "second", "url": "http://0.0.0.0:2/file"}
+            ]
+        })
+        .to_string();
+        for path in [
+            "/api/multisource/swarm/async",
+            "/api/v0/multisource/swarm/async",
+        ] {
+            let response = crate::route_http_request("POST", path, None, &body, &state)
+                .await
+                .expect("stopped swarm route");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{profile} {path}"
+            );
+        }
+        let jobs = state.multisource.read().await;
+        assert_eq!(jobs.list().len(), 2);
+        assert!(jobs.list().iter().all(|job| job.status == "failed"));
+        drop(jobs);
+        fs::remove_dir_all(&state.config.state_dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn swarm_admission_after_shutdown_fails_without_creating_output() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    state.shutdown_managed_tasks().await;
+    let request = crate::multisource::SwarmRequest {
+        filename: "stopped.flac".to_owned(),
+        file_size: 4,
+        expected_hash: Some("00".repeat(32)),
+        output_path: None,
+        chunk_size: 2,
+        sources: Vec::new(),
+    };
+    let id = "stopped-job".to_owned();
+    let output = state.config.state_dir.join("stopped.flac");
+    state
+        .multisource
+        .write()
+        .await
+        .insert(crate::multisource::new_job(
+            id.clone(),
+            &request,
+            "stopped.flac".to_owned(),
+            crate::unix_timestamp(),
+        ));
+    assert!(
+        !crate::multisource::spawn_managed(
+            &state,
+            id.clone(),
+            request,
+            output.clone(),
+            "stopped.flac".to_owned(),
+        )
+        .await
+    );
+    let jobs = state.multisource.read().await;
+    let job = jobs.get(&id).unwrap();
+    assert_eq!(job.status, "failed");
+    assert_eq!(
+        job.result.as_ref().unwrap().error.as_deref(),
+        Some("daemon is shutting down")
+    );
+    assert!(!output.exists());
+    drop(jobs);
+    fs::remove_dir_all(&state.config.state_dir).unwrap();
+}
+
+#[tokio::test]
 async fn http_listener_connection_tasks_share_capacity_and_join_with_managed_shutdown() {
     use std::sync::atomic::{AtomicBool, Ordering};
 

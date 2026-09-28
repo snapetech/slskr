@@ -349,6 +349,10 @@ impl AppState {
 
     pub(super) async fn shutdown_managed_tasks(&self) {
         self.managed_background_tasks.shutdown().await;
+        self.multisource.write().await.fail_unfinished(
+            "daemon shut down before the swarm completed",
+            unix_timestamp(),
+        );
         if let Err(error) = self.persist_distributed_shutdown_snapshot().await {
             eprintln!("distributed persistence shutdown flush failed: {error}");
         }

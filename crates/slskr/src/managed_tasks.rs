@@ -26,6 +26,13 @@ impl ManagedTaskRegistry {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.try_spawn(future);
+    }
+
+    pub(super) fn try_spawn<F>(&self, future: F) -> bool
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let mut tasks = self
             .tasks
             .lock()
@@ -33,7 +40,9 @@ impl ManagedTaskRegistry {
         if let Some(tasks) = tasks.as_mut() {
             while tasks.try_join_next().is_some() {}
             tasks.spawn(future);
+            return true;
         }
+        false
     }
 
     pub(super) fn spawn_bounded_http<F>(&self, connections: &Arc<Semaphore>, future: F) -> bool

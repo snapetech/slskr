@@ -6203,3 +6203,22 @@ Together with the four bounded API groups, this validates the selected
 differential runners through their extracted owners. It does not claim execution
 of every opt-in full-controller test. The process exited successfully and was
 reaped. Broader production ownership and lifecycle work remains open.
+
+## RF-006 Managed Asynchronous Swarm Execution (2026-09-28 UTC)
+
+Both asynchronous swarm route paths now register execution with the daemon's
+managed task registry. Admission is atomic with registry closure; a rejected
+request marks only its own job failed and returns HTTP 503. After managed
+workers are aborted and joined, shutdown marks queued/in-progress swarm jobs
+failed while preserving completed/failed jobs. Existing workspace drop cleanup
+removes unpublished temporary chunks when cancellation drops the executor.
+No new listener or port is added. A release fragment records the lifecycle fix.
+
+A real two-source stalled transfer proves managed shutdown removes its
+temporary workspace and rejects subsequent task admission. Bounded source
+waits prevent a stale harness process. Additional tests cover direct stopped
+admission, both async URL forms in both controller profiles, and preservation
+of terminal job records. All 656 default daemon tests, strict daemon
+all-targets Clippy, full-controller/legacy all-targets compile, and bounded API
+group 3 pass. RF-006 remains open for remaining service lifecycles and hosted
+proof.
