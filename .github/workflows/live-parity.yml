@@ -60,7 +60,7 @@ jobs:
           path: |
             target/ux-audit/**
             target/slskr-web/**
-            target/slskd-api-smoke/**
+            target/slskd-api-smoke/compatibility-summary.txt
           if-no-files-found: ignore
 
   credentialed-live-interop:

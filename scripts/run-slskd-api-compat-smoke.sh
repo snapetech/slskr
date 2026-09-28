@@ -12,23 +12,8 @@ if [[ -z "$api_token" ]]; then
   exit 2
 fi
 work_dir="${SLSKR_SLSKD_API_SMOKE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-smoke.XXXXXX")}"
-state_dir="$work_dir/state"
+state_dir=""
 log_file="$work_dir/slskr.log"
-mkdir -p "$state_dir/downloads/foo" "$state_dir/incomplete/foo"
-printf 'download fixture\n' >"$state_dir/downloads/foo.mp3"
-printf 'incomplete fixture\n' >"$state_dir/incomplete/foo.mp3"
-
-pick_free_port() {
-  "$python_bin" - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
-}
-
-http_port="${SLSKR_SLSKD_API_SMOKE_PORT:-$(pick_free_port)}"
-base_url="http://127.0.0.1:$http_port"
 daemon_pid=""
 
 cleanup() {
@@ -36,13 +21,48 @@ cleanup() {
     kill "$daemon_pid" 2>/dev/null || true
     wait "$daemon_pid" 2>/dev/null || true
   fi
+  if [[ -n "$state_dir" ]]; then
+    "$python_bin" - "$state_dir" <<'PY'
+import shutil
+import sys
+
+shutil.rmtree(sys.argv[1], ignore_errors=True)
+PY
+  fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+state_dir="$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-state.XXXXXX")"
+mkdir -p "$work_dir" "$state_dir/downloads/foo" "$state_dir/incomplete/foo"
+printf 'download fixture\n' >"$state_dir/downloads/foo.mp3"
+printf 'incomplete fixture\n' >"$state_dir/incomplete/foo.mp3"
+
+pick_free_port() {
+  "$python_bin" - "$@" <<'PY'
+import socket
+import sys
+
+excluded = {int(value) for value in sys.argv[1:]}
+while True:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    if port not in excluded:
+        print(port)
+        break
+PY
+}
+
+http_port="${SLSKR_SLSKD_API_SMOKE_PORT:-$(pick_free_port)}"
+peer_port="$(pick_free_port "$http_port")"
+base_url="http://127.0.0.1:$http_port"
 
 if [[ -n "${SLSKD_API_PYTHONPATH:-}" ]]; then
   api_pythonpath="$SLSKD_API_PYTHONPATH"
 else
-  api_pythonpath="$work_dir/python"
+  api_pythonpath="$state_dir/python"
   "$python_bin" -m pip install --quiet --target "$api_pythonpath" "slskd-api==$api_version"
 fi
 
@@ -50,7 +70,18 @@ cargo build -q -p slskr
 
 (
   export SLSKR_HTTP_BIND="127.0.0.1:$http_port"
+  export SLSKR_LISTENER_BIND="127.0.0.1:$peer_port"
+  export SLSKR_ADVERTISED_PORT="$peer_port"
+  export SLSKR_OVERLAY_BIND="127.0.0.1:$peer_port"
+  export SLSKR_DHT_PORT="$peer_port"
+  export SLSKR_DHT_ENABLED=false
+  export SLSKR_CONTROLLER_PROFILE=native
+  export SLSKR_PARITY_PROFILE=current
   export SLSKR_STATE_DIR="$state_dir"
+  export XDG_CONFIG_HOME="$state_dir/config"
+  unset SLSKR_CONFIG SLSKR_ADVANCED_NETWORKING_JSON SLSKR_TRUSTED_MESH_PEERS
+  unset SLSKD_SLSK_LISTEN_PORT SLSKD_SLSK_LISTEN_IP_ADDRESS
+  unset SLSKR_OBFUSCATED_LISTENER_BIND SLSKR_OBFUSCATED_ADVERTISED_PORT
   export SLSKR_API_TOKEN="$api_token"
   export SLSKR_AUTH_DISABLED=false
   export SLSKR_REMOTE_FILE_MANAGEMENT=true
@@ -58,18 +89,20 @@ cargo build -q -p slskr
   export SLSKD_PASSWORD=pass
   export SLSKR_AUTO_CONNECT=false
   export SLSKR_RECONNECT=false
+  export SLSKD_NO_HTTPS=true
   export SLSKR_SHARE_FIXTURE="Virtual/Test.flac=42;Virtual/Album/Track.ogg=64"
   exec target/debug/slskr serve
 ) >"$log_file" 2>&1 &
 daemon_pid="$!"
 
-"$python_bin" - "$base_url" "$api_token" "$api_pythonpath" <<'PY'
+"$python_bin" - "$base_url" "$api_token" "$api_pythonpath" "$work_dir/compatibility-summary.txt" <<'PY'
 import inspect
+import os
 import sys
 import time
 import uuid
 
-base_url, api_token, api_pythonpath = sys.argv[1:4]
+base_url, api_token, api_pythonpath, summary_path = sys.argv[1:5]
 sys.path.insert(0, api_pythonpath)
 
 import requests
@@ -639,7 +672,13 @@ if missing or extra:
         f"slskd_api smoke coverage mismatch; missing={missing!r}, extra={extra!r}"
     )
 
-print(f"slskd_api compatibility smoke passed: {len(checks)} calls")
+summary = f"slskd_api compatibility smoke passed: {len(checks)} calls\n" + "\n".join(checks) + "\n"
+flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+summary_fd = os.open(summary_path, flags, 0o600)
+with os.fdopen(summary_fd, "w", encoding="utf-8") as report:
+    report.write(summary)
+
+print(summary.splitlines()[0])
 for check in checks:
     print(check)
 PY

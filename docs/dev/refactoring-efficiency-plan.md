@@ -189,7 +189,7 @@ structural improvement to execute only after higher-priority work is stable.
 | RF-070 | Council count files had no scan date/commit and checks regenerated only when a report was missing. | Stale counts could pass active-backlog checks. | `run-council-scan.sh` stamps the report; `check-council-freshness.sh` validates date and the SHA-256 digest of tracked scan inputs across the report, inventory, and backlog, with a negative test and all-phases/remediation wiring. Generated records are excluded so committing them cannot invalidate their own stamp, including on shallow CI checkouts. | Verified locally |
 | RF-071 | The audit PASS matrix records a SHA but not toolchain/node/npm versions, lock hashes, or retained artifact links. | A clean checkout cannot reproduce the evidence exactly. | The collector validates source/run identity, observed tool versions, required lock/config and artifact hashes, and worktree state. The GitHub Rust gate now retains metadata, coverage summary, and the Web entry point for 30 days with a direct job-summary link. Twelve regressions and local policy gates pass. The successful Rust job at `37f2e049` retained the artifact; downloaded metadata, artifact hashes, and all seven lock/three configuration hashes match that exact clean checkout. | Verified main-gate hosted retention |
 | RF-072 | `docs/live-interop-test-matrix.md:39,119` referenced absent `web/e2e/live-surfaces.spec.ts`; the current batch updates it to maintained specs and keeps historical results explicitly dated. | Operators previously could not reproduce the stated live matrix. | Docs freshness and maintained Playwright pass locally. A fresh 2026-09-27 live interop run passed four login, one local-peer, and two social probes; its sanitized result and raw TSV hashes are in `benchmarks/artifacts/20260927-live-interop-summary.md`. Retained hosted artifact links remain open. | In progress; local live matrix passed |
-| RF-073 | `scripts/run-release-gate.sh:69-74` makes the slskd API compatibility smoke opt-in; `docs/release.md:41-63` intentionally assigns that smoke to scheduled/manual Live Parity. The current batch now labels the skipped local check as a certification artifact requirement. | This is a policy boundary, not a code defect, but release certification could be misread if artifact freshness was not visible. | Keep the opt-in behavior and require a retained scheduled artifact for certification. | In progress, policy |
+| RF-073 | `scripts/run-release-gate.sh:69-74` makes the slskd API compatibility smoke opt-in; `docs/release.md:41-63` intentionally assigns that smoke to scheduled/manual Live Parity. The current batch labels the skipped local check as a certification artifact requirement. | This is a policy boundary, not a code defect, but release certification could be misread if artifact freshness was not visible. | Manual run `36456533118` retained the UI audit artifact but exposed a stale cached Python target that hid `SlskdClient`; a fresh local reproduction confirmed the target collision. The smoke now installs its pinned client into unique temporary state, isolates config/state, keeps generated private keys outside artifacts, disables its unused HTTPS listener, and uses an available loopback port for the shared native peer TCP/UDP listener. The local smoke passes all 91 API calls. A fresh retained hosted run on the fix SHA is still required. | In progress; hosted rerun pending |
 
 ## Continuation Evidence (2026-09-21)
 
@@ -7785,3 +7785,25 @@ filesystem operation already inside a stalled mounted I/O remains unproved and
 is not represented as complete. Current GitHub CI runs for `b9e50c4d` and
 `eef6d46e` are in progress. The GitLab mirror remains blocked by its corrupt
 existing object recorded under RF-008.
+
+## RF-073 Live Parity Smoke Isolation (2026-09-28 UTC)
+
+The manual Live Parity run
+[36456533118](https://github.com/snapetech/slskr/actions/runs/36456533118)
+failed in the `slskd-api` import after pip warned that the pinned package's
+target directories already existed. A clean reproduction showed that an old
+empty `slskd_api` namespace directory shadows the real package when it is
+installed into a restored Cargo target cache. The compatibility smoke now
+installs its pinned dependency into the run's unique temporary state directory.
+
+The smoke reads no per-user configuration and uses a private temporary state
+directory that is deleted at exit. Generated TLS and mesh key material is
+therefore outside the retained artifact tree. The workflow retains only the
+smoke's passing API-call summary, rather than the target subdirectory. Its HTTPS
+listener is disabled because the compatibility calls use the authenticated
+loopback HTTP API. The peer, mesh, and DHT port settings project onto one
+dynamically selected loopback peer port; DHT rendezvous is disabled for this
+offline API smoke. The local run
+passes all 91 public `slskd-api` calls. A fresh hosted Live Parity result on the
+fix SHA remains open; the credentialed public interop job also remains skipped
+while its repository secret is absent.

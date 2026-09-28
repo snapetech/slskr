@@ -77,7 +77,7 @@ for expected in \
   'SLSKR_SLSKD_API_SMOKE_DIR: target/slskd-api-smoke' \
   'SLSKR_SLSKD_API_SMOKE_TOKEN:' \
   'target/ux-audit/**' \
-  'target/slskd-api-smoke/**' \
+  'target/slskd-api-smoke/compatibility-summary.txt' \
   'Credentialed public live interop' \
   'SLSKR_LIVE_INTEROP_ENV: ${{ secrets.SLSKR_LIVE_INTEROP_ENV }}' \
   'scripts/run-live-interop-matrix.sh' \
