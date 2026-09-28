@@ -7,11 +7,19 @@ cd "$repo_root"
 python_bin="${PYTHON:-python3}"
 api_version="${SLSKD_API_VERSION:-0.2.4}"
 api_token="${SLSKR_SLSKD_API_SMOKE_TOKEN:-}"
+work_dir="${SLSKR_SLSKD_API_SMOKE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-smoke.XXXXXX")}"
+mkdir -p "$work_dir"
+summary_path="$work_dir/compatibility-summary.txt"
+"$python_bin" - "$summary_path" <<'PY'
+from pathlib import Path
+import sys
+
+Path(sys.argv[1]).unlink(missing_ok=True)
+PY
 if [[ -z "$api_token" ]]; then
   echo "missing SLSKR_SLSKD_API_SMOKE_TOKEN" >&2
   exit 2
 fi
-work_dir="${SLSKR_SLSKD_API_SMOKE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-smoke.XXXXXX")}"
 state_dir=""
 log_file="$work_dir/slskr.log"
 daemon_pid=""
@@ -35,7 +43,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-state.XXXXXX")"
-mkdir -p "$work_dir" "$state_dir/downloads/foo" "$state_dir/incomplete/foo"
+mkdir -p "$state_dir/downloads/foo" "$state_dir/incomplete/foo"
 printf 'download fixture\n' >"$state_dir/downloads/foo.mp3"
 printf 'incomplete fixture\n' >"$state_dir/incomplete/foo.mp3"
 
@@ -95,7 +103,7 @@ cargo build -q -p slskr
 ) >"$log_file" 2>&1 &
 daemon_pid="$!"
 
-"$python_bin" - "$base_url" "$api_token" "$api_pythonpath" "$work_dir/compatibility-summary.txt" <<'PY'
+"$python_bin" - "$base_url" "$api_token" "$api_pythonpath" "$summary_path" <<'PY'
 import inspect
 import os
 import sys
