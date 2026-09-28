@@ -6923,3 +6923,21 @@ ignored by default. Original files are preserved under the ignored
 `target/rf-shared-udp-source-backup` before editing. This closes the DHT input
 identity defect; current-profile port projection and broader shared QUIC
 layout are being checked separately against the single-port requirement.
+
+
+## RF-006 Shared QUIC Socket Adapter (2026-09-28 UTC)
+
+The client transport now exposes control/data constructors over an existing
+Quinn socket adapter. Shared endpoints send through the public socket and
+receive one classified datagram through an in-process queue; no socket bind
+or relay worker is created by the adapter. The receive owner retains GRO
+stride, remote address, destination IP, and ECN metadata. Independent native
+send pollers preserve concurrent endpoint wakeups. Each queue is capped at
+128 packets of at most 65,535 bytes, reserves capacity before copying, and
+rejects malformed, full, or closed admission without blocking.
+
+Three focused tests verify metadata, real public-port replies, admission
+bounds, and both certificate-pinned ALPN handshakes on one socket. All 88
+client tests and strict all-targets client Clippy pass. This is an internal
+transport prerequisite: daemon startup and routing still need to adopt it
+before the remaining QUIC relay ports can be removed.

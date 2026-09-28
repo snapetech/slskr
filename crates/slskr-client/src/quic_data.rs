@@ -76,6 +76,42 @@ impl QuicDataServer {
         max_payload_bytes: usize,
         max_concurrent_streams: u32,
     ) -> Result<Self, QuicDataError> {
+        let server_config = Self::server_config(certificate, private_key, max_concurrent_streams)?;
+        let endpoint = quinn::Endpoint::server(server_config, bind)
+            .map_err(|error| QuicDataError::Transport(error.to_string()))?;
+        Ok(Self {
+            endpoint,
+            max_payload_bytes: bounded_payload_bytes(max_payload_bytes),
+        })
+    }
+
+    /// Listen through an existing socket adapter with the same stream and payload caps.
+    pub fn with_socket(
+        socket: Arc<dyn quinn::AsyncUdpSocket>,
+        certificate: rustls::pki_types::CertificateDer<'static>,
+        private_key: rustls::pki_types::PrivatePkcs8KeyDer<'static>,
+        max_payload_bytes: usize,
+        max_concurrent_streams: u32,
+    ) -> Result<Self, QuicDataError> {
+        let server_config = Self::server_config(certificate, private_key, max_concurrent_streams)?;
+        let endpoint = quinn::Endpoint::new_with_abstract_socket(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            socket,
+            Arc::new(quinn::TokioRuntime),
+        )
+        .map_err(|error| QuicDataError::Transport(error.to_string()))?;
+        Ok(Self {
+            endpoint,
+            max_payload_bytes: bounded_payload_bytes(max_payload_bytes),
+        })
+    }
+
+    fn server_config(
+        certificate: rustls::pki_types::CertificateDer<'static>,
+        private_key: rustls::pki_types::PrivatePkcs8KeyDer<'static>,
+        max_concurrent_streams: u32,
+    ) -> Result<quinn::ServerConfig, QuicDataError> {
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
@@ -96,12 +132,7 @@ impl QuicDataServer {
             .max_concurrent_uni_streams(quinn::VarInt::from_u32(max_concurrent_streams));
         let mut server_config = server_config;
         server_config.transport_config(Arc::new(transport_config));
-        let endpoint = quinn::Endpoint::server(server_config, bind)
-            .map_err(|error| QuicDataError::Transport(error.to_string()))?;
-        Ok(Self {
-            endpoint,
-            max_payload_bytes: bounded_payload_bytes(max_payload_bytes),
-        })
+        Ok(server_config)
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, QuicDataError> {

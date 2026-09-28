@@ -1,7 +1,7 @@
 # Council Scan Inventory
 
 Scan date: 2026-09-28
-Source digest: 2f1f9a3e6dbe37f8d8956cb9fb8f47232c04831fe4fa03effa9f0f8bc309cbee
+Source digest: 7badb5309a9a48abde3f56f8753a5eee547bb448fa330ace59b9608d8d679184
 
 > Council process upgrades (mirrored from slskNet.Runtime, 2026-05-06): see `bug-council-severity-schema.md`, `bug-council-sibling-search.md`, `bug-council-negative-space.md`, `bug-council-behavior-pinning.md`, and `bug-council-phases.md`. Future sweep rows on this file should adopt the severity/confidence schema; the wire-frame trust boundary is now declared and enforced by `scripts/check-council-negative-space.sh`.
 
@@ -72,7 +72,7 @@ adversarial corpus pass.
 | Protocol count/length candidates | 157 |
 | Protocol scalar emission candidates | 307 |
 | Resolver/raw stream candidates | 1043 |
-| Task/cancellation/lifecycle candidates | 1326 |
+| Task/cancellation/lifecycle candidates | 1337 |
 | Example Web API candidates | 323 |
 
 ### Constructor/mutable collection candidates

@@ -21,6 +21,7 @@ pub mod quic_data;
 pub mod search;
 pub mod server;
 pub mod share_payload;
+pub mod shared_udp;
 pub mod social;
 pub mod stream;
 pub mod transfer;
