@@ -1,0 +1,69 @@
+{
+  "scope": "RF006 shared peer TCP/UDP gateway clean-runner proof; other services remain separate",
+  "sourceCommit": "f9a25f9d331156c99face16bbc86ea9651fb8cfd",
+  "runUrl": "https://github.com/snapetech/slskr/actions/runs/36380983771",
+  "artifactUrl": "https://github.com/snapetech/slskr/actions/runs/36380983771/artifacts/10952049945",
+  "downloadedMetadataAndArtifactHashesMatched": true,
+  "cleanCheckout": true,
+  "proof": {
+    "schemaVersion": 1,
+    "evidenceMode": "live isolated daemon process; not deployed interop proof",
+    "sourceSha": "f9a25f9d331156c99face16bbc86ea9651fb8cfd",
+    "dirtyWorktree": false,
+    "binarySha256": "6caf191597ccb5f375367cb92a5804b6619440ee5f752459e6e0ccb3c23047ec",
+    "harnessSha256": "3e92823cd708c3f2efda9c050b4a71b05dfe12e71678a101db87ac0f92eb9c99",
+    "startedUtc": "2026-09-28T05:24:29.410217+00:00",
+    "dhtEnabled": false,
+    "meshDhtEnabled": false,
+    "quicEnabled": false,
+    "productionPortsAdded": 0,
+    "cycles": [
+      {
+        "cycle": 1,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 1,
+        "perIpCapacityRejectedFourthClient": null,
+        "establishedTlsAwaitingOverlayInit": 1,
+        "certificateSha256": "fee5b6f12bc8af6bf9e7be7d2ccb3e01a3450c28f6473e8c1b3b164697cf5d43",
+        "exitCode": 0,
+        "shutdownSeconds": 0.113591,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      },
+      {
+        "cycle": 2,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 0,
+        "perIpCapacityRejectedFourthClient": true,
+        "establishedTlsAwaitingOverlayInit": 3,
+        "certificateSha256": "29516c5474597b451101ac8054a8361025259384322a61e2a9639d31ce7e6882",
+        "exitCode": 0,
+        "shutdownSeconds": 0.113668,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      },
+      {
+        "cycle": 3,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 1,
+        "perIpCapacityRejectedFourthClient": null,
+        "establishedTlsAwaitingOverlayInit": 1,
+        "certificateSha256": "6e062f86c23b317435309915da8e956ae967dd86024706cc4531884bd6873e51",
+        "exitCode": 0,
+        "shutdownSeconds": 0.113785,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      }
+    ],
+    "success": true
+  }
+}

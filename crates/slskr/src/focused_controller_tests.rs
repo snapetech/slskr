@@ -16,3 +16,6 @@ mod input_bounds;
 mod lifecycle;
 #[path = "focused_controller_tests/transfers.rs"]
 mod transfers;
+
+#[path = "focused_controller_tests/delayed_filesystem.rs"]
+mod delayed_filesystem;
