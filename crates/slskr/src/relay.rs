@@ -1280,6 +1280,11 @@ impl RuntimeState {
         } else {
             self.pending_file_uploads.remove(&key);
         }
+        if !valid && !share {
+            // An invalid attempt still consumes the one-use token. Wake its
+            // owner because this request can no longer complete successfully.
+            Self::fail_file_stream_token(token, "relay upload authorization failed".to_owned());
+        }
         valid.then_some(AuthorizedUpload {
             agent_name,
             filename: request.filename,
@@ -1602,6 +1607,89 @@ pub(crate) fn credential_for_test(secret: &str, agent_name: &str, token: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_file_upload_consumes_token_and_wakes_its_waiter() {
+        let secret = "relay-test-secret-0123456789";
+        let settings = RelaySettings {
+            enabled: true,
+            mode: "controller".to_owned(),
+            controller: crate::config::RelayControllerSettings {
+                address: String::new(),
+                ignore_certificate_errors: false,
+                pinned_spki: String::new(),
+                api_key: String::new(),
+                secret: String::new(),
+                downloads: false,
+            },
+            agents: BTreeMap::from([(
+                "edge".to_owned(),
+                crate::config::RelayAgentSettings {
+                    instance_name: "edge-one".to_owned(),
+                    secret: secret.to_owned(),
+                    cidr: "127.0.0.1/32".to_owned(),
+                },
+            )]),
+        };
+        let mut state = RuntimeState::new();
+        state.registered_agents.insert(
+            "edge-one".to_owned(),
+            AgentRegistration {
+                connection_id: "rejected-upload-test".to_owned(),
+                remote_ip: "127.0.0.1".parse().unwrap(),
+            },
+        );
+        for wrong_credentials in [true, false] {
+            let (token, mut receiver) = state
+                .begin_file_stream("edge-one", "file.flac", 0, 100)
+                .unwrap();
+            let valid_credential = credential_for_target(
+                ControllerProfile::Native,
+                secret,
+                "edge-one",
+                &token.to_string(),
+            );
+            let credential = if wrong_credentials {
+                "invalid"
+            } else {
+                &valid_credential
+            };
+            let filename = if wrong_credentials {
+                "file.flac"
+            } else {
+                "wrong.flac"
+            };
+            assert!(state
+                .validate_file_upload(
+                    &settings,
+                    CredentialScheme::NativeHmacBase64,
+                    token,
+                    filename,
+                    credential,
+                    100
+                )
+                .is_none());
+            assert!(receiver
+                .try_recv()
+                .expect("rejected upload wakes waiter")
+                .is_err());
+            assert!(!state.pending_file_uploads.contains_key(&token.to_string()));
+            assert!(!file_upload_waiters()
+                .lock()
+                .unwrap()
+                .contains_key(&token.to_string()));
+            assert!(state
+                .validate_file_upload(
+                    &settings,
+                    CredentialScheme::NativeHmacBase64,
+                    token,
+                    "file.flac",
+                    &valid_credential,
+                    100
+                )
+                .is_none());
+        }
+    }
 
     fn multipart_fixture(part_count: usize) -> Vec<u8> {
         let mut body = Vec::new();

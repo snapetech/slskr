@@ -25,7 +25,11 @@ where
         .spawn(move || {
             tokio::runtime::Runtime::new()
                 .expect("create large-stack controller test runtime")
-                .block_on(factory())
+                .block_on(async {
+                    tokio::time::timeout(Duration::from_secs(60), factory())
+                        .await
+                        .unwrap_or_else(|_| panic!("bounded controller case timed out: {name}"));
+                })
         })
         .expect("spawn large-stack controller test")
         .join()

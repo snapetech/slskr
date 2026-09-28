@@ -6130,3 +6130,46 @@ bad-channel check also compared a body string directly with a JSON object;
 it now parses the response before comparing the existing error contract.
 Bounded API group 3 passes through the extracted owners. These are internal-only
 fixture repairs; no production behavior changes in this checkpoint.
+
+## RF-001 Shared-Port Random-Key TLS Exclusion (2026-09-28 UTC)
+
+Random obfuscated initialization keys now avoid the `0x16, 0x03` TLS prefix in
+addition to plausible plain frame lengths. An exhaustive unit check covers all
+65,536 keys in that prefix range; the random writer regression checks both
+exclusions. All 359 client tests, including 35 listener tests, and strict
+client all-targets Clippy pass. This uses the existing shared port and has a
+release fragment. Broader legacy framing ambiguity remains open under RF-001.
+
+## RF-024 Bounded API Group 4 Completion And Relay Repairs (2026-09-28 UTC)
+
+All four bounded API groups now execute successfully through the new controller
+owners. Group 4 exposed additional stale assertions: the Spotify fixture now
+calls its real helper owner; restart requests remain current-process latches
+and stay cleared in durable/rehydrated state; controller transfer IDs are
+strings; and audio canonical/dedupe checks now verify exactly the seeded key,
+size, hash, and variant instead of expecting empty populated arrays.
+
+The relay fixture exposed two production defects. Invalid authorization consumed
+its one-use upload token but left its waiter pending; it now wakes the waiter
+with failure immediately, while replay remains rejected. Uploaded staging files
+were opened for writing only and caused bad-file-descriptor errors in the HTTP
+reader; they now retain a readable, rewound original handle after syncing,
+with exclusive creation and private permissions unchanged. Direct regressions
+cover rejected credentials, filename mismatch, token consumption, waiter
+removal, readable bytes, permissions, and overwrite rejection. Both fixes have
+release fragments. Fixture stream/hub waits now have five-second deadlines and
+abort/join HTTP workers on timeout; large-stack controller cases have a
+60-second deadline. The stalled owned process was stopped and reaped.
+
+`benchmarks/artifacts/20260928-rf-controller-owned-api-group-4.json` retains 96
+passing rows across the relay, audio, upload, and core restart ledgers, binary
+and changed-source hashes, command, toolchain, platform, and the working-tree
+evidence scope. All 653 default daemon tests and strict daemon all-targets
+Clippy and the full-controller/legacy all-targets compile pass.
+RF-024 and RF-006 remain open for their broader scopes and remaining gates.
+
+The refreshed council counts are protocol scalars 307, resolver/raw streams
+1,027, and task/lifecycle 1,275. New scalar candidates are bounded key tests;
+the new readback candidate reads a six-byte local staging fixture; lifecycle
+additions are the fixture completion/abort/deadline checks above. These are
+guarded test paths rather than newly accepted production bugs.

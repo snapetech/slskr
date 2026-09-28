@@ -428,10 +428,10 @@ fn write_private_relay_staging_file(
     data: &[u8],
     label: &str,
 ) -> Result<fs::File, String> {
-    use std::io::Write;
+    use std::io::{Seek, Write};
 
     let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
+    options.read(true).write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -443,6 +443,7 @@ fn write_private_relay_staging_file(
     let result = file
         .write_all(data)
         .and_then(|()| file.sync_all())
+        .and_then(|()| file.rewind())
         .map_err(|error| format!("{label} staging write failed: {error}"));
     if let Err(error) = result {
         drop(file);
@@ -698,4 +699,32 @@ pub(super) async fn open_relay_controller_download(
         content_type: "application/octet-stream".to_owned(),
         cleanup_path: None,
     })
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::write_private_relay_staging_file;
+    use std::io::Read;
+
+    #[test]
+    fn relay_staging_handle_is_readable_rewound_and_exclusive() {
+        let directory =
+            std::env::temp_dir().join(format!("slskr-relay-staging-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).expect("create relay staging fixture");
+        let path = directory.join("upload.part");
+        let mut file = write_private_relay_staging_file(&path, b"stream", "fixture").unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .expect("read returned relay handle");
+        assert_eq!(bytes, b"stream");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        assert!(write_private_relay_staging_file(&path, b"replacement", "fixture").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"stream");
+        drop(file);
+        std::fs::remove_dir_all(directory).expect("remove relay staging fixture");
+    }
 }

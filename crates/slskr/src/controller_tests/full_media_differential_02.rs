@@ -1994,7 +1994,26 @@ pub(super) async fn controller_api_differential_audio_canonical_dedupe_and_migra
         response.status == "200 OK"
             && response.content_type.starts_with("application/json")
             && value["recordingId"] == recording_id
-            && entries.is_some_and(|entries| !populated || entries.is_empty())
+            && entries.is_some_and(|entries| {
+                if !populated {
+                    return entries.is_empty();
+                }
+                if entries.len() != 1 {
+                    return false;
+                }
+                if field == "candidates" {
+                    entries[0]["flacKey"] == "audio-differential-key"
+                        && entries[0]["size"] == 123
+                        && entries[0]["fileSha256"] == "c".repeat(64)
+                } else {
+                    entries[0]["hash"] == "c".repeat(64)
+                        && entries[0]["variants"].as_array().is_some_and(|variants| {
+                            variants.len() == 1
+                                && variants[0]["flacKey"] == "audio-differential-key"
+                                && variants[0]["size"] == 123
+                        })
+                }
+            })
     };
 
     for (path, route, field) in [

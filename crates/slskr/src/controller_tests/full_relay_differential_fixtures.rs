@@ -106,13 +106,25 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
             .await
             .expect("write relay stream request");
         let mut response = Vec::new();
-        client
-            .read_to_end(&mut response)
-            .await
-            .expect("read relay stream response");
-        task.await
-            .expect("relay stream HTTP task")
-            .expect("relay stream HTTP response");
+        let read =
+            tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut response)).await;
+        if read.is_err() {
+            task.abort();
+            let _ = task.await;
+            panic!("relay fixture response timed out: {path}");
+        }
+        read.unwrap().expect("read relay stream response");
+        let mut task = task;
+        match tokio::time::timeout(Duration::from_secs(5), &mut task).await {
+            Ok(result) => result
+                .expect("relay stream HTTP task")
+                .expect("relay stream HTTP response"),
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                panic!("relay fixture HTTP worker did not finish: {path}");
+            }
+        }
         response
     }
 
@@ -366,8 +378,9 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
     ))
     .await
     .expect("relay file upload");
-    let uploaded = upload_receiver
+    let uploaded = tokio::time::timeout(Duration::from_secs(5), upload_receiver)
         .await
+        .expect("relay fixture upload completion timed out")
         .expect("relay upload receiver")
         .expect("relay upload result");
     assert_eq!(uploaded.filename, "Upload.flac");
@@ -415,7 +428,7 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
     let runtime_upload = crate::versioned_relay_request(
         "POST",
         &format!("/api/v0/relay/controller/files/{runtime_upload_token}"),
-        upload_body,
+        &upload_body.replace("Upload.flac", "Runtime.flac"),
         &crate::RequestSecurityHeaders {
             content_type: Some("multipart/form-data; boundary=relay".to_owned()),
             x_relay_agent: Some("edge-one".to_owned()),
@@ -427,10 +440,38 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
     )
     .await
     .expect("runtime relay file upload");
-    assert!(runtime_upload_receiver
-        .await
-        .expect("runtime relay upload receiver")
-        .is_err());
+    assert_eq!(runtime_upload.status, "401 Unauthorized");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), runtime_upload_receiver)
+            .await
+            .expect("relay fixture rejected upload completion timed out")
+            .expect("runtime relay upload receiver")
+            .is_err()
+    );
+    let valid_retry = crate::versioned_relay_request(
+        "POST",
+        &format!("/api/v0/relay/controller/files/{runtime_upload_token}"),
+        &upload_body.replace("Upload.flac", "Runtime.flac"),
+        &crate::RequestSecurityHeaders {
+            content_type: Some("multipart/form-data; boundary=relay".to_owned()),
+            x_relay_agent: Some("edge-one".to_owned()),
+            x_relay_credential: Some(crate::relay::credential_for_target(
+                crate::ControllerProfile::Native,
+                &secret,
+                "edge-one",
+                &runtime_upload_token.to_string(),
+            )),
+            remote_addr: Some("127.0.0.1:1".parse().expect("relay remote address")),
+            ..crate::RequestSecurityHeaders::default()
+        },
+        &controller_state,
+    )
+    .await
+    .expect("valid relay upload retry");
+    assert_eq!(
+        valid_retry.status, "401 Unauthorized",
+        "one-use token remains consumed"
+    );
     record!(
         "POST",
         "/api/v0/relay/controller/files/{token}",
@@ -495,10 +536,13 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
         .iter()
         .filter_map(|response| response.as_ref().map(|value| value.status))
         .collect::<Vec<_>>();
-    assert!(concurrent_upload_receiver
-        .await
-        .expect("concurrent relay upload receiver")
-        .is_ok());
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), concurrent_upload_receiver)
+            .await
+            .expect("relay fixture concurrent upload completion timed out")
+            .expect("concurrent relay upload receiver")
+            .is_ok()
+    );
     record!(
         "POST",
         "/api/v0/relay/controller/files/{token}",
@@ -729,9 +773,9 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
     let stream_state = Arc::clone(&controller_state);
     let stream_path = format!("/api/v0/relay/streams/{content_id}?agentName=edge-one");
     let stream_task = tokio::spawn(async move { live_get(stream_state, &stream_path).await });
-    let info_invocation = hub_receiver
-        .recv()
+    let info_invocation = tokio::time::timeout(Duration::from_secs(5), hub_receiver.recv())
         .await
+        .expect("relay fixture info invocation timed out")
         .expect("relay stream info invocation");
     let info_json = serde_json::from_str::<serde_json::Value>(&info_invocation)
         .expect("relay stream info JSON");
@@ -746,9 +790,9 @@ pub(super) async fn controller_api_differential_relay_open_cases_impl() {
         .await
         .protocol
         .complete_file_info("slskdn-relay-connection", info_token, true, 6,));
-    let upload_invocation = hub_receiver
-        .recv()
+    let upload_invocation = tokio::time::timeout(Duration::from_secs(5), hub_receiver.recv())
         .await
+        .expect("relay fixture upload invocation timed out")
         .expect("relay stream upload invocation");
     let upload_json = serde_json::from_str::<serde_json::Value>(&upload_invocation)
         .expect("relay stream upload JSON");

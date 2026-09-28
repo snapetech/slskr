@@ -540,7 +540,8 @@ pub(super) async fn controller_api_differential_integrations_residuals() {
     }
     {
         let (state, _receiver) = test_state_with_env(spotify_env());
-        let connection_path = crate::spotify_connection_path(&state.config.state_dir);
+        let connection_path =
+            crate::spotify_integration::spotify_connection_path(&state.config.state_dir);
         fs::create_dir_all(&connection_path).expect("create Spotify connection conflict");
         let response =
             crate::route_http_request("DELETE", "/api/v0/integrations/spotify", None, "", &state)

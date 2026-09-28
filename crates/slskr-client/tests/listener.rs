@@ -234,7 +234,7 @@ async fn shared_demux_rejects_dual_valid_init_prefix() {
 }
 
 #[tokio::test]
-async fn obfuscated_init_writer_avoids_plain_length_prefixes() {
+async fn obfuscated_init_writer_avoids_plain_length_and_tls_prefixes() {
     let frame = InitMessage::PeerInit {
         username: "peer".to_owned(),
         connection_type: "P".to_owned(),
@@ -248,9 +248,9 @@ async fn obfuscated_init_writer_avoids_plain_length_prefixes() {
         write_obfuscated_init_frame(&mut writer, &frame)
             .await
             .unwrap();
-        assert!(
-            reader.read_u32_le().await.unwrap() as usize > slskr_client::io::DEFAULT_MAX_FRAME_LEN
-        );
+        let key = reader.read_u32_le().await.unwrap();
+        assert!(key as usize > slskr_client::io::DEFAULT_MAX_FRAME_LEN);
+        assert_ne!(key.to_le_bytes()[..2], [0x16, 0x03]);
     }
 }
 

@@ -143,7 +143,7 @@ pub(super) async fn controller_api_differential_controller_upload_lifecycle() {
         "/api/v0/transfers/uploads/{username}/{id}",
         "populated-dynamic-state",
         detail.status == "200 OK"
-            && detail_json["id"] == upload_id
+            && detail_json["id"] == upload_id.to_string()
             && detail_json["bytesTransferred"] == 17
     );
 

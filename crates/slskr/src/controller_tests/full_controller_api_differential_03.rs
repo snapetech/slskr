@@ -1567,8 +1567,8 @@ pub(super) async fn controller_api_differential_controller_core_failure_restart_
         malformed_event.status == "400 Bad Request"
     );
 
-    // Restart is persisted in the real runtime compatibility row and is
-    // recoverable by the same conversion used during application boot.
+    // Restart requests are latches owned by the current process. Durable
+    // compatibility rows and boot rehydration must keep that flag cleared.
     let restart = crate::route_http_request("PUT", "/api/v0/application", None, "{}", &state)
         .await
         .expect("persist slskd restart request");
@@ -1583,8 +1583,9 @@ pub(super) async fn controller_api_differential_controller_core_failure_restart_
         "/api/v0/application",
         "restart-persistence-or-reset",
         restart.status == "204 No Content"
-            && persisted_restart.application_restart_requested
-            && rehydrated_restart.application_restart_requested
+            && state.runtime.read().await.application_restart_requested
+            && !persisted_restart.application_restart_requested
+            && !rehydrated_restart.application_restart_requested
     );
 
     // DELETE is safe to repeat and persists the reset state rather than
