@@ -7310,3 +7310,24 @@ actual supplied or explicitly declared media. The previous wording implying
 Linux codec unavailability was unsupported; missing declarations and the cwd
 bug are independently established causes. This checkpoint does not count
 presence stubs as playback proof or alter native peer transport ports.
+
+## RF-006/RF-066 Native E2E Peer Port and Child Ownership (2026-09-28 UTC)
+
+The real-node E2E harness no longer allocates separate DHT or overlay ports.
+Its TCP listener, overlay bind, and DHT configuration use the same loopback
+peer port, matching the native transport implementation. HTTP remains the
+existing application API service. A shared configuration regression checks
+all four peer settings and rejects invalid ports.
+
+Nodes enter the harness registry before startup; failed starts call stop
+before removal. Stop records cancellation before further process launch,
+waits for a live child's close event, and clears its force-kill timer. An
+actual Node child regression verifies termination and repeated stop; a
+failed-start regression verifies early registration and cleanup. Together
+with fixture discovery, six Playwright utility tests pass without media or
+browser dependencies. CI runs both utility suites. Original harness sources
+are backed up under ignored `target/rf-e2e-single-port-source-backup`.
+
+This checkpoint does not claim cancellation of shared build commands or
+complete RF-006/RF-066 acceptance. Those ownership and playback checks remain
+part of the continuing program.

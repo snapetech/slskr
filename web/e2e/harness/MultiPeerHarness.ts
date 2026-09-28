@@ -33,9 +33,15 @@ export class MultiPeerHarness {
       shareDir,
     });
 
-    await node.start();
     this.nodes.set(name, node);
-    return node;
+    try {
+      await node.start();
+      return node;
+    } catch (error) {
+      await node.stop();
+      this.nodes.delete(name);
+      throw error;
+    }
   }
 
   /**

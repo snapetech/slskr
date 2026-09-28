@@ -14,6 +14,18 @@ export type NodeConfig = {
   shareDir: string | string[]; // Single dir or array for multiple shares
 };
 
+export function nativePeerEnvironment(port: number): NodeJS.ProcessEnv {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('Invalid native peer port');
+  }
+  return {
+    SLSKR_DHT_PORT: String(port),
+    SLSKR_LISTENER_BIND: `127.0.0.1:${port}`,
+    SLSKD_SLSK_LISTEN_PORT: String(port),
+    SLSKR_OVERLAY_BIND: `127.0.0.1:${port}`,
+  };
+}
+
 /**
  * Find a free port on localhost.
  */
@@ -229,9 +241,7 @@ export class SlskrNode {
 
   private soulseekListenPort: number = 0;
 
-  private dhtPort: number = 0;
-
-  private overlayPort: number = 0;
+  private stopRequested = false;
 
   private appDir: string = '';
 
@@ -364,6 +374,7 @@ export class SlskrNode {
    * Start the slskr node process.
    */
   async start(): Promise<void> {
+    if (this.stopRequested) throw new Error('Cannot start a stopped node');
     const repoRoot = this.getRepoRoot();
     const webBuildPath = await this.ensureWebBuild(repoRoot);
 
@@ -409,12 +420,7 @@ export class SlskrNode {
 
     // Allocate a unique Soulseek listen port per node (multi-instance needs this)
     this.soulseekListenPort = await findFreePort();
-    // The DHT UDP socket and the TLS mesh overlay TCP listener both default
-    // to fixed well-known ports (50300/50305) regardless of the Soulseek
-    // listen port — give each test node its own, or it collides with any
-    // other slskr process already running on the host.
-    this.dhtPort = await findFreePort();
-    this.overlayPort = await findFreePort();
+    // Native peer TCP, DHT, and both QUIC protocols share this numeric port.
 
     // Create isolated app directory
     if (!this.config.appDir) {
@@ -475,6 +481,7 @@ export class SlskrNode {
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      ...nativePeerEnvironment(this.soulseekListenPort),
       SLSKD_APP_DIR: this.appDir,
       SLSKD_CONTENT_PATH: contentPath,
       SLSKD_DOWNLOADS_DIR: downloadsDir,
@@ -483,18 +490,15 @@ export class SlskrNode {
       // network; this HTTP endpoint is a same-process stand-in for that
       // push, so it stays off outside e2e runs.
       SLSKDN_E2E_SHARE_ANNOUNCE: '1',
-      SLSKR_DHT_PORT: String(this.dhtPort),
       SLSKD_HTTP_ADDRESS: '127.0.0.1',
       SLSKD_HTTP_PORT: String(this.apiPort),
       SLSKD_INCOMPLETE_DIR: incompleteDir,
       SLSKD_INSTANCE_NAME: this.config.nodeName,
       SLSKD_NO_HTTPS: 'true',
       SLSKD_PASSWORD: nodeCreds.password,
-      SLSKD_SLSK_LISTEN_PORT: String(this.soulseekListenPort),
       SLSKD_SLSK_PASSWORD: nodeCreds.password,
       SLSKD_SLSK_USERNAME: nodeCreds.username,
       SLSKD_USERNAME: nodeCreds.username,
-      SLSKR_OVERLAY_BIND: `127.0.0.1:${this.overlayPort}`,
       // A recipient viewing a share owned by another node fetches its
       // manifest/stream/backfill directly from that node's own API — a
       // genuinely cross-origin request between two node ports. Each test
@@ -518,6 +522,12 @@ export class SlskrNode {
     const stderrPath = path.join(artifactsDir, 'stderr.log');
     const stdoutFd = await fs.open(stdoutPath, 'w');
     const stderrFd = await fs.open(stderrPath, 'w');
+
+    if (this.stopRequested) {
+      await stdoutFd.close();
+      await stderrFd.close();
+      throw new Error('Node startup was stopped before process launch');
+    }
 
     this.process = spawn(binaryPath, ['serve'], {
       cwd: repoRoot,
@@ -912,24 +922,19 @@ export class SlskrNode {
    * Stop the node process and clean up.
    */
   async stop(): Promise<void> {
-    if (this.process) {
-      this.process.kill('SIGTERM');
+    this.stopRequested = true;
+    const child = this.process;
+    if (child && child.exitCode === null && child.signalCode === null) {
       await new Promise<void>((resolve) => {
-        if (this.process) {
-          this.process.on('exit', () => resolve());
-          // Force kill after 5s
-          setTimeout(() => {
-            if (this.process) {
-              this.process.kill('SIGKILL');
-              resolve();
-            }
-          }, 5_000);
-        } else {
+        const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
+        child.once('close', () => {
+          clearTimeout(timer);
           resolve();
-        }
+        });
+        child.kill('SIGTERM');
       });
-      this.process = null;
     }
+    if (this.process === child) this.process = null;
 
     // Cleanup app directory unless KEEP_ARTIFACTS is set
     if (this.appDir && process.env.SLSKR_TEST_KEEP_ARTIFACTS !== '1') {

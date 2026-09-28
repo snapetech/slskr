@@ -113,7 +113,7 @@ jobs:
       - run: npm --prefix web test
       - name: Verify E2E fixture path discovery
         working-directory: web
-        run: npx playwright test e2e/fixture-paths.spec.ts --reporter=line
+        run: npx playwright test e2e/fixture-paths.spec.ts e2e/harness-lifecycle.spec.ts --reporter=line
       - run: npm --prefix web run test:api-lifecycle-coverage
       - run: npm --prefix web run build
       - run: npm --prefix web run test:bundle-budget
