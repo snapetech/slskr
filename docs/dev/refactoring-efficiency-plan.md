@@ -6063,3 +6063,25 @@ and the per-owner audit remain under
 `target/rf-controller-segment-07-before-owners/`. The old include is removed.
 The full-controller/legacy all-targets compile and bounded API group 1 runner
 pass. This is internal-only; RF-024 remains open for the other 28 includes.
+
+## RF-024 Remaining Controller Test Owner Extraction (2026-09-28 UTC)
+
+All 28 remaining flat controller test includes are replaced by domain modules
+and shared fixture owners. Rust syntax spans account for 915 test functions,
+58 helper functions, and every one of the original 5,131,884 bytes before
+formatting. Code-token path changes and visibility insertions are reversed in
+the extraction audit to verify exact source reconstruction; strings and
+comments are preserved. The formatted test-name inventory matches the original
+exactly. The 114 new owners are at most 2,399 lines; the existing manual owners
+remain in place. Shared state, network, federation, persistence, route fixtures,
+and bounded runners have their own modules. Feature guards and the public
+bounded-runner entry point are preserved.
+
+`benchmarks/artifacts/20260928-rf-controller-domain-owner-extraction.json`
+retains the source revision, original file/item hashes, function-to-owner map,
+and formatted module hashes. Snapshots remain under
+`target/rf-controller-domain-owner-backup/`. The Rust hygiene gate now rejects
+flat includes and controller test owners over 2,500 lines. This is internal-only
+work. The full-controller/legacy all-targets compile, runtime boundary hardening,
+formatter, and ownership/hygiene gates pass. RF-024 remains open for its broader
+tracked-source scope; bounded execution gates are recorded after they finish.
