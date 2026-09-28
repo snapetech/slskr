@@ -249,7 +249,7 @@ where
     let mut unknown = None;
     let mut last_error = None;
 
-    // Prefer the shortest valid candidate after rejecting conflicting init headers.
+    // Prefer the shortest valid known candidate after rejecting conflicting init headers.
     // Unknown extension payloads are opaque; if one overlaps a recognized init,
     // the known interpretation preserves peer interoperability because the wire
     // carries no marker that can establish the sender's intended interpretation.
