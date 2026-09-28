@@ -6289,3 +6289,22 @@ strict daemon all-targets Clippy, and full-controller/legacy all-targets compile
 pass. Hygiene caps the aggregate at 300 lines and these owners at 1,200 lines.
 This checkpoint is internal-only. Native Web ownership and other RF-024 scopes
 remain open.
+
+## RF-024 Native Web Contract Test Owners (2026-09-28 UTC)
+
+Replaced the included native Web test module with a real test-module registry.
+All 86 tests now have eleven domain owners, plus one shared fixture owner.
+The registry is 32 lines and the largest owner is 766 lines. RustyMilk runtime,
+preset, geometry, GPU, and shader contracts are owned separately from native
+actions, workflow rendering, response projection, player/search, shell lifecycle,
+and route inventory contracts. Test names and assertions remain intact.
+
+`benchmarks/artifacts/20260928-rf-native-web-test-owner-extraction.json`
+accounts for all 156,690 original bytes and 4,092 original lines, including
+the moved module wrapper, all 93 items, and both shared fixtures. It verifies
+exact reconstruction after reversing visibility and dependency-path relocations.
+The two moved `include_str!` dependencies resolve to their original files with
+matching hashes. All 86 Web tests, strict Web all-targets Clippy, and the locked
+WASM target check pass. Hygiene caps the registry at 100 lines and owners at
+1,000 lines, and forbids a return to flat test includes. This checkpoint is
+internal-only. Production Web action ownership remains open under RF-024.

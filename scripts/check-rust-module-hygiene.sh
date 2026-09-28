@@ -50,6 +50,18 @@ for name, budget in [("config.rs", 400), ("config_file.rs", 300)]:
         violations.append(f"{name}: aggregate and registry exceed the {budget}-line budget")
     if re.search(r"\binclude!\s*\(", registry.read_text()):
         violations.append(f"{name}: flat configuration includes are forbidden")
+web_root = Path("crates/slskr-web/src")
+web_registry = web_root / "web_tests.rs"
+if len(web_registry.read_bytes().splitlines()) > 100:
+    violations.append("web_tests.rs: registry exceeds the 100-line budget")
+if re.search(r"\binclude!\s*\(", web_registry.read_text()):
+    violations.append("web_tests.rs: flat test includes are forbidden")
+if 'include!("web_tests.rs")' in (web_root / "lib.rs").read_text():
+    violations.append("slskr-web/lib.rs: tests must use a real module")
+for file in (web_root / "web_tests").glob("*.rs"):
+    lines = len(file.read_bytes().splitlines())
+    if lines > 1000:
+        violations.append(f"{file}: {lines} lines exceed the 1000-line Web test owner budget")
 if violations:
     raise SystemExit("\n".join(violations))
 print("controller/configuration ownership check passed")

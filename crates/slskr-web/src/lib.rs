@@ -25,4 +25,6 @@ use self::native_transfer_controls::*;
 include!("web_actions.rs");
 include!("search_planning.rs");
 include!("rustymilk_ui.rs");
-include!("web_tests.rs");
+#[cfg(test)]
+#[path = "web_tests.rs"]
+mod tests;
