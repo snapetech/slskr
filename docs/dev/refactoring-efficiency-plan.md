@@ -7511,8 +7511,9 @@ Smoke and hosted actionlint completion are still required before closure.
 Shared Cargo/npm promises previously had no deadline or cancellation owner.
 `BuildOwner.ts` now owns commands with a ten-minute deadline, POSIX process-group
 termination (TERM then KILL after five seconds), and Windows PID-scoped
-`taskkill /T /F` on cancellation. Command promises settle after child close;
-POSIX completion also removes remaining descendants from the owned group.
+`taskkill /T /F` on cancellation. Command promises settle after child close. Numeric process-group targets are
+never signaled after Node reaps their leader; independently detached or orphaned
+descendants are not claimed as joined by this harness.
 Each node owns a build cancellation signal and joins its pending build waits
 before stop returns. Sharing is limited to the running build: one canceled
 consumer leaves other consumers intact, while the last consumer cancels and

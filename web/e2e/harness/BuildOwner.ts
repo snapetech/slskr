@@ -23,7 +23,8 @@ export async function runOwnedCommand(
     let treeTermination: Promise<void> | undefined;
     let escalation: ReturnType<typeof setTimeout> | undefined;
     const signalGroup = (kind: NodeJS.Signals) => {
-      if (!child.pid) return;
+      // Never retain a numeric process-group target after Node reaps its leader.
+      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
       try {
         process.kill(-child.pid, kind);
       } catch (error) {
@@ -68,9 +69,6 @@ export async function runOwnedCommand(
       clearTimeout(timer);
       if (escalation) clearTimeout(escalation);
       signal.removeEventListener('abort', abort);
-      // POSIX descendants can survive a successful parent with inherited stdio.
-      // Clean this owned process group before allowing another build to start.
-      if (process.platform !== 'win32') signalGroup('SIGKILL');
       if (treeTermination) await treeTermination;
       if (failure !== undefined) reject(failure);
       else if (code === 0) resolve();
