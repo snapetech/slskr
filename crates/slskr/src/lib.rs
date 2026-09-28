@@ -35,6 +35,7 @@ mod controller_yaml;
 mod core_dump_process;
 mod credential_store;
 mod daemon_runtime_setup;
+mod daemon_runtime_shutdown;
 mod daemon_serve;
 mod database_maintenance;
 mod destination_state;
@@ -1057,7 +1058,9 @@ pub fn run() {
         .thread_stack_size(8 * 1024 * 1024)
         .build()
         .expect("build slskr runtime");
-    if let Err(error) = runtime.block_on(run_daemon()) {
+    let result = runtime.block_on(run_daemon());
+    daemon_runtime_shutdown::shutdown(runtime);
+    if let Err(error) = result {
         eprintln!("{error}");
         std::process::exit(1);
     }
