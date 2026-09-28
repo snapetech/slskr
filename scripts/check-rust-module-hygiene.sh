@@ -24,23 +24,24 @@ if ! rg -n '^\| BUG-025 .* \| Verified \|$' "$ledger" >/dev/null; then
   status=1
 fi
 
-# Controller contract suites must retain real module ownership after RF-024.
+# Contract suites must retain real module ownership after RF-024.
 if ! python3 - <<'PY_CHECK'
 from pathlib import Path
 import re
 
 root = Path("crates/slskr/src")
-registry = root / "controller_tests.rs"
 violations = []
-if re.search(r"\binclude!\s*\(", registry.read_text()):
-    violations.append(f"{registry}: flat test includes are forbidden")
-for file in (root / "controller_tests").glob("*.rs"):
-    lines = len(file.read_bytes().splitlines())
-    if lines > 2500:
-        violations.append(f"{file}: {lines} lines exceed the 2500-line owner budget")
+for suite, budget in [("controller_tests", 2500), ("config_tests", 1200)]:
+    registry = root / f"{suite}.rs"
+    if re.search(r"\binclude!\s*\(", registry.read_text()):
+        violations.append(f"{registry}: flat test includes are forbidden")
+    for file in (root / suite).glob("*.rs"):
+        lines = len(file.read_bytes().splitlines())
+        if lines > budget:
+            violations.append(f"{file}: {lines} lines exceed the {budget}-line owner budget")
 if violations:
     raise SystemExit("\n".join(violations))
-print("controller test ownership check passed")
+print("controller/config test ownership check passed")
 PY_CHECK
 then
   status=1

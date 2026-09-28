@@ -6222,3 +6222,22 @@ of terminal job records. All 656 default daemon tests, strict daemon
 all-targets Clippy, full-controller/legacy all-targets compile, and bounded API
 group 3 pass. RF-006 remains open for remaining service lifecycles and hosted
 proof.
+
+## RF-024 Configuration Contract Test Owners (2026-09-28 UTC)
+
+Extracted all 79 configuration tests from the 3,797-line `config_tests.rs`
+into seven real domain modules: peer transport, Web security, media integration,
+transfer policy, file layers, runtime policy, and federation/membership. The
+formatted registry is 41 lines; the largest owner is 872 lines. The shared
+environment fixture stays in the registry. No test body or expected contract
+was removed. Only token-identified parent paths are relocated to `crate::config`.
+
+`benchmarks/artifacts/20260928-rf-config-test-owner-extraction.json` accounts for
+all 140,311 original bytes, per-test hashes, fixture bytes, formatted owner
+hashes, and exact reconstruction after reversing every path relocation. All
+79 test names match the original inventory. All 79 configuration tests, all
+656 default daemon tests, strict daemon all-targets Clippy, and full-controller/
+legacy all-targets compile pass. Module hygiene now enforces a 1,200-line
+configuration-test owner budget and forbids flat includes in the registry.
+This checkpoint is internal-only. Production configuration ownership and other
+RF-024 scopes remain open.

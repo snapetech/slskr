@@ -160,7 +160,7 @@ source_files=(
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
 config_source="crates/slskr/src/config.rs"
-config_tests_source="crates/slskr/src/config_tests.rs"
+config_tests_sources=(crates/slskr/src/config_tests.rs crates/slskr/src/config_tests/*.rs)
 client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
 client_peer_cache_source="crates/slskr-client/src/peer_cache.rs"
@@ -549,7 +549,7 @@ for anchor in \
   'api_token_rejects_blank_env_and_file_values' \
   'config_file_reader_rejects_symlinks' \
   'config_file_reader_rejects_oversized_files'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$config_tests_source" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "${config_tests_sources[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
     status=1
   fi
