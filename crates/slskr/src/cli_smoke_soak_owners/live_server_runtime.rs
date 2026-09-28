@@ -14,54 +14,59 @@ where
     let send_timeout = env_duration_secs("SLSK_SOAK_SERVER_SEND_TIMEOUT_SECONDS", 20, false)?;
     let mut search_token = config.search_token;
     let mut events = 0usize;
-
-    while Instant::now() < deadline && events < config.max_events {
-        let now = Instant::now();
-        if now >= next_ping {
-            time::timeout(send_timeout, session.send_ping())
-                .await
-                .map_err(|_| "periodic ping send timed out".to_owned())?
-                .map_err(|error| format!("periodic ping failed: {error}"))?;
-            next_ping = Instant::now() + config.ping_interval;
-            progress.store(unix_seconds(), Ordering::Relaxed);
-            println!("server ping sent");
-        }
-        if config.active_probes && now >= next_search {
-            if let Some(query) = &config.search_query {
-                search_token = search_token.wrapping_add(1).max(1);
-                time::timeout(
-                    send_timeout,
-                    dispatch_live_soak_search(session, query, search_token),
-                )
-                .await
-                .map_err(|_| "search dispatch timed out".to_owned())??;
+    let mut workers = SoakTaskSet::default();
+    let result = async {
+        while Instant::now() < deadline && events < config.max_events {
+            let now = Instant::now();
+            if now >= next_ping {
+                time::timeout(send_timeout, session.send_ping())
+                    .await
+                    .map_err(|_| "periodic ping send timed out".to_owned())?
+                    .map_err(|error| format!("periodic ping failed: {error}"))?;
+                next_ping = Instant::now() + config.ping_interval;
                 progress.store(unix_seconds(), Ordering::Relaxed);
+                println!("server ping sent");
             }
-            next_search = Instant::now() + config.search_interval;
+            if config.active_probes && now >= next_search {
+                if let Some(query) = &config.search_query {
+                    search_token = search_token.wrapping_add(1).max(1);
+                    time::timeout(
+                        send_timeout,
+                        dispatch_live_soak_search(session, query, search_token),
+                    )
+                    .await
+                    .map_err(|_| "search dispatch timed out".to_owned())??;
+                    progress.store(unix_seconds(), Ordering::Relaxed);
+                }
+                next_search = Instant::now() + config.search_interval;
+            }
+
+            let next_action = if config.active_probes && config.search_query.is_some() {
+                next_ping.min(next_search)
+            } else {
+                next_ping
+            };
+            let next_wait = next_action
+                .min(deadline)
+                .saturating_duration_since(Instant::now());
+
+            match time::timeout(next_wait, session.receive()).await {
+                Ok(Ok(message)) => {
+                    events += 1;
+                    progress.store(unix_seconds(), Ordering::Relaxed);
+                    handle_server_message(session, message, &mut workers).await?;
+                }
+                Ok(Err(error)) => return Err(format!("server receive failed: {error}")),
+                Err(_) => {}
+            }
         }
 
-        let next_action = if config.active_probes && config.search_query.is_some() {
-            next_ping.min(next_search)
-        } else {
-            next_ping
-        };
-        let next_wait = next_action
-            .min(deadline)
-            .saturating_duration_since(Instant::now());
-
-        match time::timeout(next_wait, session.receive()).await {
-            Ok(Ok(message)) => {
-                events += 1;
-                progress.store(unix_seconds(), Ordering::Relaxed);
-                handle_server_message(session, message).await?;
-            }
-            Ok(Err(error)) => return Err(format!("server receive failed: {error}")),
-            Err(_) => {}
-        }
+        println!("server soak observed {events} event(s)");
+        Ok(())
     }
-
-    println!("server soak observed {events} event(s)");
-    Ok(())
+    .await;
+    workers.shutdown().await;
+    result
 }
 
 pub(super) async fn run_live_soak_server_watchdog(
@@ -113,6 +118,7 @@ where
 pub(super) async fn handle_server_message<S>(
     session: &mut ServerSession<S>,
     message: ServerMessage,
+    workers: &mut SoakTaskSet,
 ) -> Result<(), String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -180,7 +186,7 @@ where
             // Never hold the server receive loop on that socket attempt: a
             // later valid indirect request must still be dispatched while an
             // unrelated peer is being retried.
-            tokio::spawn(async move {
+            if !workers.try_spawn(async move {
                 match time::timeout(timeout, handle_live_soak_connect_to_peer_response(response))
                     .await
                 {
@@ -192,7 +198,9 @@ where
                         println!("server event: connect_to_peer probe timed out");
                     }
                 }
-            });
+            }) {
+                println!("server rejected indirect peer work at live-soak capacity");
+            }
         }
         ServerMessage::RoomList(rooms) => {
             println!(

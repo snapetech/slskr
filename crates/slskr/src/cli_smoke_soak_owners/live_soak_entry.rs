@@ -116,38 +116,43 @@ pub(in crate::cli) async fn live_soak() -> Result<(), String> {
         config.search_query.is_some()
     );
 
+    let mut workers = tokio::task::JoinSet::new();
     let listener_duration = config.duration;
-    let listener_task =
-        tokio::spawn(async move { run_listener(listener, listener_duration).await });
-    let obfuscated_listener_task = obfuscated_listener.map(|(listener, _)| {
+    workers.spawn(async move { run_listener(listener, listener_duration).await });
+    if let Some((listener, _)) = obfuscated_listener {
         let duration = config.duration;
-        tokio::spawn(async move { run_obfuscated_listener(listener, duration).await })
-    });
+        workers.spawn(async move { run_obfuscated_listener(listener, duration).await });
+    }
     let server_progress = Arc::new(AtomicU64::new(unix_seconds()));
-    let watchdog_task = tokio::spawn(run_live_soak_server_watchdog(
-        server_progress.clone(),
-        config.duration,
-        config.watchdog_interval,
-        config.watchdog_stale_seconds,
-    ));
+    let watchdog_progress = server_progress.clone();
+    let duration = config.duration;
+    let interval = config.watchdog_interval;
+    let stale_seconds = config.watchdog_stale_seconds;
+    let watchdog = workers.spawn(async move {
+        run_live_soak_server_watchdog(watchdog_progress, duration, interval, stale_seconds).await;
+        Ok(())
+    });
     let server_result = run_server_soak(&mut session, &config, server_progress).await;
-    watchdog_task.abort();
-    let listener_result = listener_task
-        .await
-        .map_err(|error| format!("listener task failed: {error}"))?;
-    let obfuscated_listener_result = if let Some(task) = obfuscated_listener_task {
-        Some(
-            task.await
-                .map_err(|error| format!("obfuscated listener task failed: {error}"))?,
-        )
-    } else {
-        None
-    };
-
+    watchdog.abort();
+    if server_result.is_err() {
+        workers.abort_all();
+    }
+    let mut worker_error = None;
+    while let Some(result) = workers.join_next().await {
+        let error = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error),
+            Err(error) if error.is_cancelled() => None,
+            Err(error) => Some(format!("live soak worker task failed: {error}")),
+        };
+        if let Some(error) = error {
+            worker_error.get_or_insert(error);
+            workers.abort_all();
+        }
+    }
     server_result?;
-    listener_result?;
-    if let Some(result) = obfuscated_listener_result {
-        result?;
+    if let Some(error) = worker_error {
+        return Err(error);
     }
     println!("live soak completed");
     Ok(())

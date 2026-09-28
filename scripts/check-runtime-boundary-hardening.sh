@@ -571,4 +571,13 @@ if rg -n 'tokio::(task::)?spawn\(' \
   exit 1
 fi
 
+# CLI live-soak workers remain bounded and owned by their enclosing scopes.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/cli_smoke_soak_owners/live_peer_runtime.rs \
+  crates/slskr/src/cli_smoke_soak_owners/live_server_runtime.rs \
+  crates/slskr/src/cli_smoke_soak_owners/live_soak_entry.rs; then
+  printf 'runtime boundary hardening failed: detached live-soak task\n' >&2
+  exit 1
+fi
+
 printf 'runtime boundary hardening check passed\n'

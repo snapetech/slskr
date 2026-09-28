@@ -3,6 +3,7 @@ use super::*;
 pub(super) async fn run_listener(listener: Listener, duration: Duration) -> Result<(), String> {
     let deadline = Instant::now() + duration;
     let mut accepted = 0usize;
+    let mut workers = SoakTaskSet::default();
 
     while Instant::now() < deadline {
         match time::timeout(
@@ -18,7 +19,7 @@ pub(super) async fn run_listener(listener: Listener, duration: Duration) -> Resu
                 // A public listener receives unrelated peer attempts. Handle
                 // each accepted stream independently so a slow or malformed
                 // peer cannot block the next valid direct/indirect handshake.
-                tokio::spawn(async move {
+                if !workers.try_spawn(async move {
                     let response_result = handle_plain_soak_incoming(incoming).await;
                     println!("listener event: {name} from {address}");
                     if let Err(error) = response_result {
@@ -27,7 +28,9 @@ pub(super) async fn run_listener(listener: Listener, duration: Duration) -> Resu
                             peer_close_reason(&error)
                         );
                     }
-                });
+                }) {
+                    println!("listener rejected peer work at live-soak capacity");
+                }
             }
             Ok(Err(error)) => println!(
                 "listener rejected invalid peer initialization: {}",
@@ -37,6 +40,7 @@ pub(super) async fn run_listener(listener: Listener, duration: Duration) -> Resu
         }
     }
 
+    workers.shutdown().await;
     println!("listener observed {accepted} inbound connection(s)");
     Ok(())
 }
@@ -47,6 +51,7 @@ pub(super) async fn run_obfuscated_listener(
 ) -> Result<(), String> {
     let deadline = Instant::now() + duration;
     let mut accepted = 0usize;
+    let mut workers = SoakTaskSet::default();
 
     while Instant::now() < deadline {
         match time::timeout(
@@ -59,7 +64,7 @@ pub(super) async fn run_obfuscated_listener(
                 accepted += 1;
                 let name = incoming_connection_name(&incoming);
                 let address = scrub_socket_addr(address);
-                tokio::spawn(async move {
+                if !workers.try_spawn(async move {
                     let response_result = handle_obfuscated_soak_incoming(incoming).await;
                     println!("obfuscated listener event: {name} from {address}");
                     if let Err(error) = response_result {
@@ -68,7 +73,9 @@ pub(super) async fn run_obfuscated_listener(
                             peer_close_reason(&error)
                         );
                     }
-                });
+                }) {
+                    println!("listener rejected peer work at live-soak capacity");
+                }
             }
             Ok(Err(error)) => println!(
                 "obfuscated listener rejected invalid peer initialization: {}",
@@ -78,6 +85,7 @@ pub(super) async fn run_obfuscated_listener(
         }
     }
 
+    workers.shutdown().await;
     println!("obfuscated listener observed {accepted} inbound connection(s)");
     Ok(())
 }

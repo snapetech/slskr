@@ -6804,3 +6804,24 @@ focused workflow scenarios retain five-minute deadlines, and the outer
 15-minute service plus 25-minute job limits remain. This adjustment does
 not count partial screenshots or a failed receipt as passing evidence.
 A fresh hosted run is required.
+
+
+## RF-006 Bounded CLI Live-Soak Ownership (2026-09-28 UTC)
+
+The CLI live-soak harness previously detached accepted peer handlers and
+indirect peer probes with raw spawn calls. Each plain/obfuscated listener
+and the server probe loop now owns a bounded 64-worker JoinSet. Completed
+work is reaped before admission; capacity overflow drops the new future,
+and shutdown rejects late work before aborting and joining existing work.
+Listener deadlines close stalled peer handlers. The server loop joins its
+probe workers on normal completion and on error. The top-level listener and
+watchdog tasks remain in one owned set; the watchdog is joined and a failed
+worker cancels the remaining tasks. No transport listener port was added.
+
+Four focused regressions prove capacity/resource release, completed-worker
+readmission, child socket closure on parent cancellation, and actual plain/
+obfuscated TCP client EOF plus listener rebinding at the soak deadline.
+The full daemon suite passes 672 tests with the separately exercised mounted
+filesystem test ignored by default; strict Clippy passes. The runtime guard
+rejects detached spawn calls in the three live-soak production owners.
+Broader RF-006 managed-service clean-runner coverage remains open.

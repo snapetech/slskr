@@ -1,4 +1,7 @@
 use super::*;
+#[path = "cli_smoke_soak_owners/live_task_set.rs"]
+mod live_task_set;
+use self::live_task_set::SoakTaskSet;
 #[path = "cli_smoke_soak_owners/fixture_transfers.rs"]
 mod fixture_transfers;
 pub(super) use self::fixture_transfers::await_fixture_server_task;
