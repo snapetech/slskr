@@ -68,6 +68,13 @@ for file in (web_root / "web_action_owners").glob("*.rs"):
     lines = len(file.read_bytes().splitlines())
     if lines > 1000:
         violations.append(f"{file}: {lines} lines exceed the 1000-line Web action owner budget")
+for old_source, owner_directory in [("search_planning.rs", "search_planning_owners")]:
+    if f'include!("{old_source}")' in (web_root / "lib.rs").read_text():
+        violations.append(f"slskr-web/lib.rs: {old_source} must use real modules")
+    for file in (web_root / owner_directory).glob("*.rs"):
+        lines = len(file.read_bytes().splitlines())
+        if lines > 1000:
+            violations.append(f"{file}: {lines} lines exceed the 1000-line Web owner budget")
 if violations:
     raise SystemExit("\n".join(violations))
 print("controller/configuration ownership check passed")

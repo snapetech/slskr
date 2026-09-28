@@ -6332,3 +6332,19 @@ The complete tracked Rust scan now has six files above 2,500 lines:
 (2,914), native Web `search_planning.rs` (2,857), native Web `rustymilk_ui.rs`
 (2,802), and `file_transfer_runtime.rs` (2,524). RF-024 remains open for these
 and its other scope/evidence requirements.
+
+## RF-024 Native Search, Player, and Workspace Owners (2026-09-28 UTC)
+
+Replaced the 2,857-line `search_planning.rs` flat include with eleven real
+modules for search ranking/previews, player radio/queue planning and browser
+controls, experience reports, workspace tables/actions, browser preferences,
+player status projection, and visualizer startup. The largest owner is 520
+lines. WASM guards and all 22 public root bindings remain intact.
+
+`benchmarks/artifacts/20260928-rf-search-planning-owner-extraction.json`
+accounts for every original byte and all 87 items, with exact reconstruction
+and reversed visibility relocations. All 75 functions remain present. All 86
+Web tests, strict all-targets Clippy, and the locked WASM check pass. Hygiene
+forbids the old flat include and caps owners at 1,000 lines. This checkpoint
+is internal-only. Five tracked Rust files remain above 2,500 lines; broader
+RF-024 scope remains open.

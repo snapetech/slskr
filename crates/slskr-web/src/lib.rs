@@ -89,7 +89,67 @@ mod search_action_models;
 pub use self::search_action_models::{
     SearchActionPreview, SearchCandidateRank, SearchDuplicateGroup,
 };
-include!("search_planning.rs");
+#[cfg(target_arch = "wasm32")]
+#[path = "search_planning_owners/browser_local_preferences.rs"]
+mod browser_local_preferences;
+#[cfg(target_arch = "wasm32")]
+use self::browser_local_preferences::*;
+#[path = "search_planning_owners/experience_reports.rs"]
+mod experience_reports;
+pub use self::experience_reports::{
+    automation_dry_run_report, automation_history_report, automation_summary_from_state,
+    default_experience_preferences, experience_preferences_report,
+};
+#[cfg(target_arch = "wasm32")]
+#[path = "search_planning_owners/player_browser_controls.rs"]
+mod player_browser_controls;
+#[cfg(target_arch = "wasm32")]
+use self::player_browser_controls::*;
+#[path = "search_planning_owners/player_queue_planning.rs"]
+mod player_queue_planning;
+#[cfg(target_arch = "wasm32")]
+use self::player_queue_planning::current_player_track;
+pub use self::player_queue_planning::{
+    build_similar_queue_candidates, player_radio_query_from_now_playing_body,
+    player_similarity_score, similar_queue_search_queries,
+};
+#[path = "search_planning_owners/player_radio_planning.rs"]
+mod player_radio_planning;
+use self::player_radio_planning::*;
+pub use self::player_radio_planning::{
+    build_player_radio_plan, build_player_radio_search_path, player_radio_copy_text,
+    player_radio_queries,
+};
+#[path = "search_planning_owners/player_status_projection.rs"]
+mod player_status_projection;
+pub use self::player_status_projection::{
+    player_now_playing_text, player_party_text, player_transfer_text, player_visualizer_text,
+};
+#[path = "search_planning_owners/search_previews.rs"]
+mod search_previews;
+pub use self::search_previews::{
+    build_search_action_preview, deduplicate_search_response_groups, format_search_action_preview,
+    search_planner_report,
+};
+#[path = "search_planning_owners/search_ranking.rs"]
+mod search_ranking;
+pub use self::search_ranking::rank_search_candidate;
+use self::search_ranking::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "search_planning_owners/visualizer_startup.rs"]
+mod visualizer_startup;
+#[cfg(target_arch = "wasm32")]
+use self::visualizer_startup::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "search_planning_owners/workspace_action_mounting.rs"]
+mod workspace_action_mounting;
+#[cfg(target_arch = "wasm32")]
+use self::workspace_action_mounting::*;
+#[cfg(target_arch = "wasm32")]
+#[path = "search_planning_owners/workspace_table_controls.rs"]
+mod workspace_table_controls;
+#[cfg(target_arch = "wasm32")]
+use self::workspace_table_controls::*;
 include!("rustymilk_ui.rs");
 #[cfg(test)]
 #[path = "web_tests.rs"]
