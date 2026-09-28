@@ -5954,3 +5954,17 @@ in `target/rf-controller-media-before-modules/` account for 38,382 moved bytes
 and all 17 test bodies with exact reconstruction before formatting. The
 remaining full-controller includes still need ownership boundaries; this
 internal-only step does not close RF-024.
+
+## RF-003/RF-006/RF-007 Owned-Worker Live Revalidation (2026-09-28 UTC)
+
+The native daemon was rebuilt at clean commit `dbc188d9` after the peer listener
+and session workers moved into managed shutdown. The retained
+`benchmarks/artifacts/20260928-rf-owned-workers-shutdown-crash-restart.json`
+records source, binary, harness, and Rust toolchain metadata. SIGTERM during
+an observed real 20,000-file scan and an attached distributed child exits
+zero in 0.164 seconds, closes the child socket, returns HTTP 503 to the scan,
+and leaves zero partial share rows with SQLite integrity `ok`. The final
+disconnected distributed snapshot survives restart; a later committed depth-7
+child snapshot survives SIGKILL and another restart. The direct loopback HTTP
+adapter also passes hosted security scans at `47440cfb`. RF-003/RF-007 retain
+their verified local status; RF-006 still needs broader service coverage.
