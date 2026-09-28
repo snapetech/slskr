@@ -60,7 +60,11 @@ for rust_file in "${rust_files[@]}"; do
     format_status=1
     continue
   fi
-  if ! cmp -s "$rust_file" "$formatted_file"; then
+  normalized_source="$(mktemp "$format_tmp_dir/source.XXXXXX")"
+  normalized_formatted="$(mktemp "$format_tmp_dir/normalized.XXXXXX")"
+  sed 's/\r$//' "$rust_file" >"$normalized_source"
+  sed 's/\r$//' "$formatted_file" >"$normalized_formatted"
+  if ! cmp -s "$normalized_source" "$normalized_formatted"; then
     diff -u -- "$rust_file" "$formatted_file" || true
     format_status=1
   fi
