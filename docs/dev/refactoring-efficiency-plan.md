@@ -182,7 +182,7 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest tests pass; serialized E2E passes with static fixtures; optional remote media remains unavailable in this Linux environment. | In progress, optional-media gap |
+| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Optional encoded media has no declared downloads; actual playback coverage remains open, without an established Linux codec failure. | In progress, optional-media gap |
 | RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
@@ -7283,3 +7283,30 @@ artifact are retained in
 `benchmarks/artifacts/20260928-rf-hosted-a431-complete-matrix.json`.
 This is a definitive successful matrix for the shared-QUIC/DHT and forwarding
 source; subsequent lifecycle commits require their own hosted completion.
+
+## RF-066 E2E Fixture Repository Discovery (2026-09-28 UTC)
+
+Optional media discovery assumed the current directory was exactly three
+levels below the repository, so normal launches from the repo root or `web`
+could inspect the wrong fixture tree. The node harness also had a separate
+cwd assumption. Both now use one ancestor search for the workspace and daemon
+Cargo manifests. Absolute fixture directories validate independently of cwd.
+Media availability requires nonempty regular files, excluding empty files or
+directories. The fetch helper passes the script path through `execFile`
+arguments instead of interpolating a shell command.
+
+Three actual Playwright utility regressions verify discovery from five cwd
+locations, absolute fixture paths, checksum validation, rejected missing/empty/
+directory media, and an explicit failure outside a checkout. Their temporary
+presence stubs are not encoded playback media. The CI Rust job now executes
+these utility tests without launching nodes or requiring browser installation.
+The complete web suite passes 915 tests; the seven-file static manifest and
+its corruption regressions pass. Original sources remain backed up under
+ignored `target/rf-fixture-path-source-backup`.
+
+RF-066 remains open: the committed media manifest declares no downloadable
+audio/video assets, and the optional playback/sharing matrix still needs
+actual supplied or explicitly declared media. The previous wording implying
+Linux codec unavailability was unsupported; missing declarations and the cwd
+bug are independently established causes. This checkpoint does not count
+presence stubs as playback proof or alter native peer transport ports.

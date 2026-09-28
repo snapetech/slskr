@@ -1,29 +1,41 @@
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const OPTIONAL_MEDIA_FILES = [
   'music/open_goldberg/01_aria.ogg',
   'movie/sintel_512kb_stereo.mp4',
   'tv/pioneer_one_s01e01_sample.mp4',
 ];
 
-function getRepoRootFromCwd(cwd: string = process.cwd()): string {
-  return path.join(cwd, '..', '..', '..');
+export function getRepoRootFromCwd(cwd: string = process.cwd()): string {
+  let candidate = path.resolve(cwd);
+  while (true) {
+    if (
+      existsSync(path.join(candidate, 'Cargo.toml')) &&
+      existsSync(path.join(candidate, 'crates', 'slskr', 'Cargo.toml'))
+    ) {
+      return candidate;
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      throw new Error(`Cannot locate slskr repository root from ${cwd}`);
+    }
+    candidate = parent;
+  }
 }
 
 function getFullFixturesPath(
   fixturesDir: string,
   cwd: string = process.cwd(),
 ): string {
-  const repoRoot = getRepoRootFromCwd(cwd);
   return path.isAbsolute(fixturesDir)
     ? fixturesDir
-    : path.join(repoRoot, fixturesDir);
+    : path.join(getRepoRootFromCwd(cwd), fixturesDir);
 }
 
 async function validateManifestFiles(
@@ -103,9 +115,14 @@ export function hasDownloadedMediaFixtures(
 ): boolean {
   const fullFixturesPath = getFullFixturesPath(fixturesDir, cwd);
 
-  return OPTIONAL_MEDIA_FILES.every((mediaFile) =>
-    existsSync(path.join(fullFixturesPath, mediaFile)),
-  );
+  return OPTIONAL_MEDIA_FILES.every((mediaFile) => {
+    try {
+      const stat = statSync(path.join(fullFixturesPath, mediaFile));
+      return stat.isFile() && stat.size > 0;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -120,7 +137,6 @@ export async function ensureFixtures(
   fixturesDir: string = 'test-data/slskr-test-fixtures',
   fetchIfMissing: boolean = false,
 ): Promise<void> {
-  const repoRoot = getRepoRootFromCwd();
   const fullFixturesPath = getFullFixturesPath(fixturesDir);
 
   // Check if fixtures directory exists
@@ -158,7 +174,7 @@ export async function ensureFixtures(
     const filePath = path.join(fullFixturesPath, mediaFile);
     try {
       const stat = await fs.stat(filePath);
-      if (stat.size === 0) {
+      if (!stat.isFile() || stat.size === 0) {
         missingMedia.push(mediaFile);
       }
     } catch {
@@ -171,12 +187,13 @@ export async function ensureFixtures(
       `[E2E] Missing ${missingMedia.length} media files, fetching...`,
     );
     try {
+      const repoRoot = getRepoRootFromCwd();
       const fetchScript = path.join(
         repoRoot,
         'scripts',
         'fetch-test-fixtures.sh',
       );
-      await execAsync(`bash "${fetchScript}"`, {
+      await execFileAsync('bash', [fetchScript], {
         cwd: repoRoot,
         env: { ...process.env, FIXTURES_DIR: fullFixturesPath },
       });

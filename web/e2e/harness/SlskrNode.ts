@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import { ensureFixtures } from '../fixtures/ensure-fixtures';
+import { ensureFixtures, getRepoRootFromCwd } from '../fixtures/ensure-fixtures';
 
 export type NodeConfig = {
   apiPort?: number;
@@ -245,15 +245,7 @@ export class SlskrNode {
    * Get the repository root directory.
    */
   private getRepoRoot(): string {
-    // process.cwd() is web/e2e/ when running tests, so go up 2 levels.
-    // Use __dirname if available, or calculate from cwd for robustness.
-    if (typeof __dirname !== 'undefined') {
-      // Running as compiled JS: web/e2e/harness/SlskrNode.js -> repo root
-      return path.join(__dirname, '..', '..', '..');
-    } else {
-      // Running as TS - process.cwd() is web/e2e/
-      return path.resolve(process.cwd(), '..', '..');
-    }
+    return getRepoRootFromCwd();
   }
 
   /**

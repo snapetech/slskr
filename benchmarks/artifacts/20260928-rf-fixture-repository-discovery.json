@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local fixture utility tests and web suite; not media playback proof",
+  "sourceSha": "a81ac1af71f0065718b4239f216046d9fdb7245a",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "web/e2e/fixtures/ensure-fixtures.ts": "cdf6044c9fed09513678773955b69b7a127f2853b62ccd95ebe5f6e5dddbfaaf",
+    "web/e2e/harness/SlskrNode.ts": "aad0a772e377687fc1ab20d8b4c6df48174b813ea9815545d6a4b256708385f8",
+    "web/e2e/fixture-paths.spec.ts": "a60c294325a9a406af4962abab8824bb86218e91ff47d733ef94692fc55fa23e",
+    ".github/workflows/ci.yml": "8ec5fbce82635644706edc770bc3e8abc07259f891534de6a0864af3dd9b6c40"
+  },
+  "logsSha256": {
+    "target/rf-fixture-paths-playwright.log": "3267f0dbf2debf0b1f162807687d20ffcd0f23fd3692f9eff7219586aee565a7",
+    "target/rf-fixture-paths-web-tests.log": "10955d82a75267735d78653d5147ef41c3b50fe70305ee4537c794c0f35289ea",
+    "target/rf-fixture-paths-manifest.log": "4848add18c07228e123d21ce6fe5df9dd4427c238709ed665827e9373dc3df85",
+    "target/rf-fixture-paths-manifest-tests.log": "4536f6c1a896611b2b834f8b3ac58d4d7e10a56d15400a1f44c7cbcd27f95123"
+  },
+  "tests": {
+    "playwrightUtilityTestsPassed": 3,
+    "webTestsPassed": 915,
+    "staticFixtureFilesValidated": 7,
+    "manifestCorruptionTestsPassed": true
+  },
+  "limitations": [
+    "Presence stubs are not encoded media and provide no playback evidence",
+    "Actual optional playback media remains undeclared; RF-066 remains open"
+  ]
+}

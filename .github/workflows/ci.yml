@@ -111,6 +111,9 @@ jobs:
       - run: bash scripts/check-web-audit.sh
       - run: npm --prefix web run lint
       - run: npm --prefix web test
+      - name: Verify E2E fixture path discovery
+        working-directory: web
+        run: npx playwright test e2e/fixture-paths.spec.ts --reporter=line
       - run: npm --prefix web run test:api-lifecycle-coverage
       - run: npm --prefix web run build
       - run: npm --prefix web run test:bundle-budget
