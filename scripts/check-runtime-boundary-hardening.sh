@@ -627,6 +627,18 @@ for name in ('events_ws.rs', 'signalr_ws.rs', 'relay_ws.rs'):
         raise SystemExit(f'runtime boundary hardening failed: missing scoped reader in {path}')
 PYWS
 
+python3 - <<'PYFTP'
+from pathlib import Path
+source = Path('crates/slskr/src/ftp_upload_queue.rs').read_text()
+for anchor in ('MAX_ADMITTED_UPLOADS: usize = 64', 'MAX_ACTIVE_UPLOADS: usize = 4',
+               'tasks.try_spawn(', 'impl Drop for FtpUploadQueue'):
+    if anchor not in source:
+        raise SystemExit(f'runtime boundary hardening failed: missing FTP admission {anchor}')
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('self.ftp_uploads.close()') > state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: FTP admission must close before joining workers')
+PYFTP
+
 # One-shot QUIC operations finish cleanup in their caller's scope.
 python3 - <<'PYCODE'
 from pathlib import Path

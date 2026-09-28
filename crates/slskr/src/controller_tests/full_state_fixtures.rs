@@ -215,6 +215,7 @@ pub(super) fn test_state_with_env_parts_full(
         download_requests: Arc::new(crate::Semaphore::new(2)),
         download_batch_requests: Arc::new(crate::Semaphore::new(1)),
         websocket_connections: Arc::new(crate::Semaphore::new(crate::MAX_WEBSOCKET_CONNECTIONS)),
+        ftp_uploads: crate::ftp::FtpUploadQueue::default(),
         external_visualizer_processes: Arc::new(crate::Semaphore::new(
             crate::MAX_EXTERNAL_VISUALIZER_PROCESSES,
         )),

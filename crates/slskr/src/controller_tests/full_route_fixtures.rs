@@ -1059,6 +1059,7 @@ pub(super) async fn configured_api_token_protects_api_routes_impl() {
         download_requests: Arc::new(crate::Semaphore::new(2)),
         download_batch_requests: Arc::new(crate::Semaphore::new(1)),
         websocket_connections: Arc::new(crate::Semaphore::new(crate::MAX_WEBSOCKET_CONNECTIONS)),
+        ftp_uploads: crate::ftp::FtpUploadQueue::default(),
         external_visualizer_processes: Arc::new(crate::Semaphore::new(
             crate::MAX_EXTERNAL_VISUALIZER_PROCESSES,
         )),
@@ -1411,6 +1412,7 @@ pub(super) async fn configured_api_token_protects_api_routes_impl() {
         download_requests: Arc::new(crate::Semaphore::new(2)),
         download_batch_requests: Arc::new(crate::Semaphore::new(1)),
         websocket_connections: Arc::new(crate::Semaphore::new(crate::MAX_WEBSOCKET_CONNECTIONS)),
+        ftp_uploads: crate::ftp::FtpUploadQueue::default(),
         external_visualizer_processes: Arc::new(crate::Semaphore::new(
             crate::MAX_EXTERNAL_VISUALIZER_PROCESSES,
         )),

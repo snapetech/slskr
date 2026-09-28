@@ -25,3 +25,6 @@ mod shared_peer_udp;
 
 #[path = "focused_controller_tests/websocket_ownership.rs"]
 mod websocket_ownership;
+
+#[path = "focused_controller_tests/ftp_admission.rs"]
+mod ftp_admission;

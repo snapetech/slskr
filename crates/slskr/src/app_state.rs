@@ -82,6 +82,7 @@ pub(super) struct AppState {
     pub(super) download_requests: Arc<Semaphore>,
     pub(super) download_batch_requests: Arc<Semaphore>,
     pub(super) websocket_connections: Arc<Semaphore>,
+    pub(super) ftp_uploads: ftp::FtpUploadQueue,
     pub(super) external_visualizer_processes: Arc<Semaphore>,
     pub(super) songid_run_slots: Arc<Semaphore>,
     pub(super) songid_jobs: Option<mpsc::Sender<SongIdJob>>,
@@ -348,6 +349,7 @@ impl AppState {
     }
 
     pub(super) async fn shutdown_managed_tasks(&self) {
+        self.ftp_uploads.close();
         self.managed_background_tasks.shutdown().await;
         self.port_forwarding.shutdown().await;
         if let Some(gateway) = self.private_gateway.as_ref() {

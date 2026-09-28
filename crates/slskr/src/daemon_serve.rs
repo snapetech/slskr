@@ -795,6 +795,7 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         download_requests: Arc::new(Semaphore::new(2)),
         download_batch_requests: Arc::new(Semaphore::new(1)),
         websocket_connections: Arc::new(Semaphore::new(MAX_WEBSOCKET_CONNECTIONS)),
+        ftp_uploads: crate::ftp::FtpUploadQueue::default(),
         external_visualizer_processes: Arc::new(Semaphore::new(MAX_EXTERNAL_VISUALIZER_PROCESSES)),
         songid_run_slots: Arc::new(Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
