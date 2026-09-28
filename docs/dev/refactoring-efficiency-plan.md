@@ -6308,3 +6308,27 @@ matching hashes. All 86 Web tests, strict Web all-targets Clippy, and the locked
 WASM target check pass. Hygiene caps the registry at 100 lines and owners at
 1,000 lines, and forbids a return to flat test includes. This checkpoint is
 internal-only. Production Web action ownership remains open under RF-024.
+
+## RF-024 Native Web Action Domain Owners (2026-09-28 UTC)
+
+Replaced the 3,630-line `web_actions.rs` flat include with thirteen real owners:
+WASM action execution, form values, wishlist operations, share access, row
+context, filters, selection/inspection, sorting, reference controls, action
+projection, and player/search/experience models. The largest owner is 567
+lines. WASM-only modules and imports retain their target guards; the action
+projection keeps its original WASM-or-test availability. All eleven original
+public declaration bindings remain at the crate root.
+
+`benchmarks/artifacts/20260928-rf-native-web-action-owner-extraction.json`
+accounts for all 133,129 original bytes, all 95 original items, and all 87
+functions, including exact reconstruction after reversing visibility/path
+relocations. Source backups and original committed source remain available.
+All 86 Web tests, strict Web all-targets Clippy, and the locked WASM target
+check pass. Hygiene requires real action modules and caps owners at 1,000
+lines. This checkpoint is internal-only.
+
+The complete tracked Rust scan now has six files above 2,500 lines:
+`private_gateway.rs` (3,524), `session_runtime.rs` (3,083), `cli_smoke_soak.rs`
+(2,914), native Web `search_planning.rs` (2,857), native Web `rustymilk_ui.rs`
+(2,802), and `file_transfer_runtime.rs` (2,524). RF-024 remains open for these
+and its other scope/evidence requirements.
