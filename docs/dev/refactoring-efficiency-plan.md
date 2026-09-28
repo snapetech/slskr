@@ -6743,8 +6743,8 @@ it does not certify deployed devices or credentialed upstream interop.
 
 The runner clears inherited live-backend settings, tokens, endpoint sweeps,
 and route restrictions. It rejects missing, failed, swept, mismatched, or
-empty browser evidence and removes stale reports before every launch. Each
-build/audit command has a five-minute deadline. Timeout and interruption
+empty browser evidence and removes stale reports before every launch. Build and focused scenario commands have five-minute deadlines; the full
+desktop/mobile scenario has an eight-minute deadline. Timeout and interruption
 terminate the owned process group; a grace period lets the memory guard stop
 its external systemd service before hard cleanup. Six regressions include a
 real guarded-child timeout and confirm that child is reaped.
@@ -6791,3 +6791,16 @@ cover normal, failed, and timed-out cleanup. RF-047's delayed-filesystem and
 crash-stress requirement is verified locally; product durability semantics
 remain unchanged. Retained evidence is
 `benchmarks/artifacts/20260928-rf-delayed-filesystem-proof.json`.
+
+
+## RF-030 Hosted Deadline Adjustment (2026-09-28 UTC)
+
+The first hosted nightly run completed 79 of 84 screenshots before the
+five-minute success-scenario deadline. Its failed receipt and screenshots
+were retained, and its owned service terminated with zero swap use. The
+local final runner had already passed from a clean checkout. The full
+84-check success scenario now has an eight-minute deadline; build and
+focused workflow scenarios retain five-minute deadlines, and the outer
+15-minute service plus 25-minute job limits remain. This adjustment does
+not count partial screenshots or a failed receipt as passing evidence.
+A fresh hosted run is required.

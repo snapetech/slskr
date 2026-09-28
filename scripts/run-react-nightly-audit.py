@@ -110,7 +110,8 @@ def main():
             audit_path.unlink(missing_ok=True)
             run_owned([guard, 'node', 'web/scripts/audit-react-webui.mjs'], root,
                       scenario_environment(environment, scenario, directory),
-                      output / f'{scenario}.log')
+                      output / f'{scenario}.log',
+                      timeout=480 if scenario == 'success' else 300)
             audit = json.loads(audit_path.read_text())
             observed = validate_audit(audit, scenario)
             record['scenarios'].append({'scenario': scenario, **observed,
