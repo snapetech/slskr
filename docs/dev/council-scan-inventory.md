@@ -72,7 +72,7 @@ adversarial corpus pass.
 | Protocol count/length candidates | 157 |
 | Protocol scalar emission candidates | 305 |
 | Resolver/raw stream candidates | 1026 |
-| Task/cancellation/lifecycle candidates | 1264 |
+| Task/cancellation/lifecycle candidates | 1265 |
 | Example Web API candidates | 323 |
 
 ### Constructor/mutable collection candidates
