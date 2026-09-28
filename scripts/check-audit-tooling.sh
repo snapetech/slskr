@@ -25,6 +25,7 @@ scripts/with-process-memory-guard.sh python3 -m py_compile \
   "$lifecycle_runner" "$lifecycle_test"
 python3 scripts/test-parity-owner-boundaries.py
 python3 scripts/test-parity-webui-evidence.py
+python3 scripts/test-reproducibility-metadata.py
 python3 scripts/test-native-style-owners.py
 scripts/with-process-memory-guard.sh python3 scripts/test-react-audit-launch-cleanup.py
 scripts/with-process-memory-guard.sh python3 scripts/test-controller-inventory-order.py

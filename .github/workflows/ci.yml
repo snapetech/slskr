@@ -123,6 +123,29 @@ jobs:
       - run: npm --prefix dashboard run test:coverage
       - run: npm --prefix dashboard run build
       - run: npm --prefix dashboard run test:bundle-budget
+      - name: Collect reproducibility evidence
+        run: |
+          python3 scripts/collect-reproducibility-metadata.py \
+            --output target/reproducibility/ci-rust.json \
+            --artifact-name ci-reproducibility-rust \
+            --artifact dashboard/coverage/coverage-summary.json \
+            --artifact web/build/index.html \
+            --validate
+      - name: Retain reproducibility evidence
+        id: reproducibility-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
+        with:
+          name: ci-reproducibility-rust
+          path: |
+            target/reproducibility/ci-rust.json
+            dashboard/coverage/coverage-summary.json
+            web/build/index.html
+          if-no-files-found: error
+          retention-days: 30
+      - name: Link reproducibility evidence
+        env:
+          REPRODUCIBILITY_ARTIFACT_URL: ${{ steps.reproducibility-artifact.outputs.artifact-url }}
+        run: printf '[Reproducibility evidence](%s)\n' "$REPRODUCIBILITY_ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
 
   linux-aarch64:
     name: Linux AArch64
