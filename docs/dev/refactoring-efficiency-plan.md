@@ -7482,3 +7482,26 @@ scope are retained in
 Original smoke source is backed up in ignored `target/rf-aur-container-source-backup`.
 Fresh actual clean-runner Docker completion is still required for RF-010;
 the previous marker does not establish that completion.
+
+## RF-011/RF-035 Native Windows Smoke and Actual Workflow Lint (2026-09-28 UTC)
+
+Explicit Windows Smoke run `36401784119` at `9b8e52f2` failed before Rust tests:
+the memory-guard regression compared native Node cwd `D:\a\slskr\slskr` with
+Git Bash's POSIX path. It now obtains the expected native cwd outside the guard
+and compares it with native cwd inside the guard. The actual local guard
+regression passes; this is path representation correction, not a bypass.
+
+Windows Smoke now prefers the pinned rustup Cargo binary, restores Rust cache,
+and selects full Perl for vendored OpenSSL through the same helper as main CI.
+The already used main-matrix Perl implementation is extracted unchanged to
+`scripts/select-windows-perl.ps1`; PowerShell syntax validation passes.
+CI installed actionlint but did not execute it. An explicit actionlint step
+now runs, and policy requires that execution and the shared Perl helper in
+both workflows. Pinned actionlint v1.7.12 and the full existing shellcheck gate
+pass locally. No Rust wrapper, virtual-memory cap, or test-thread override is
+added to Rust commands.
+
+The failed hosted receipt, source/log hashes, and local proof scope are retained
+in `benchmarks/artifacts/20260928-rf-windows-smoke-native-cwd.json`; originals
+remain in ignored `target/rf-windows-smoke-source-backup`. Fresh actual Windows
+Smoke and hosted actionlint completion are still required before closure.

@@ -146,6 +146,21 @@ for workflow in .github/workflows/ci.yml .github/workflows/release.yml; do
   fi
 done
 
+if ! rg -n -F 'run: actionlint' .github/workflows/ci.yml >/dev/null; then
+  printf 'workflow release policy check failed: installed actionlint must run in CI\n' >&2
+  status=1
+fi
+for workflow in .github/workflows/ci.yml .github/workflows/windows-smoke.yml; do
+  if ! rg -n -F 'run: ./scripts/select-windows-perl.ps1' "$workflow" >/dev/null; then
+    printf 'workflow release policy check failed: shared Windows Perl selection missing: %s\n' "$workflow" >&2
+    status=1
+  fi
+done
+if ! rg -n -F 'Locale::Maketext::Simple' scripts/select-windows-perl.ps1 >/dev/null; then
+  printf 'workflow release policy check failed: full Perl module validation missing\n' >&2
+  status=1
+fi
+
 if ! rg -n -F "release-v*" .github/workflows/release.yml >/dev/null; then
   printf 'workflow release policy check failed: release-v tag trigger was not found\n' >&2
   status=1

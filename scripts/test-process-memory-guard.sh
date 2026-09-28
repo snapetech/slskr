@@ -56,10 +56,11 @@ if [[ "$node_options" != *--max-old-space-size=1024* ]]; then
   exit 1
 fi
 
+expected_working_directory="$(node -e 'process.stdout.write(process.cwd())')"
 working_directory="$(
   "$guard" node -e 'process.stdout.write(process.cwd())'
 )"
-if [[ "$working_directory" != "$repo_root" ]]; then
+if [[ "$working_directory" != "$expected_working_directory" ]]; then
   printf 'Process memory guard test failed: working directory was %s\n' "$working_directory" >&2
   exit 1
 fi
