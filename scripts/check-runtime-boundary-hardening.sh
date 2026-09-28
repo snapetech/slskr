@@ -159,7 +159,7 @@ source_files=(
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
-config_source="crates/slskr/src/config.rs"
+config_sources=(crates/slskr/src/config.rs crates/slskr/src/config_parts/*.rs)
 config_tests_sources=(crates/slskr/src/config_tests.rs crates/slskr/src/config_tests/*.rs)
 client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
@@ -539,7 +539,7 @@ done
 for anchor in \
   'file.take(MAX_CONFIG_FILE_BYTES + 1)' \
   'HTTP API token must not be empty or whitespace-only'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$config_source" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "${config_sources[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
     status=1
   fi

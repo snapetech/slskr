@@ -39,9 +39,17 @@ for suite, budget in [("controller_tests", 2500), ("config_tests", 1200)]:
         lines = len(file.read_bytes().splitlines())
         if lines > budget:
             violations.append(f"{file}: {lines} lines exceed the {budget}-line owner budget")
+for file in (root / "config_parts").glob("*.rs"):
+    lines = len(file.read_bytes().splitlines())
+    if lines > 1200:
+        violations.append(f"{file}: {lines} lines exceed the 1200-line configuration owner budget")
+if len((root / "config.rs").read_bytes().splitlines()) > 400:
+    violations.append("config.rs: aggregate and registry exceed the 400-line budget")
+if re.search(r"\binclude!\s*\(", (root / "config.rs").read_text()):
+    violations.append("config.rs: flat configuration includes are forbidden")
 if violations:
     raise SystemExit("\n".join(violations))
-print("controller/config test ownership check passed")
+print("controller/configuration ownership check passed")
 PY_CHECK
 then
   status=1

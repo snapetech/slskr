@@ -6241,3 +6241,27 @@ legacy all-targets compile pass. Module hygiene now enforces a 1,200-line
 configuration-test owner budget and forbids flat includes in the registry.
 This checkpoint is internal-only. Production configuration ownership and other
 RF-024 scopes remain open.
+
+## RF-024 Production Configuration Domain Owners (2026-09-28 UTC)
+
+Reduced `config.rs` from 4,703 lines to a 290-line aggregate and registry.
+Ten real owners hold startup orchestration, environment layers, peer transport,
+network/security settings, Web security, transfer policy, federation/membership,
+media services, file loading, and projection. The largest owner is 891 lines.
+All 57 original public function/type declarations retain their configuration
+namespace bindings; existing settings/integration exports and the configuration
+environment trait remain available. Private members gain only the visibility
+needed to retain access within the original configuration boundary. Four
+public compatibility exports have a narrow unused-import allowance so their
+existing paths remain available in builds without current callers.
+
+`benchmarks/artifacts/20260928-rf-config-production-owner-extraction.json`
+accounts for all 172,044 original bytes and all 154 original top-level items,
+retains per-item and formatted-owner hashes, and proves exact reconstruction
+after reversing visibility relocations. All 100 function/method declarations
+remain. All 79 configuration tests, 656 default daemon tests, strict daemon
+all-targets Clippy, and full-controller/legacy all-targets compile pass.
+Boundary checks search the real owners; module hygiene forbids flat includes,
+caps this aggregate at 400 lines, and caps its owners at 1,200 lines.
+This checkpoint is internal-only. The 3,231-line file-configuration model and
+other RF-024 scopes remain open.
