@@ -2,8 +2,8 @@
 
 Generated from local source patterns. Counts are candidate lines, not confirmed bugs.
 
-Scan date: 2026-09-27
-Source digest: a4fdf5a29c907a114e56f9c53abf8f4b27002b9df4e9aba977b5aee5e48f621a
+Scan date: 2026-09-28
+Source digest: 2f1f9a3e6dbe37f8d8956cb9fb8f47232c04831fe4fa03effa9f0f8bc309cbee
 
 | Candidate Class | Count |
 | --- | ---: |
@@ -11,5 +11,5 @@ Source digest: a4fdf5a29c907a114e56f9c53abf8f4b27002b9df4e9aba977b5aee5e48f621a
 | Protocol count/length candidates | 157 |
 | Protocol scalar emission candidates | 307 |
 | Resolver/raw stream candidates | 1043 |
-| Task/cancellation/lifecycle candidates | 1324 |
+| Task/cancellation/lifecycle candidates | 1326 |
 | Example Web API candidates | 323 |

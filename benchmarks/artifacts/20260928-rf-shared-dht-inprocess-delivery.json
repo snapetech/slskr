@@ -1,0 +1,26 @@
+{
+  "scope": "RF006 shared DHT in-process delivery and peer identity",
+  "sourceCommitBeforeChanges": "b45401930375e709b9491079e0f3b850312bdff6",
+  "worktreeDirty": true,
+  "focusedTests": 5,
+  "daemonLibraryTests": 675,
+  "defaultIgnoredMountedFixture": 1,
+  "strictDaemonClippy": "passed",
+  "strictVendoredMainlineClippy": "passed",
+  "fullControllerLegacyCompile": "passed",
+  "dedicatedDhtReceiveOrForwardSockets": 0,
+  "packetMaxBytes": 2048,
+  "queuedPacketLimit": 256,
+  "legacyRelayReplyDestination": "local forwarder; verified with four-byte transaction fixture",
+  "sharedReplyDestination": "original remote peer; public socket source port verified",
+  "excludedEvidence": "initial two-byte transaction fixture was incompatible with pinned mainline parser",
+  "sourceHashes": {
+    "vendor/mainline/src/rpc/socket.rs": "21190713fdd70856f5d3f81b93924e9dbe1361bf36b00bcd53cea6ffdfc8f545",
+    "vendor/mainline/src/rpc/config.rs": "627cabe427b5a81dcd66ee78ac4edbb31ea6475ac9403c0e138dcde516fd6fe0",
+    "vendor/mainline/src/dht.rs": "bbe9dee9758387a8915d3baf002ccdd530d9327fd4e5423f0ff9a5b69a52e5e4",
+    "vendor/mainline/src/lib.rs": "97d25f8b5de5e3f4e6d5e512098b09a50b7345746f5890d95ad99d2f465ed8de",
+    "crates/slskr/src/dht.rs": "28588f3754293da4e3ccbe0f4fbe5630dd66f1f131c8f48b325e1644079d9cab",
+    "crates/slskr/src/private_gateway_owners/gateway_transport.rs": "2afbf4ef7d5a59fa19607d7d861c37bc938bd03136917d0e8e9aa7aa90e82d03"
+  },
+  "nativeCurrentOverallPortProjection": "separate follow-up pending"
+}

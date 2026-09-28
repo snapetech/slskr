@@ -6897,3 +6897,29 @@ budget on both viewports. Source-bound mock evidence is retained in
 `benchmarks/artifacts/20260928-rf-native-transfer-speed-request-sharing.json`.
 This does not close deployed accessibility or credentialed interop scope.
 A fresh retained Live Parity result is still required for RF-073.
+
+
+## RF-006 Shared DHT Without a Receive Port (2026-09-28 UTC)
+
+The shared DHT path formerly bound a second mainline receive socket and
+forwarded raw datagrams from a local relay. A validated four-byte transaction
+fixture confirms the old path sends replies to that relay, changing the
+original peer identity. The initial two-byte transaction fixture is excluded
+from this evidence because the pinned library does not accept that encoding.
+
+Mainline now reuses the public socket for sending and accepts bounded
+in-process datagrams from the gateway with the kernel-observed remote
+address. It never reads the public socket itself, so the gateway remains its
+single reader. No dedicated DHT receive or forwarding port is needed.
+Packets are capped at the existing 2,048-byte parser MTU, queue capacity is
+256, and full/closed/oversized admission never blocks. Builds without the
+bundled shared transport reject shared mode rather than opening another port.
+
+Five focused regressions verify the old relay's wrong destination, the new
+actual ping/reply source and destination, equal actor/public socket ports,
+absence of a dedicated endpoint, and bounded queue/packet/closed admission.
+The daemon suite passes 675 tests with one separately exercised mount fixture
+ignored by default. Original files are preserved under the ignored
+`target/rf-shared-udp-source-backup` before editing. This closes the DHT input
+identity defect; current-profile port projection and broader shared QUIC
+layout are being checked separately against the single-port requirement.

@@ -580,6 +580,11 @@ impl Gateway {
                 continue;
             }
             if is_dht_packet(&buffer[..received.0]) {
+                if state.dht.as_ref().is_some_and(|rendezvous| {
+                    rendezvous.accept_shared_udp_datagram(&buffer[..received.0], received.1)
+                }) {
+                    continue;
+                }
                 if let (Some(forward_socket), Some(forward_target)) =
                     (&self.dht_forward_socket, self.dht_forward_target)
                 {

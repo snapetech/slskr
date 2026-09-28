@@ -27,6 +27,36 @@ use crate::{
 
 use crate::rpc::config::Config;
 
+/// Bounded in-process input for a DHT actor using one shared UDP socket.
+#[derive(Debug, Clone)]
+pub struct SharedUdpIngress {
+    sender: flume::Sender<(Vec<u8>, SocketAddrV4)>,
+}
+
+impl SharedUdpIngress {
+    /// Deliver at most 2,048 bytes with the original kernel-observed peer.
+    ///
+    /// Admission never blocks. Oversized packets and full or closed queues
+    /// are rejected; at most 256 packets remain queued for the actor.
+    pub fn try_send(&self, packet: &[u8], peer: SocketAddrV4) -> std::io::Result<()> {
+        if packet.len() > 2_048 || peer.port() == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid shared DHT datagram",
+            ));
+        }
+        self.sender
+            .try_send((packet.to_vec(), peer))
+            .map_err(|error| {
+                let kind = match error {
+                    flume::TrySendError::Full(_) => std::io::ErrorKind::WouldBlock,
+                    flume::TrySendError::Disconnected(_) => std::io::ErrorKind::BrokenPipe,
+                };
+                std::io::Error::new(kind, "shared DHT ingress unavailable")
+            })
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
@@ -129,6 +159,18 @@ impl DhtBuilder {
         self.0.outbound_socket = Some(socket);
 
         self
+    }
+
+    /// Reuse a public UDP socket without a dedicated receive endpoint.
+    ///
+    /// The embedding demultiplexer owns all socket reads and supplies packets
+    /// through the returned bounded ingress, preserving their peer addresses.
+    /// The actor sends through the same socket and never reads it directly.
+    pub fn shared_udp_socket(&mut self, socket: Arc<UdpSocket>) -> SharedUdpIngress {
+        let (sender, receiver) = flume::bounded(256);
+        self.0.outbound_socket = Some(socket);
+        self.0.incoming_packets = Some(receiver);
+        SharedUdpIngress { sender }
     }
 
     /// Create a Dht node.
