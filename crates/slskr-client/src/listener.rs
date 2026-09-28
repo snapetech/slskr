@@ -250,6 +250,9 @@ where
     let mut last_error = None;
 
     // Prefer the shortest valid candidate after rejecting conflicting init headers.
+    // Unknown extension payloads are opaque; if one overlaps a recognized init,
+    // the known interpretation preserves peer interoperability because the wire
+    // carries no marker that can establish the sender's intended interpretation.
     for candidate in candidates {
         if let Err(error) =
             validate_shared_candidate_header(&mut stream, &mut buffered, candidate).await

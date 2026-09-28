@@ -234,6 +234,34 @@ async fn shared_demux_rejects_dual_valid_init_prefix() {
 }
 
 #[tokio::test]
+async fn shared_demux_prefers_known_obfuscated_init_over_opaque_unknown_collision() {
+    let known = InitMessage::PeerInit {
+        username: "a".repeat(252),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+    // The obfuscated prefix also advertises a bounded plain unknown frame.
+    let wire = encode_rotated(&known.encode().unwrap().encode().unwrap(), 0x42);
+    let plain_length = u32::from_le_bytes(wire[..4].try_into().unwrap()) as usize;
+    let plain_end = 4 + plain_length;
+    let plain = InitFrame::decode(&wire[..plain_end]).unwrap();
+    assert!(matches!(
+        InitMessage::decode(plain).unwrap(),
+        InitMessage::Unknown { .. }
+    ));
+    let obfuscated = InitFrame::decode(&decode_rotated(&wire).unwrap()).unwrap();
+    assert_eq!(InitMessage::decode(obfuscated).unwrap(), known);
+
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+    let incoming = demux_shared_incoming(server).await.unwrap();
+    assert!(matches!(
+        incoming,
+        IncomingConnection::ObfuscatedPeerMessages(_)
+    ));
+}
+
+#[tokio::test]
 async fn shared_demux_rejects_nested_collision_before_reading_body() {
     let message = InitMessage::PeerInit {
         username: "a".repeat(248),
