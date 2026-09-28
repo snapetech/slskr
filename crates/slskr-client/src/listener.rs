@@ -326,7 +326,9 @@ where
     let max = match InitCode::try_from(code) {
         Ok(InitCode::PierceFirewall) => PIERCE_FIREWALL_FRAME_LEN,
         Ok(InitCode::PeerInit) => MAX_PEER_INIT_FRAME_LEN,
-        Err(_) => return Ok(()),
+        // Unknown extension init frames share the known initialization bound.
+        // Large peer payloads belong after a successful initialization.
+        Err(_) => MAX_PEER_INIT_FRAME_LEN,
     };
     if length > max {
         return Err(ClientError::FrameTooLarge { length, max });

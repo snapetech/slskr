@@ -796,3 +796,50 @@ async fn shared_demux_rejects_oversized_firewall_init_before_buffering_body() {
         );
     }
 }
+
+#[tokio::test]
+async fn shared_demux_bounds_unknown_initialization_before_buffering_body() {
+    let length = slskr_client::io::DEFAULT_MAX_FRAME_LEN;
+    let mut plain_header = (length as u32).to_le_bytes().to_vec();
+    plain_header.extend_from_slice(&[0x42, 0, 0, 0]);
+    let obfuscated_header = encode_rotated(&plain_header[..5], 0x8000_0000);
+    for header in [plain_header, obfuscated_header] {
+        let (mut client, server) = duplex(64);
+        client.write_all(&header).await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+            .await
+            .expect("reject unknown init header without reading body")
+            .unwrap_err();
+        assert!(
+            matches!(error, ClientError::FrameTooLarge { length: actual, max: MAX_PEER_INIT_FRAME_LEN } if actual == length)
+        );
+    }
+}
+
+#[tokio::test]
+async fn shared_demux_accepts_unknown_extensions_at_initialization_bound() {
+    let unknown = InitMessage::Unknown {
+        code: 0x42,
+        payload: vec![0x55; MAX_PEER_INIT_FRAME_LEN - 1],
+    };
+    let plain = unknown.encode().unwrap().encode().unwrap();
+    let obfuscated = encode_rotated(&plain, 0x8000_0000);
+    for wire in [plain, obfuscated] {
+        let (mut client, server) = tcp_pair().await;
+        client.write_all(&wire).await.unwrap();
+        client.write_all(b"sentinel").await.unwrap();
+        let IncomingConnection::UnknownInit {
+            code,
+            payload,
+            mut stream,
+        } = demux_shared_incoming(server).await.unwrap()
+        else {
+            panic!("expected bounded unknown initialization");
+        };
+        assert_eq!(code, 0x42);
+        assert_eq!(payload.len(), MAX_PEER_INIT_FRAME_LEN - 1);
+        let mut following = [0; 8];
+        stream.read_exact(&mut following).await.unwrap();
+        assert_eq!(&following, b"sentinel");
+    }
+}

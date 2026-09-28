@@ -6025,3 +6025,14 @@ the rows, ledger digests, source commit, binary/module hashes, toolchain,
 platform, command, and timing metadata. This records real execution through
 the new module exports and the unavailable-storage rollback assertions.
 RF-024 remains open for the other controller include owners.
+
+## RF-001 Unknown Initialization Allocation Bound (2026-09-28 UTC)
+
+Unknown initialization codes previously retained the general 16 MiB frame
+limit on the shared listener even though known initialization is bounded.
+Header validation now applies `MAX_PEER_INIT_FRAME_LEN` to these extensions
+for both encodings, keeping receive allocation bounded before authentication.
+A header-only regression advertises the old general maximum and requires
+immediate rejection; another accepts extensions exactly at the initialization
+bound and preserves following bytes. All changes use the existing shared
+port. The legacy byte-level framing ambiguity remains open under RF-001.
