@@ -8,7 +8,7 @@ pub(in crate::cli) async fn distributed_tree_smoke() -> Result<(), String> {
     let address = listener
         .local_addr()
         .map_err(|error| format!("distributed listener address failed: {error}"))?;
-    let server_task = tokio::spawn(async move {
+    let server_task = ProbeTask::spawn(async move {
         let (incoming, _) = listener
             .accept()
             .await

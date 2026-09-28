@@ -7,7 +7,7 @@ pub(super) async fn run_direct_peer_message_smoke(local_username: &str) -> Resul
     let address = listener
         .local_addr()
         .map_err(|error| format!("peer listener address failed: {error}"))?;
-    let accept_task = tokio::spawn(async move { listener.accept().await });
+    let accept_task = ProbeTask::spawn(async move { listener.accept().await });
 
     let stream = TcpStream::connect(address)
         .await
@@ -77,7 +77,7 @@ pub(super) async fn run_obfuscated_peer_message_smoke(local_username: &str) -> R
     let address = listener
         .local_addr()
         .map_err(|error| format!("obfuscated peer listener address failed: {error}"))?;
-    let accept_task = tokio::spawn(async move { listener.accept_obfuscated().await });
+    let accept_task = ProbeTask::spawn(async move { listener.accept_obfuscated().await });
 
     let stream = TcpStream::connect(address)
         .await
@@ -143,7 +143,7 @@ pub(super) async fn run_direct_file_transfer_smoke(local_username: &str) -> Resu
     let address = listener
         .local_addr()
         .map_err(|error| format!("file listener address failed: {error}"))?;
-    let accept_task = tokio::spawn(async move { listener.accept().await });
+    let accept_task = ProbeTask::spawn(async move { listener.accept().await });
 
     let stream = TcpStream::connect(address)
         .await
@@ -245,7 +245,7 @@ pub(super) async fn run_indirect_peer_message_smoke(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| response.ip.to_string());
     let connect_address = format!("{connect_host}:{}", response.port);
-    let accept_task = tokio::spawn(async move { listener.accept().await });
+    let accept_task = ProbeTask::spawn(async move { listener.accept().await });
     let stream = time::timeout(timeout, TcpStream::connect(connect_address.as_str()))
         .await
         .map_err(|_| "indirect peer connect timed out".to_owned())?

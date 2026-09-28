@@ -582,6 +582,17 @@ if rg -n 'tokio::(task::)?spawn\(' \
   exit 1
 fi
 
+# Short-lived CLI fixture and accept tasks have cancellation owners too.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/cli_smoke_soak_owners/fixture_transfers.rs \
+  crates/slskr/src/cli_smoke_soak_owners/peer_probe_operations.rs \
+  crates/slskr/src/cli_smoke_soak_owners/peer_smoke_scenarios.rs \
+  crates/slskr/src/cli_smoke_soak_owners/server_smoke_scenarios.rs \
+  crates/slskr/src/cli_smoke_soak_owners/transfer_smoke_scenarios.rs; then
+  printf 'runtime boundary hardening failed: detached CLI probe task\n' >&2
+  exit 1
+fi
+
 # Administrative jobs share daemon shutdown ownership; forwarding has one
 # explicitly owned listener task and a bounded child join set.
 if rg -n 'tokio::(task::)?spawn\(' \

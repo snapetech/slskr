@@ -138,7 +138,7 @@ pub(in crate::cli) async fn malformed_peer_response_smoke() -> Result<(), String
     let address = listener
         .local_addr()
         .map_err(|error| format!("malformed-peer listener address failed: {error}"))?;
-    let server_task = tokio::spawn(async move {
+    let server_task = ProbeTask::spawn(async move {
         let (incoming, _) = listener
             .accept()
             .await

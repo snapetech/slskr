@@ -22,7 +22,7 @@ pub(in crate::cli) async fn transfer_resume_smoke() -> Result<(), String> {
     let server_payload = full_payload.to_vec();
     let server_filename = filename.to_owned();
     let offset_val = resume_offset;
-    let server_task = tokio::spawn(async move {
+    let server_task = ProbeTask::spawn(async move {
         let (incoming, _) = listener
             .accept()
             .await
@@ -169,7 +169,7 @@ pub(in crate::cli) async fn transfer_reject_smoke() -> Result<(), String> {
         .map_err(|e| format!("reject listener addr failed: {e}"))?;
 
     let server_filename = filename.to_owned();
-    let server_task = tokio::spawn(async move {
+    let server_task = ProbeTask::spawn(async move {
         let (incoming, _) = listener
             .accept()
             .await

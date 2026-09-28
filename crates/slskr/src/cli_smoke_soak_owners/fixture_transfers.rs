@@ -1,10 +1,11 @@
 use super::*;
 
 pub(in crate::cli) async fn await_fixture_server_task(
-    task: tokio::task::JoinHandle<Result<(), String>>,
+    task: impl Into<ProbeTask<Result<(), String>>>,
     probe: &str,
 ) -> Result<(), String> {
-    task.await
+    task.into()
+        .await
         .map_err(|error| format!("{probe} server task failed: {error}"))?
 }
 
@@ -21,7 +22,7 @@ pub(super) async fn run_fixture_browse_smoke(
         .local_addr()
         .map_err(|error| format!("fixture browse listener address failed: {error}"))?;
     let payload = build_fixture_shared_file_list_payload(virtual_filename, size)?;
-    let server_task = tokio::spawn(async move {
+    let server_task = ProbeTask::spawn(async move {
         let (incoming, _) = listener
             .accept()
             .await
@@ -87,7 +88,7 @@ pub(super) async fn run_fixture_download_smoke(
         .map_err(|_| "fixture download bytes exceed u64 size".to_owned())?;
     let expected_bytes = bytes.clone();
     let server_filename = virtual_filename.to_owned();
-    let server_task = tokio::spawn(async move {
+    let server_task = ProbeTask::spawn(async move {
         let (incoming, _) = listener
             .accept()
             .await

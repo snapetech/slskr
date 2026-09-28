@@ -7138,3 +7138,25 @@ This verifies the native shared UDP/QUIC endpoint on a clean Linux runner,
 including DHT-enabled routing. The full platform matrix was still running at
 receipt download; later script/WebSocket ownership changes are not covered
 by this earlier job. Broader RF-006 and deployed interop remain open.
+
+## RF-006 CLI Probe Child Cancellation (2026-09-28 UTC)
+
+Peer accept tasks and peer/server/transfer fixture workers now use an owned
+join handle. Awaiting preserves existing results and panic reporting; dropping
+a probe, failing before its final join, or timing out requests child abortion.
+There is no detached cleanup worker. Regressions wait for real pending TCP
+listeners, then verify handle drop, timeout, and parent task cancellation
+release child resources and permit rebinding. The parent cancellation case
+joins its parent, and child drop notification confirms its listener was
+released. Normal completion and child panic results are also covered.
+
+The existing probe helpers and fixtures remain intact; the original sources
+are backed up under ignored `target/rf-cli-probe-source-backup`. Source guards
+reject raw spawns in the five maintained fixture/accept owners. This adds no
+production listener or native transport port. Broader RF-006 service inventory,
+relay registration cleanup, and FTP concurrency policy remain open.
+
+Validation: 691 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and cancellation scope are retained in
+`benchmarks/artifacts/20260928-rf-cli-probe-child-ownership.json`.
