@@ -2,6 +2,111 @@
 
 use super::*;
 
+#[cfg(feature = "full-controller-tests")]
+#[tokio::test]
+pub(super) async fn controller_api_differential_share_stream_ticket_admission_enforces_grant_limits(
+) {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    {
+        let mut grants = state.share_grants.write().await;
+        grants.records.extend([
+            crate::share_grant_store::ShareGrantRecord {
+                id: "grant-limited".to_owned(),
+                collection_id: "collection-limited".to_owned(),
+                username: "recipient".to_owned(),
+                shared_at: crate::unix_timestamp(),
+                permissions: "stream".to_owned(),
+                max_concurrent_streams: Some(1),
+            },
+            crate::share_grant_store::ShareGrantRecord {
+                id: "grant-independent".to_owned(),
+                collection_id: "collection-independent".to_owned(),
+                username: "recipient".to_owned(),
+                shared_at: crate::unix_timestamp(),
+                permissions: "stream".to_owned(),
+                max_concurrent_streams: Some(1),
+            },
+        ]);
+    }
+    let mut tickets = state.stream_tickets.write().await;
+    let limited_first = tickets
+        .issue(
+            "share",
+            "share:grant-limited",
+            "content-one".to_owned(),
+            "one.flac".to_owned(),
+            None,
+            0,
+            "audio/flac".to_owned(),
+            60,
+        )
+        .expect("first limited stream ticket")
+        .0;
+    let limited_second = tickets
+        .issue(
+            "share",
+            "share:grant-limited",
+            "content-two".to_owned(),
+            "two.flac".to_owned(),
+            None,
+            0,
+            "audio/flac".to_owned(),
+            60,
+        )
+        .expect("second limited stream ticket")
+        .0;
+    let independent = tickets
+        .issue(
+            "share",
+            "share:grant-independent",
+            "content-other".to_owned(),
+            "other.flac".to_owned(),
+            None,
+            0,
+            "audio/flac".to_owned(),
+            60,
+        )
+        .expect("independent grant stream ticket")
+        .0;
+    drop(tickets);
+
+    let first = crate::share_stream_limits::acquire_ticket_stream(
+        &state,
+        "content-one",
+        Some(&format!("ticket={limited_first}")),
+    )
+    .await
+    .expect("first stream admission")
+    .expect("ticketed share stream lease");
+    assert!(matches!(
+        crate::share_stream_limits::acquire_ticket_stream(
+            &state,
+            "content-two",
+            Some(&format!("ticket={limited_second}")),
+        )
+        .await,
+        Err(crate::share_stream_limits::AdmissionError::Busy)
+    ));
+    let independent = crate::share_stream_limits::acquire_ticket_stream(
+        &state,
+        "content-other",
+        Some(&format!("ticket={independent}")),
+    )
+    .await
+    .expect("other-grant admission")
+    .expect("other grants have independent capacity");
+    drop(first);
+    assert!(crate::share_stream_limits::acquire_ticket_stream(
+        &state,
+        "content-two",
+        Some(&format!("ticket={limited_second}")),
+    )
+    .await
+    .expect("released grant capacity")
+    .is_some());
+    drop(independent);
+}
+
 #[cfg_attr(
     all(
         test,
