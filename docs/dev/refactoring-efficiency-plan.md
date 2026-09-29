@@ -1,6 +1,6 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, as of 2026-09-29 UTC. GitHub CI run 36613453093 on 69cf4141 passed all 11 jobs, including every supported platform and Package and deployment surfaces. GitLab pipeline 162 on 69cf4141 passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; the 2026-09-29 deployed RF-059 follow-up clears the CSP finding but does not claim physical-device performance; release publication remains a separate versioned operation.
+Status: active whole-project implementation plan, as of 2026-09-29 UTC. GitHub CI run 36613453093 on 69cf4141 passed all 11 jobs, including every supported platform and Package and deployment surfaces. GitLab pipeline 162 on 69cf4141 passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; the RF-059 route and bundle work is verified and its deployed CSP finding is cleared, with no claim of physical-device performance; release publication remains a separate versioned operation.
 
 
 Audit baseline date: 2026-09-15; evidence addenda through 2026-09-29 UTC
@@ -7933,8 +7933,10 @@ console errors on System and Integrations; they remain open for follow-up. The
 container, source revision, route counts, CSP finding, and restoration record
 are retained in
 [`20260928-rf059-kspls0-deployed-route-audit.md`](../../benchmarks/artifacts/20260928-rf059-kspls0-deployed-route-audit.md).
-RF-059 remains in progress pending device-performance evidence and resolution
-of the deployed CSP finding.
+The RF-059 route and bundle checks recorded in the table above are complete.
+The deployed CSP errors remained open for follow-up at this point; measuring
+performance on a physical phone is additional evidence, not a completion
+condition for RF-059.
 
 ## RF-059 CSP Nonce Metadata Follow-up (2026-09-28 UTC)
 
@@ -8004,12 +8006,13 @@ and its per-view JSON artifact. Both temporary kspls0 windows restored the
 healthy slskd service; their containers, remote env files, guards, and SSH
 tunnels were removed.
 
-This 30-view run supersedes the earlier open CSP status in this plan. It also
-used browser viewport and CPU/network emulation rather than a physical handset.
-Neither the local host nor kspls0 had ADB or a connected Android device, and
-the repository has no configured GitHub hosted-device service credentials.
-The physical-device performance portion therefore remains external and has no
-measured result.
+This 30-view run supersedes the earlier open CSP status in this plan and
+completes the RF-059 route and bundle checks recorded in the table. It used
+phone-sized browser views and CPU/network emulation rather than a physical
+handset. No Android Debug Bridge (ADB) client or connected Android device was
+available locally or on kspls0, and the repository has no configured GitHub
+hosted-device service credentials. Real-phone performance was not measured or
+claimed; that optional measurement does not keep RF-059 open.
 
 ## RF-066 Deployed Owner Stream Saturation and Current Hosted Proof (2026-09-29 UTC)
 
