@@ -56,3 +56,30 @@ remained open; RF-006 retains its broader managed-service lifecycle scope.
 This closes deployed recipient-backfill evidence. Per-grant concurrent-stream
 admission remains locally verified; deployed saturation under concurrent
 streams and the broader RF-006 lifecycle acceptance remain open.
+
+## Deployed owner stream saturation (2026-09-29 UTC)
+
+This is internal-only operational evidence; no product code or published
+behavior changed.
+
+A temporary swap used the hardened slskr-rf059:b42e01c5-trixie image and
+test account 4 from the protected repository .env. The container reused the
+single peer endpoint on TCP/UDP 44508 and loopback HTTP on 127.0.0.1:5030. Its
+root filesystem was read-only, runtime state was temporary, and it had no host
+media mounts. The 8 MiB sparse FLAC fixture was held in /run and mounted
+read-only.
+
+The authenticated owner API created a collection, added the fixture, created a
+test-account-3 grant with maxConcurrentStreams=1, and issued a share token
+and content-bound stream ticket. A real ranged HTTP response was left open
+without draining its body: the held stream returned 206, the concurrent
+request returned 429, and a new range request returned 206 after the held
+socket closed. This verifies the deployed owner's stream admission and release
+path. This probe did not run a second recipient process or a signed peer
+announcement; the preceding backfill receipt covers that peer path.
+
+The temporary container and credentials, fixture, test driver, restore script,
+and recovery timer were removed. slskd.service returned healthy, the VPN
+watchdog and ingress-renewal timers and ingress service were active, local
+peer port 44508 was listening, both pre-existing Proton namespaces remained,
+and the temporary paths and timer were absent.
