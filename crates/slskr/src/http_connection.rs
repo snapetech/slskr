@@ -652,6 +652,7 @@ where
                 Some(&state.config.controller_web.content_path),
                 state.config.controller_profile,
                 !state.config.current_upstream_behavior,
+                req.headers.accept_encoding.as_deref(),
                 method == "GET",
                 keep_alive,
                 &cors_str,
