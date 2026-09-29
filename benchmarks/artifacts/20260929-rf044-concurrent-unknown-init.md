@@ -14,6 +14,7 @@ Validation:
 
 - `scripts/check-rust-format.sh` passes.
 - `cargo test --locked -p slskr-client --test listener shared_demux_concurrently_rejects_oversized_unknown_headers_without_body -- --exact` passes (1 test).
+- The full current-source GitLab pipeline 148 and GitHub CI run 36566959004 both passed on commit `8265032a`; each runs the workspace client listener tests.
 
 This closes the concurrent header-preflight stress gap. Unknown extension init
 frames above 8,205 bytes remain intentionally unsupported before peer
