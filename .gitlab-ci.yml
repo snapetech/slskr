@@ -15,6 +15,7 @@ rust:
   stage: test
   image: rust:1.94-bookworm
   before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends nodejs
     - rustup component add clippy rustfmt
     - rustup target add wasm32-unknown-unknown
   script:
@@ -63,6 +64,7 @@ node:dashboard:
     paths:
       - dashboard/.npm/
   before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends python3
     - npm --prefix dashboard ci --cache dashboard/.npm --prefer-offline
   script:
     - npm --prefix dashboard run type-check
