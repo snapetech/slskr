@@ -911,6 +911,51 @@ async fn shared_demux_bounds_unknown_initialization_before_buffering_body() {
 }
 
 #[tokio::test]
+async fn shared_demux_concurrently_rejects_oversized_unknown_headers_without_body() {
+    const CONNECTIONS: usize = 64;
+    let length = slskr_client::io::DEFAULT_MAX_FRAME_LEN;
+    let mut clients = Vec::with_capacity(CONNECTIONS);
+    let mut tasks = tokio::task::JoinSet::new();
+
+    for index in 0..CONNECTIONS {
+        let (mut client, server) = tcp_pair().await;
+        let mut plain_header = (length as u32).to_le_bytes().to_vec();
+        plain_header.extend_from_slice(&[0x42, 0, 0, 0]);
+        let header = if index % 2 == 0 {
+            plain_header
+        } else {
+            encode_rotated(&plain_header[..5], 0x8000_0000)
+        };
+        client.write_all(&header).await.unwrap();
+        clients.push(client);
+
+        tasks.spawn(async move {
+            tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+                .await
+                .expect("oversized unknown header is rejected before waiting for its body")
+                .unwrap_err()
+        });
+    }
+
+    for _ in 0..CONNECTIONS {
+        let error = tasks
+            .join_next()
+            .await
+            .expect("one parser task remains")
+            .expect("parser task did not panic");
+        assert!(matches!(
+            error,
+            ClientError::FrameTooLarge {
+                length: actual,
+                max: MAX_PEER_INIT_FRAME_LEN
+            } if actual == length
+        ));
+    }
+
+    drop(clients);
+}
+
+#[tokio::test]
 async fn shared_demux_accepts_unknown_extensions_at_initialization_bound() {
     let unknown = InitMessage::Unknown {
         code: 0x42,

@@ -24,5 +24,15 @@ budget remains 21 rather than being raised to include the redundant read.
 
 `scripts/check-rust-format.sh` passes, and the direct locked release build
 `cargo build --locked -p slskr-web --release --target wasm32-unknown-unknown`
-passes in 7.13 seconds. A current-source hosted Live Parity browser rerun is
-pending; this record does not claim that rerun passed.
+passes in 7.13 seconds. The hosted Live Parity rerun was pending when this
+correction was first recorded; see the revalidation below.
+
+## Current-source revalidation
+
+Live Parity run
+[`36565318189`](https://github.com/snapetech/slskr/actions/runs/36565318189)
+on `1283666858fd85e9733f79b4f1daa982a5d5f05a` passed both the Rust UI/API
+audit and credentialed public interop jobs. The retained audit JSON records all
+30 desktop/mobile route views with zero errors; desktop `/collections` made
+21 requests against its 21-request budget. This confirms the corrected action
+path no longer performs the extra route refresh.
