@@ -64,13 +64,16 @@ To validate a released Chocolatey package on a clean Windows runner without
 publishing it, dispatch the existing workflow with `publish=false`:
 
 ```sh
-gh workflow run publish-chocolatey.yml --ref main -f tag=release-v0.2.40 -f publish=false
+tag="$(git describe --tags --match 'release-v*' --abbrev=0)"
+gh workflow run publish-chocolatey.yml --ref main -f tag="$tag" -f publish=false
 ```
 
-Select the released tag being reviewed. The workflow verifies the downloaded
-release asset against `SHA256SUMS.txt`, packs and checks the nupkg, and retains
-the package and a source-bound receipt for 30 days. The default `publish=true`
-preserves the manual publication flow and requires configured credentials.
+The command selects the newest release tag reachable from the current checkout;
+set `tag` directly to inspect another release. The workflow verifies the
+downloaded release asset against `SHA256SUMS.txt`, packs and checks the nupkg,
+and retains the package and a source-bound receipt for 30 days. The default
+`publish=true` preserves the manual publication flow and requires configured
+credentials.
 
 ## Local Archive
 
