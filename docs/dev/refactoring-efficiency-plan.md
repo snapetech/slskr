@@ -7819,8 +7819,7 @@ filesystem operation already inside a stalled mounted I/O remains unproved and
 is not represented as complete. Windows Smoke run
 [36462085991](https://github.com/snapetech/slskr/actions/runs/36462085991)
 passed its Rust, WASM, and Web checks on `46854887`, before the runtime teardown
-cap was added. Fresh hosted proof for that policy is pending. The GitLab mirror
-remains blocked by its corrupt existing object recorded under RF-008.
+cap was added. Fresh hosted proof for that policy is pending. At the time of this 2026-09-28 checkpoint, the GitLab mirror was still blocked by the RF-008 loose object. That blob was repaired later on 2026-09-28, and GitLab pipeline 155 on 2026-09-29 passed on `b06c78ec`.
 
 ## RF-073 Live Parity Smoke Isolation (2026-09-28 UTC)
 
@@ -8158,3 +8157,7 @@ commit also remains pending. The temporary service was removed and the
 original slskd service and listener layout were restored. Detailed records are
 in [`Dashboard audit`](../../benchmarks/artifacts/20260929-rf049-rf052-rf057-rf061-kspls0-dashboard.md)
 and [`Web route audit`](../../benchmarks/artifacts/20260929-rf056-rf064-kspls0-web-route-audit.md).
+
+## RF-008 GitLab Loose-Object Revalidation (2026-09-29 UTC)
+
+The repaired GitLab repository contains blob `272d9b69345294fa1aa98ec3a83a9383c87be9e2`; its type is `blob`, its size is 457,048 bytes, and `git hash-object` recomputes the same object ID. A full strict fsck of the GitLab project repository passes. The original damaged loose object remains in the existing backup at `/var/opt/gitlab/backups/object-repair-272d9b69345294fa1aa98ec3a83a9383c87be9e2-20260928/damaged.loose-object` (103,870 bytes, mode 0444). GitLab `main` resolves to `5b7109e20cf631a481ac2ff805b7451fb71456d6` at the time of the check; pipeline 155 on `b06c78ec` passed. Machine-reproducible checks and the boundary between this repaired Git blob and the separately unrecovered historical MinIO avatar/job-artifact objects are recorded in [`GitLab object verification`](../../benchmarks/artifacts/20260929-rf008-gitlab-object-recovery-verification.md).
