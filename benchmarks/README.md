@@ -101,5 +101,18 @@ diagnostic only and sets no CI timing threshold.
 
 ```bash
 cargo bench --locked -p slskr-client --bench search_response_dedup -- \
-  --output ../../benchmarks/artifacts/search-response-dedup.json
+  --output benchmarks/artifacts/search-response-dedup.json
+```
+
+The RF-038 share-cache diagnostic compares the production writer with its
+previous `replace`/`format!`/`Vec<String>` serializer. It generates 50,000 file
+entries with a bounded mix of tabs, newlines, and backslashes, verifies that
+both implementations produce identical bytes, and records allocation calls,
+requested bytes, and elapsed time. It requires no daemon, network, or database
+and is not a CI threshold.
+
+```bash
+cargo run --locked -p slskr --features rf-benchmarks \
+  --example share_cache_allocations -- \
+  --output benchmarks/artifacts/share-cache-allocations.json
 ```

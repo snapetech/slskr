@@ -105,15 +105,13 @@ fn median(mut values: Vec<u128>) -> u128 {
 
 fn output_path() -> Option<PathBuf> {
     let mut args = std::env::args_os().skip(1);
-    while let Some(argument) = args.next() {
-        if argument == "--output" {
-            return Some(PathBuf::from(
-                args.next().expect("--output requires a path"),
-            ));
-        }
-        panic!("unknown argument: {}", argument.to_string_lossy());
+    match args.next() {
+        Some(argument) if argument == "--output" => Some(PathBuf::from(
+            args.next().expect("--output requires a path"),
+        )),
+        Some(argument) => panic!("unknown argument: {}", argument.to_string_lossy()),
+        None => None,
     }
-    None
 }
 
 fn main() {

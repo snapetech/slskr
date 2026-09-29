@@ -27,6 +27,10 @@ path = "src/bin/slskr-bounded-differential.rs"
 test = false
 bench = false
 
+[[example]]
+name = "share_cache_allocations"
+required-features = ["rf-benchmarks"]
+
 [features]
 default = ["focused-controller-tests"]
 focused-controller-tests = []
@@ -49,6 +53,7 @@ bounded-file-lifecycle-tests = ["bounded-differential"]
 bounded-protocol-tests = ["bounded-differential"]
 bounded-security-control-tests = ["bounded-differential"]
 bounded-security-authorization-tests = ["bounded-differential"]
+rf-benchmarks = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -98,6 +103,9 @@ openssl = "0.10"
 
 [target.'cfg(any(target_os = "windows", target_env = "musl"))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+
+[dev-dependencies]
+stats_alloc = "=0.1.10"
 
 [lints]
 workspace = true

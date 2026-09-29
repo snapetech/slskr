@@ -211,6 +211,9 @@ mod source_discovery_state;
     reason = "storage codecs are retained for cache and compatibility formats"
 )]
 mod storage;
+#[cfg(feature = "rf-benchmarks")]
+#[doc(hidden)]
+pub use storage::rf_benchmark_write_share_cache;
 #[allow(
     dead_code,
     reason = "tracing context helpers are retained for optional instrumentation"
