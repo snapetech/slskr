@@ -74,6 +74,7 @@ describe('webhook request lifecycle', () => {
     expect(requestJson).toHaveBeenNthCalledWith(2, '/api/admin/webhooks', 'test-key', {
       method: 'POST',
       body: JSON.stringify({ url: webhook.url, events: ['transfer.completed'] }),
+      signal: expect.any(AbortSignal),
     });
     expect(screen.queryByText('Create Webhook')).toBeNull();
   });
@@ -106,6 +107,7 @@ describe('webhook request lifecycle', () => {
     expect(await screen.findByText('No webhooks configured')).toBeTruthy();
     expect(requestJson).toHaveBeenNthCalledWith(2, '/api/admin/webhooks/hook%2Fone', 'test-key', {
       method: 'DELETE',
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -123,6 +125,7 @@ describe('webhook request lifecycle', () => {
     await waitFor(() => expect(alert).toHaveBeenCalledWith('Test webhook sent!'));
     expect(requestJson).toHaveBeenNthCalledWith(2, '/api/admin/webhooks/hook%2Fone/test', 'test-key', {
       method: 'POST',
+      signal: expect.any(AbortSignal),
     });
     await user.click(button);
     expect((await screen.findByRole('alert')).textContent).toContain('Delivery failed');
