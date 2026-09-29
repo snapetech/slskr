@@ -144,6 +144,28 @@ describe('Messaging', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps joined pod channels visible and reports detail-load failures', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+        name: 'Gold Star Club',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockRejectedValue(new Error('pod detail unavailable'));
+
+    render(
+      <MemoryRouter>
+        <Messaging />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Pod pod-1: pod detail unavailable/)).toBeInTheDocument();
+    expect(await screen.findByText('Gold Star Club / General')).toBeInTheDocument();
+  });
+
   it('refreshes conversations when a message websocket event arrives', async () => {
     chat.getAll
       .mockResolvedValueOnce([])
