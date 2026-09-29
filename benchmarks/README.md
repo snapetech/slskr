@@ -91,3 +91,15 @@ SQLite version are separate evidence.
 python3 benchmarks/benchmark-sqlite-cardinality.py \
   --output benchmarks/artifacts/sqlite-cardinality.json
 ```
+
+The RF-046 search-response diagnostic compares the current fingerprint bucket
+with the former linear equality scan using 900 seeded responses, 11 files per
+response, and 900 duplicates of the final seeded response. The benchmark uses
+the production `SearchResults` acceptance path for the current implementation
+and a direct `Vec::contains` reference for the former comparison. It is
+diagnostic only and sets no CI timing threshold.
+
+```bash
+cargo bench --locked -p slskr-client --bench search_response_dedup -- \
+  --output ../../benchmarks/artifacts/search-response-dedup.json
+```
