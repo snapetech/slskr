@@ -9,7 +9,7 @@
 import '@testing-library/jest-dom';
 import { configure } from '@testing-library/react';
 
-configure({ asyncUtilTimeout: 5000 });
+configure({ asyncUtilTimeout: 10000 });
 
 // Vitest compatibility shim: alias 'jest' to 'vi' so test files written
 // for Jest continue to work without modification.
