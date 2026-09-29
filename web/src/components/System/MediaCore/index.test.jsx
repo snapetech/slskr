@@ -1377,11 +1377,13 @@ describe('MediaCore', () => {
     render(<MediaCore />);
     await screen.findByText('MediaCore ContentID Registry');
 
-    fireEvent.change(screen.getByPlaceholderText('Pod ID'), {
+    fireEvent.change(await screen.findByPlaceholderText('Pod ID'), {
       target: { value: 'pod-1' },
     });
     fireEvent.change(
-      screen.getByPlaceholderText('Content ID (e.g., content:audio:album:mb-id)'),
+      await screen.findByPlaceholderText(
+        'Content ID (e.g., content:audio:album:mb-id)',
+      ),
       { target: { value: 'content-1' } },
     );
     fireEvent.click(screen.getByRole('button', { name: 'Get Opinions' }));
