@@ -232,15 +232,14 @@ export const createBatch = async ({ queries = [], providers = null } = {}) => {
   return normalizedQueries.length;
 };
 
-export const getStatus = async ({ id, includeResponses = false }) => {
+export const getStatus = async ({ id, includeResponses = false, signal }) => {
   const parameters = new URLSearchParams({
     includeResponses: String(includeResponses),
   });
-  const response = (
-    await api.get(
-      `/searches/${encodeURIComponent(id)}?${parameters.toString()}`,
-    )
-  ).data;
+  const path = `/searches/${encodeURIComponent(id)}?${parameters.toString()}`;
+  const response = (await (signal
+    ? api.get(path, { signal })
+    : api.get(path))).data;
   return requireObjectResponse(response, 'search status');
 };
 

@@ -624,10 +624,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
 
     const loadSearch = async () => {
       try {
-        const search = await library.getStatus({ id: searchId });
+        const search = await library.getStatus({
+          id: searchId,
+          signal: controller.signal,
+        });
         const resolvedId = searchEventIdentifier(search);
         if (
           cancelled ||
@@ -653,6 +657,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     connecting,
