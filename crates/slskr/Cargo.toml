@@ -31,6 +31,10 @@ bench = false
 name = "share_cache_allocations"
 required-features = ["rf-benchmarks"]
 
+[[example]]
+name = "search_result_delta"
+required-features = ["rf-benchmarks"]
+
 [features]
 default = ["focused-controller-tests"]
 focused-controller-tests = []

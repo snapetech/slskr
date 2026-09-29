@@ -214,6 +214,11 @@ mod storage;
 #[cfg(feature = "rf-benchmarks")]
 #[doc(hidden)]
 pub use storage::rf_benchmark_write_share_cache;
+#[cfg(feature = "rf-benchmarks")]
+#[doc(hidden)]
+pub use persistence::{
+    DatabaseManager, SearchRecord as RfBenchmarkSearchRecord, SearchResultRecord,
+};
 #[allow(
     dead_code,
     reason = "tracing context helpers are retained for optional instrumentation"
