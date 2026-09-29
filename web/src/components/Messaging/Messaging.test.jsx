@@ -5,7 +5,7 @@ import * as pods from '../../lib/pods';
 import React from 'react';
 import * as rooms from '../../lib/rooms';
 import { MemoryRouter } from 'react-router-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { hubHandlers, makeHub } = vi.hoisted(() => {
@@ -166,7 +166,7 @@ describe('Messaging', () => {
     expect(await screen.findByText('Gold Star Club / General')).toBeInTheDocument();
   });
 
-  it('refreshes conversations when a message websocket event arrives', async () => {
+  it('coalesces a burst of message and room events into one workspace refresh', async () => {
     chat.getAll
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -189,11 +189,22 @@ describe('Messaging', () => {
       expect(screen.getByText('Saved Chats')).toBeInTheDocument();
     });
 
-    hubHandlers['messages:changed']?.({ resource: 'new-friend' });
-
-    await waitFor(() => {
-      expect(screen.getByText('new-friend')).toBeInTheDocument();
+    act(() => {
+      for (let index = 0; index < 25; index += 1) {
+        hubHandlers['messages:changed']?.({ resource: 'new-friend' });
+        hubHandlers['rooms:changed']?.({ resource: 'indie' });
+      }
     });
+
+    expect(chat.getAll).toHaveBeenCalledTimes(1);
+
+    await waitFor(
+      () => {
+        expect(chat.getAll).toHaveBeenCalledTimes(2);
+        expect(screen.getByText('new-friend')).toBeInTheDocument();
+      },
+      { timeout: 2_500 },
+    );
   });
 
   it('coalesces a message event with an in-flight workspace hydration', async () => {
@@ -219,10 +230,36 @@ describe('Messaging', () => {
     expect(chat.getAll).toHaveBeenCalledTimes(1);
     resolveInitialHydration([]);
 
-    await waitFor(() => {
-      expect(chat.getAll).toHaveBeenCalledTimes(2);
-      expect(screen.getByText('after-hydration')).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(chat.getAll).toHaveBeenCalledTimes(2);
+        expect(screen.getByText('after-hydration')).toBeInTheDocument();
+      },
+      { timeout: 2_500 },
+    );
+  });
+
+  it('cancels a scheduled event refresh when the workspace unmounts', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([]);
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <Messaging state={{ user: { username: 'me' } }} />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Saved Chats');
+    expect(chat.getAll).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      hubHandlers['messages:changed']?.({ resource: 'new-friend' });
     });
+    unmount();
+    await new Promise((resolve) => window.setTimeout(resolve, 1_100));
+
+    expect(chat.getAll).toHaveBeenCalledTimes(1);
   });
 
   it('opens chat and room panels and collapses them into the dock', async () => {
