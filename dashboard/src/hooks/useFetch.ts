@@ -153,8 +153,16 @@ export function useFetch<T>(
     void fetchData();
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden' && !requestRef.current) {
-        if (intervalRef.current) {
+      if (document.visibilityState === 'hidden') {
+        if (intervalRef.current !== null) {
+          clearTimeout(intervalRef.current);
+          intervalRef.current = null;
+        }
+        return;
+      }
+
+      if (!requestRef.current) {
+        if (intervalRef.current !== null) {
           clearTimeout(intervalRef.current);
           intervalRef.current = null;
         }

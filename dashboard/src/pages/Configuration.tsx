@@ -221,7 +221,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
             onChange={(event) => setPreferences((current) => current
               ? { ...current, autoreplace_enabled: event.target.checked }
               : current)}
-            className="w-4 h-4"
+            className="h-6 w-6"
           />
           Enable automatic replacement
         </label>
@@ -239,7 +239,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
         <button
           onClick={savePreferences}
           disabled={!preferences || saving !== null}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+          className="flex items-center gap-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
           {saving === 'preferences' ? 'Saving...' : 'Save preferences'}

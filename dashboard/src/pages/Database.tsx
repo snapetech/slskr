@@ -141,14 +141,14 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
         <div className="space-y-3">
           <button
             onClick={() => handleCleanup(30)}
-            className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
+            className="w-full px-4 py-2 bg-orange-800 text-white rounded-lg hover:bg-orange-900 flex items-center gap-2"
           >
             <Trash2 className="w-4 h-4" />
             Cleanup Records (30+ days old)
           </button>
           <button
             onClick={() => handleCleanup(90)}
-            className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
+            className="w-full px-4 py-2 bg-orange-800 text-white rounded-lg hover:bg-orange-900 flex items-center gap-2"
           >
             <Trash2 className="w-4 h-4" />
             Cleanup Records (90+ days old)
