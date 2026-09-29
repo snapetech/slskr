@@ -1,6 +1,6 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, as of 2026-09-29 UTC. GitHub CI run 36613453093 on 69cf4141 passed all 11 jobs, including every supported platform and Package and deployment surfaces. GitLab pipeline 162 on 69cf4141 passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; release publication and external physical-device evidence remain separately scoped.
+Status: active whole-project implementation plan, as of 2026-09-29 UTC. GitHub CI run 36613453093 on 69cf4141 passed all 11 jobs, including every supported platform and Package and deployment surfaces. GitLab pipeline 162 on 69cf4141 passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; the 2026-09-29 deployed RF-059 follow-up clears the CSP finding but does not claim physical-device performance; release publication remains a separate versioned operation.
 
 
 Audit baseline date: 2026-09-15; evidence addenda through 2026-09-29 UTC
@@ -8003,6 +8003,13 @@ asset request confirmed gzip negotiation. The full result is retained in
 and its per-view JSON artifact. Both temporary kspls0 windows restored the
 healthy slskd service; their containers, remote env files, guards, and SSH
 tunnels were removed.
+
+This 30-view run supersedes the earlier open CSP status in this plan. It also
+used browser viewport and CPU/network emulation rather than a physical handset.
+Neither the local host nor kspls0 had ADB or a connected Android device, and
+the repository has no configured GitHub hosted-device service credentials.
+The physical-device performance portion therefore remains external and has no
+measured result.
 
 ## RF-066 Deployed Owner Stream Saturation and Current Hosted Proof (2026-09-29 UTC)
 
