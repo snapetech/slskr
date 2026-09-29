@@ -39,3 +39,29 @@ The advisory lists `undici@8.10.2` as patched:
 - No SQL marker was changed to claim unavailable remote objects were local, and
   no object was deleted or fabricated. Existing avatar/artifact object content
   remains unrecovered; GitLab push-triggered pipeline proof remains open.
+
+## Superseding storage and pipeline status (2026-09-29 UTC)
+
+The preceding section records the pre-recovery state. GitLab's consolidated
+object store is now enabled against the SeaweedFS S3 endpoint, with artifacts
+written to the configured `gitlab-artifacts` bucket. An authenticated SigV4
+probe from `gitlab-external` wrote an object, read back identical bytes, and
+deleted it successfully (HTTP 200/200/204). The probe object was removed.
+
+The existing GitLab PAT `snape-gitlab-mcp-admin-2026-09` was rotated in place.
+The protected local configuration files are mode `0600`; authenticated
+`GET /api/v4/user` returns the expected admin account. The already-running
+GitLab MCP process still has its previous token cached and returns 401; a newly
+started MCP process will read the rotated value. No token value is stored here.
+
+GitLab pipeline 141 on `af16a5ad` passed its Rust, Go, Web, dashboard,
+TypeScript, and `github:mirror` jobs, demonstrating that default-branch pushes
+schedule and complete CI again. Pipeline 142 on exact source `1dcbb95a` passed
+all six jobs: Rust, Go, Web, dashboard, TypeScript, and `github:mirror`. This
+also verifies the retention-shutdown cancellation change on a clean GitLab
+runner and confirms GitLab mirrored the same branch tip to GitHub.
+
+The original MinIO data volume is still absent: the available Velero backup
+explicitly skipped its volume data. Historical avatar and artifact object
+bytes therefore remain unrecovered. New pipeline artifacts are being written
+to the active object store; this does not reconstruct the old objects.
