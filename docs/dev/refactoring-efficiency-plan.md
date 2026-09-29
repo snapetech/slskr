@@ -8188,3 +8188,14 @@ pass. The release behavior is recorded in
 [`the Web messaging release note`](../../release-notes/20260929-web-messaging-event-coalescing.md).
 The current source tip still needs definitive GitHub and GitLab hosted matrix
 results before these RF rows have hosted verification.
+
+## RF-006 Hosted Share-Scan Shutdown Gate (2026-09-29 UTC)
+
+The GitHub Linux Rust job now runs
+[`run-rf-shutdown-overlap.py`](../../scripts/run-rf-shutdown-overlap.py) with
+a 20,000-file fixture after building the exact-source daemon. It overlaps a
+live share scan and distributed child connection with SIGTERM, then verifies
+clean restart, abrupt-crash recovery, socket closure, and SQLite integrity.
+The JSON receipt is added to the 30-day reproducibility artifact with its
+source and binary hashes. This is internal-only CI acceptance coverage; it
+adds no product listener or port. The hosted run for this gate is pending.
