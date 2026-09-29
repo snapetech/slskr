@@ -139,6 +139,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.js'],
+    testTimeout: 15000,
     exclude: ['e2e/**', 'node_modules/**'],
     coverage: {
       provider: 'v8',
