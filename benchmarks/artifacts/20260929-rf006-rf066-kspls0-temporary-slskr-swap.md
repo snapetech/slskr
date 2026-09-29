@@ -24,7 +24,35 @@ changed.
   The test container, temporary credentials, restore script, and timer were
   removed.
 
-This verifies deployed startup, authenticated Soulseek login, the shared
-single peer/DHT port, and restoration. It does not exercise deployed mesh
-backfill or per-grant concurrent-stream admission, so RF-066 remains open for
-that evidence; RF-006 retains its broader managed-service lifecycle scope.
+The initial startup-only swap verified deployed startup, authenticated
+Soulseek login, the shared single peer/DHT port, and restoration. At that
+stage, deployed mesh backfill and per-grant concurrent-stream admission
+remained open; RF-006 retains its broader managed-service lifecycle scope.
+
+## Deployed recipient backfill (2026-09-29 UTC)
+
+- A second bounded swap used the same hardened SlskR image and test accounts:
+  account 4 as owner on kspls0 and account 3 as recipient in an isolated
+  Proton namespace. The recipient's NAT-PMP mapping and the owner's existing
+  ingress both forwarded to the existing local peer listener on port 44508.
+  The owner continued to use its existing public peer port 53514; no additional
+  peer listener or public port was added.
+- The owner initially had `SLSKR_PEER_HOST_OVERRIDE` set to its own address.
+  That setting overrides outbound peer destinations, so the capability probe
+  tried the wrong IP. Removing the override allowed the owner to receive and
+  validate the recipient's signed capability descriptor over the real
+  Soulseek peer path.
+- The recipient accepted the synthetic grant announcement with HTTP 201. Its
+  signed, certificate-pinned MeshContent backfill returned HTTP 200 with one
+  downloaded item and zero failures. The on-disk file was 131,072 bytes and
+  matched SHA-256
+  `a5ca21d995e6b075abf6bcb9e785f59a987e726477eb21541d86b7da494cc9ca`.
+- The temporary owner and recipient were stopped, test tokens and fixtures
+  removed, and `slskd.service` restored. The container reported healthy; the
+  watchdog, ingress-renewal timer, and ingress service were active. The shared
+  local peer port 44508 was listening, the temporary recipient namespace was
+  gone, and no `rf066_` firewall rules remained.
+
+This closes deployed recipient-backfill evidence. Per-grant concurrent-stream
+admission remains locally verified; deployed saturation under concurrent
+streams and the broader RF-006 lifecycle acceptance remain open.

@@ -7776,6 +7776,38 @@ on disk. The focused Web collection tests pass (15 tests); changed-file Rust
 formatting and active-plan freshness pass. This proves local behavior over the
 one shared native peer port; focused owner per-grant admission is also verified locally. Fresh hosted or deployed-device evidence remains open under RF-066 and the associated live-evidence rows. A focused full-controller regression holds a stream lease from the real ticket-admission helper, rejects a second ticket under the same grant's limit of one, allows another grant concurrently, and verifies capacity recovery after release. Live socket saturation and deployed-peer evidence remain open.
 
+## RF-066 Deployed Recipient Backfill Receipt (2026-09-29 UTC)
+
+This is internal-only operational evidence; no product code or published
+behavior changed.
+
+The deployed recipient backfill was verified on kspls0 with a temporary SlskR
+owner using test account 4 and a recipient using test account 3 in an isolated
+Proton namespace. Both used their existing local peer listener on port 44508;
+the owner retained its existing public ingress on port 53514. No additional
+peer listener or public port was introduced. The recipient's temporary HTTP
+API was bound only inside its host-local test namespace.
+
+The first signed attempt exposed a test configuration error: the owner's
+`SLSKR_PEER_HOST_OVERRIDE` rewrote outbound peer destinations to the owner's
+address. Removing that override allowed the owner to probe the recipient's
+actual NAT-PMP endpoint and accept its signed capability descriptor. This is
+the required authenticated identity record for the certificate-pinned
+`MeshContent` backfill. The owner certificate pin remained unchanged.
+
+The recipient accepted the grant announcement with HTTP 201. Backfill then
+returned HTTP 200 (`downloaded`, one item, zero failures). The recipient's
+on-disk file was 131,072 bytes with SHA-256
+`a5ca21d995e6b075abf6bcb9e785f59a987e726477eb21541d86b7da494cc9ca`, matching
+the synthetic owner's fixture. The owner, recipient, temporary token, and
+fixture were removed after the proof. The original `slskd.service` was
+restored healthy with its watchdog and ingress-renewal timers active; no
+RF-066 firewall rules or test network namespace remained.
+
+This closes the deployed recipient-backfill evidence gap. The focused local
+regression still proves per-grant admission and independent-grant capacity;
+deployed concurrent-stream saturation remains open under RF-066.
+
 ## RF-006 Blocking Work Inventory Checkpoint (2026-09-28 UTC)
 
 `docs/dev/blocking-work-ownership.md` classifies all nine production
