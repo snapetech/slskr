@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -20,6 +23,41 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 
 type contextBody struct {
 	context context.Context
+}
+
+type sharedSDKHTTPContract struct {
+	APIError struct {
+		Path   string `json:"path"`
+		Status int    `json:"status"`
+		Body   struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+			Details string `json:"details"`
+		} `json:"body"`
+		ExpectedAttempts int `json:"expected_attempts"`
+	} `json:"api_error"`
+	Retry struct {
+		Path                           string            `json:"path"`
+		MutationPath                   string            `json:"mutation_path"`
+		TransportFailuresBeforeSuccess int               `json:"transport_failures_before_success"`
+		SuccessBody                    map[string]string `json:"success_body"`
+		GetAttempts                    map[string]int    `json:"get_attempts"`
+		MutationAttempts               map[string]int    `json:"mutation_attempts"`
+	} `json:"retry"`
+}
+
+func readSharedSDKHTTPContract(t *testing.T) sharedSDKHTTPContract {
+	t.Helper()
+
+	contents, err := os.ReadFile(filepath.Join("..", "testdata", "sdk-http-contract.json"))
+	if err != nil {
+		t.Fatalf("read shared SDK HTTP contract: %v", err)
+	}
+	var fixture sharedSDKHTTPContract
+	if err := json.Unmarshal(contents, &fixture); err != nil {
+		t.Fatalf("decode shared SDK HTTP contract: %v", err)
+	}
+	return fixture
 }
 
 func (body contextBody) Read(_ []byte) (int, error) {
@@ -183,6 +221,91 @@ func TestClientReturnsTypedAPIErrorWithoutChangingErrorText(t *testing.T) {
 	if !apiErr.IsClientError() || apiErr.IsServerError() {
 		t.Fatalf("unexpected API error classification: %#v", apiErr)
 	}
+}
+
+func TestClientMatchesSharedHTTPErrorAndRetryFixture(t *testing.T) {
+	fixture := readSharedSDKHTTPContract(t)
+	t.Run("structured API error", func(t *testing.T) {
+		var attempts atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			attempts.Add(1)
+			if request.Method != http.MethodGet || request.URL.Path != fixture.APIError.Path {
+				http.NotFound(writer, request)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(fixture.APIError.Status)
+			_ = json.NewEncoder(writer).Encode(fixture.APIError.Body)
+		}))
+		defer server.Close()
+
+		_, err := NewClient(server.URL, "fixture-token").GetConfig(context.Background())
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("expected shared fixture APIError, got %v", err)
+		}
+		if apiErr.Status != fixture.APIError.Status ||
+			apiErr.Code != fixture.APIError.Body.Error ||
+			apiErr.Details != fixture.APIError.Body.Details {
+			t.Fatalf("shared fixture error fields differ: %#v", apiErr)
+		}
+		if got := int(attempts.Load()); got != fixture.APIError.ExpectedAttempts {
+			t.Fatalf("API error request attempts = %d, want %d", got, fixture.APIError.ExpectedAttempts)
+		}
+	})
+
+	t.Run("GET transport failure policy", func(t *testing.T) {
+		var attempts atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodGet || request.URL.Path != fixture.Retry.Path {
+				http.NotFound(writer, request)
+				return
+			}
+			attempt := int(attempts.Add(1))
+			if attempt <= fixture.Retry.TransportFailuresBeforeSuccess {
+				connection, _, err := writer.(http.Hijacker).Hijack()
+				if err == nil {
+					_ = connection.Close()
+				}
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(fixture.Retry.SuccessBody)
+		}))
+		defer server.Close()
+
+		_, err := NewClient(server.URL, "fixture-token").Health(context.Background())
+		if err == nil {
+			t.Fatal("Go client unexpectedly retried the failed GET")
+		}
+		if got, want := int(attempts.Load()), fixture.Retry.GetAttempts["go"]; got != want {
+			t.Fatalf("GET attempts = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("mutation transport failure policy", func(t *testing.T) {
+		var attempts atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			attempts.Add(1)
+			if request.Method != http.MethodPost || request.URL.Path != fixture.Retry.MutationPath {
+				http.NotFound(writer, request)
+				return
+			}
+			connection, _, err := writer.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = connection.Close()
+			}
+		}))
+		defer server.Close()
+
+		_, err := NewClient(server.URL, "fixture-token").CreateSearch(context.Background(), "fixture")
+		if err == nil {
+			t.Fatal("expected the dropped mutation response to fail")
+		}
+		if got, want := int(attempts.Load()), fixture.Retry.MutationAttempts["go"]; got != want {
+			t.Fatalf("mutation attempts = %d, want %d", got, want)
+		}
+	})
 }
 
 func TestClientPreservesTimeoutWhileReadingErrorResponse(t *testing.T) {

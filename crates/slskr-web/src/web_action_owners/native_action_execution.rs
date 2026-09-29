@@ -424,6 +424,7 @@ pub(super) fn execute_native_route_action(
     let document = document.clone();
     wasm_bindgen_futures::spawn_local(async move {
         let result = fetch_text_with_method(&window, &path, &method, body.as_deref()).await;
+        let refresh_after_action = result.is_err() || method != "GET";
         if let Some(status) = document.get_element_by_id("slskr-action-status") {
             match result {
                 Ok(response) => status.set_inner_html(&format!(
@@ -443,7 +444,9 @@ pub(super) fn execute_native_route_action(
                 }
             }
         }
-        let _ = refresh_route_data(&window).await;
+        if refresh_after_action {
+            let _ = refresh_route_data(&window).await;
+        }
     });
 }
 

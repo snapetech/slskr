@@ -1,5 +1,28 @@
+import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { resolve } from 'node:path';
 import { SlskrClient } from './client';
 import { ApiError, NetworkError, ResponseContractError, TimeoutError } from './errors';
+
+const sharedSDKHTTPContract = JSON.parse(
+  readFileSync(resolve(__dirname, '../../testdata/sdk-http-contract.json'), 'utf8'),
+) as {
+  api_error: {
+    path: string;
+    status: number;
+    body: { error: string; message: string; details: string };
+    expected_attempts: number;
+  };
+  retry: {
+    path: string;
+    mutation_path: string;
+    configured_retries: number;
+    transport_failures_before_success: number;
+    success_body: { status: string };
+    get_attempts: { typescript: number };
+    mutation_attempts: { typescript: number };
+  };
+};
 
 describe('SlskrClient request lifecycle', () => {
   it('validates and normalizes the REST base URL', () => {
@@ -328,6 +351,80 @@ describe('SlskrClient request lifecycle', () => {
 
     await expect(client.health()).resolves.toMatchObject({ status: 'ok' });
     expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('matches the shared live HTTP error and retry fixture', async () => {
+    let errorAttempts = 0;
+    let readAttempts = 0;
+    let mutationAttempts = 0;
+    const server = createServer((request, response) => {
+      if (request.url === sharedSDKHTTPContract.api_error.path) {
+        errorAttempts += 1;
+        response.writeHead(sharedSDKHTTPContract.api_error.status, {
+          'Content-Type': 'application/json',
+        });
+        response.end(JSON.stringify(sharedSDKHTTPContract.api_error.body));
+        return;
+      }
+
+      if (request.method === 'GET') {
+        if (request.url !== sharedSDKHTTPContract.retry.path) {
+          response.writeHead(404).end();
+          return;
+        }
+        readAttempts += 1;
+        if (readAttempts <= sharedSDKHTTPContract.retry.transport_failures_before_success) {
+          request.socket.destroy();
+          return;
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(sharedSDKHTTPContract.retry.success_body));
+        return;
+      }
+
+      if (request.url !== sharedSDKHTTPContract.retry.mutation_path) {
+        response.writeHead(404).end();
+        return;
+      }
+      mutationAttempts += 1;
+      request.resume();
+      request.socket.destroy();
+    });
+    await new Promise<void>((resolveListen, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolveListen);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      server.close();
+      throw new Error('shared SDK HTTP fixture did not bind a TCP address');
+    }
+
+    const client = new SlskrClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      token: 'fixture-token',
+      retries: sharedSDKHTTPContract.retry.configured_retries,
+      retryDelay: 0,
+    });
+    try {
+      await expect(client.getConfig()).rejects.toMatchObject({
+        status: sharedSDKHTTPContract.api_error.status,
+        code: sharedSDKHTTPContract.api_error.body.error,
+        details: sharedSDKHTTPContract.api_error.body.details,
+        message: sharedSDKHTTPContract.api_error.body.message,
+      });
+      expect(errorAttempts).toBe(sharedSDKHTTPContract.api_error.expected_attempts);
+
+      await expect(client.health()).resolves.toMatchObject(sharedSDKHTTPContract.retry.success_body);
+      expect(readAttempts).toBe(sharedSDKHTTPContract.retry.get_attempts.typescript);
+
+      await expect(client.createSearch({ query: 'fixture' })).rejects.toBeInstanceOf(NetworkError);
+      expect(mutationAttempts).toBe(sharedSDKHTTPContract.retry.mutation_attempts.typescript);
+    } finally {
+      await new Promise<void>((resolveClose, reject) => {
+        server.close((error) => (error ? reject(error) : resolveClose()));
+      });
+    }
   });
 
   it('uses daemon wire contracts and accepts daemon collection shapes', async () => {
