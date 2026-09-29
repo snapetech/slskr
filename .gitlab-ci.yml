@@ -15,7 +15,7 @@ rust:
   stage: test
   image: rust:1.94-bookworm
   before_script:
-    - apt-get update -qq && apt-get install -y --no-install-recommends nodejs
+    - apt-get update -qq && apt-get install -y --no-install-recommends nodejs ripgrep
     - rustup component add clippy rustfmt
     - rustup target add wasm32-unknown-unknown
   script:
