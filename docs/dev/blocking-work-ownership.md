@@ -13,7 +13,7 @@ blocking closure, cancellation of its requesting future cannot stop that closure
 | `mesh_sync.rs` | Confined local-file chunk with validated offset, length, and indexed size. | Handle is awaited by the chunk handler. Request cancellation does not establish a join of running filesystem I/O. |
 | `share_index_runtime.rs` | Directory/entry/pending-descriptor bounds; shared cancellation flag. | Worker checks cooperative cancellation. Mounted delayed I/O and shutdown during a running worker still need acceptance proof. |
 | `controller_feature_state.rs` | At most 4,096 records and 8 MiB persisted feature state; serialized mutation turn. | Worker deliberately retains the turn through publication after request cancellation, preventing stale writes. Shutdown completion of running workers remains unproved. |
-| `database_maintenance.rs` | Retention recursively scans configured download trees and avoids symlinks. | Worker is awaited but has no cooperative cancellation or total traversal budget. Shutdown during large or stalled filesystem traversal remains open. |
+| `database_maintenance.rs` | Retention recursively scans configured download trees and avoids symlinks. | The owning async task now signals cancellation on drop, and the worker checks between entries and removals. There is no total traversal budget during normal operation; an active filesystem syscall cannot be cancelled. |
 | `preview_stream_controller.rs` / `core_dump_process.rs` | At most one application dump worker; admission is held through blocking completion after request cancellation. Linux gcore retains its 60-second deadline, owned process group, child reap, ptrace cleanup and partial-output guard. | Returned temporary stream output has a last-consumer cleanup owner, including an unconsumed worker result. The running filesystem worker is not joined by the daemon managed registry; shutdown can still wait for the remaining child deadline or mounted file I/O. |
 
 There are nine production call sites: two audio metadata workers and one in each
@@ -27,7 +27,9 @@ After managed async shutdown returns, the daemon now calls Tokio's
 `Runtime::shutdown_timeout` with a five-second deadline. A focused regression
 holds a real `spawn_blocking` closure, confirms runtime teardown returns at its
 deadline, then releases the worker and observes it complete. This bounds normal
-runtime teardown; it does not cancel or join a filesystem syscall stuck in an
-uninterruptible kernel state. Such a worker may continue until the operating
-system call returns. RF-006 remains open for fresh hosted/service-overlap proof,
-and this limitation is not represented as a completed join guarantee.
+runtime teardown. File-retention traversal now observes cancellation when its
+owning async task is dropped, so it stops after the active filesystem call
+returns. Neither Tokio nor the operating system can cancel a filesystem syscall
+stuck in an uninterruptible kernel state; the runtime deadline bounds daemon
+teardown without claiming to join that call. RF-006 still needs fresh
+hosted/service-overlap proof.

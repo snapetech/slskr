@@ -421,7 +421,23 @@ fn retention_age_for_transfer(
     }
 }
 
-fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) -> Result<usize, String> {
+struct CancelRetentionScanOnDrop(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for CancelRetentionScanOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+fn prune_files_older_than(
+    root: &Path,
+    age_minutes: u64,
+    now: SystemTime,
+    cancellation: &std::sync::atomic::AtomicBool,
+) -> Result<usize, String> {
+    if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("file retention scan cancelled".to_owned());
+    }
     let cutoff = now
         .checked_sub(Duration::from_secs(age_minutes.saturating_mul(60)))
         .unwrap_or(SystemTime::UNIX_EPOCH);
@@ -439,6 +455,9 @@ fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) -> Res
     let mut failures = 0_usize;
     let mut first_failure = None;
     for entry in entries {
+        if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("file retention scan cancelled".to_owned());
+        }
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
@@ -465,11 +484,20 @@ fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) -> Res
             continue;
         }
         if metadata.is_dir() {
-            if let Err(error) = prune_files_older_than(&path, age_minutes, now) {
-                failures = failures.saturating_add(1);
-                if first_failure.is_none() {
-                    first_failure = Some(error);
+            match prune_files_older_than(&path, age_minutes, now, cancellation) {
+                Ok(_) => {}
+                Err(error) if cancellation.load(std::sync::atomic::Ordering::Acquire) => {
+                    return Err(error);
                 }
+                Err(error) => {
+                    failures = failures.saturating_add(1);
+                    if first_failure.is_none() {
+                        first_failure = Some(error);
+                    }
+                }
+            }
+            if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("file retention scan cancelled".to_owned());
             }
             match fs::remove_dir(&path) {
                 Ok(()) => removed = removed.saturating_add(1),
@@ -503,6 +531,9 @@ fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) -> Res
                 }
             };
             if is_expired {
+                if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+                    return Err("file retention scan cancelled".to_owned());
+                }
                 match fs::remove_file(&path) {
                     Ok(()) => removed = removed.saturating_add(1),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -516,6 +547,9 @@ fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) -> Res
                 }
             }
         }
+    }
+    if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("file retention scan cancelled".to_owned());
     }
     if failures == 0 {
         Ok(removed)
@@ -640,16 +674,23 @@ async fn run_retention_once(state: &AppState) {
     let incomplete = state.config.retention.files_incomplete_minutes;
     let downloads = effective_downloads_dir(state);
     let incomplete_dir = effective_incomplete_dir(state);
+    let retention_cancellation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _cancel_retention_scan_on_drop =
+        CancelRetentionScanOnDrop(Arc::clone(&retention_cancellation));
     let prune_result = match tokio::task::spawn_blocking(move || {
         let now = SystemTime::now();
         let mut failures = Vec::new();
         if let Some(age) = complete {
-            if let Err(error) = prune_files_older_than(&downloads, age, now) {
+            if let Err(error) =
+                prune_files_older_than(&downloads, age, now, &retention_cancellation)
+            {
                 failures.push(error);
             }
         }
         if let Some(age) = incomplete {
-            if let Err(error) = prune_files_older_than(&incomplete_dir, age, now) {
+            if let Err(error) =
+                prune_files_older_than(&incomplete_dir, age, now, &retention_cancellation)
+            {
                 failures.push(error);
             }
         }
@@ -781,5 +822,42 @@ pub(super) async fn database_vacuum_value(state: &AppState) -> serde_json::Value
             "status": "skipped",
             "note": "database not initialized",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prune_files_older_than, CancelRetentionScanOnDrop};
+    use std::{
+        path::Path,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        time::SystemTime,
+    };
+
+    #[test]
+    fn dropping_retention_owner_cancels_its_worker() {
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let owner = CancelRetentionScanOnDrop(Arc::clone(&cancellation));
+
+        drop(owner);
+
+        assert!(cancellation.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn file_retention_scan_stops_before_io_when_cancelled() {
+        let cancellation = AtomicBool::new(true);
+        let error = prune_files_older_than(
+            Path::new("cancelled-before-filesystem-access"),
+            60,
+            SystemTime::UNIX_EPOCH,
+            &cancellation,
+        )
+        .expect_err("cancelled retention scan must stop before reading the root");
+
+        assert_eq!(error, "file retention scan cancelled");
     }
 }
