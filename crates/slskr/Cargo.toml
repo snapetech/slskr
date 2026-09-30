@@ -98,7 +98,7 @@ webpki-roots = "1"
 mainline = "8"
 sha1 = "0.11"
 socket2 = "0.6"
-suppaftp = { version = "10.0.1", default-features = false, features = ["tokio-rustls-ring", "deprecated"] }
+suppaftp = { version = "12.0.1", default-features = false, features = ["tokio-rustls-ring", "deprecated"] }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }
 
