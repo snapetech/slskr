@@ -18,6 +18,11 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
+## [0.2.42] — 2026-09-30
+
+- Reduced startup share-scan I/O by skipping unsupported media files and using
+  bounded, format-specific metadata probes for WAV, FLAC, and MP3 files.
+
 ## [0.2.41] — 2026-09-29
 
 - Added Rust-specific getting-started, feature, status, configuration,
