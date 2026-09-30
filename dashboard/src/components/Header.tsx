@@ -43,11 +43,11 @@ export default function Header() {
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
-      <div className="flex justify-between items-center px-8 py-4">
+      <div className="flex items-center justify-between px-4 py-3 sm:px-8 sm:py-4">
         <div className="flex items-center gap-3">
           <Server className="w-6 h-6 text-blue-600" />
           <h1 className="text-xl font-semibold text-gray-900">slskr Admin</h1>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+          <span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium sm:px-3 sm:text-sm ${
             isConnected
               ? 'bg-green-100 text-green-800'
               : 'bg-red-100 text-red-800'

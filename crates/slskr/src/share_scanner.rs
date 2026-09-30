@@ -62,30 +62,54 @@ pub(super) fn extension_for(filename: &str) -> String {
         .unwrap_or_default()
 }
 
-fn probe_media_attributes(path: &Path, extension: &str, file_size: u64) -> Vec<FileAttribute> {
+#[derive(Clone, Copy)]
+enum MediaProbeFormat {
+    Wav,
+    Flac,
+    Mp3,
+}
+
+fn media_probe_format(extension: &str) -> Option<MediaProbeFormat> {
+    if extension.eq_ignore_ascii_case("wav") {
+        Some(MediaProbeFormat::Wav)
+    } else if extension.eq_ignore_ascii_case("flac") {
+        Some(MediaProbeFormat::Flac)
+    } else if extension.eq_ignore_ascii_case("mp3") {
+        Some(MediaProbeFormat::Mp3)
+    } else {
+        None
+    }
+}
+
+fn probe_media_attributes(
+    path: &Path,
+    format: MediaProbeFormat,
+    file_size: u64,
+) -> Vec<FileAttribute> {
     let Ok(mut file) = fs::File::open(path) else {
         return Vec::new();
     };
-    probe_media_attributes_from_file(&mut file, extension, file_size)
+    probe_media_attributes_from_file(&mut file, format, file_size)
 }
 
 fn probe_media_attributes_from_file(
     file: &mut fs::File,
-    extension: &str,
+    format: MediaProbeFormat,
     file_size: u64,
 ) -> Vec<FileAttribute> {
     if file.seek(SeekFrom::Start(0)).is_err() {
         return Vec::new();
     }
-    let mut bytes = Vec::new();
-    if file.take(256 * 1024).read_to_end(&mut bytes).is_err() {
-        return Vec::new();
-    }
-    match extension.to_ascii_lowercase().as_str() {
-        "wav" => probe_wav_attributes(&bytes),
-        "flac" => probe_flac_attributes(&bytes, file_size),
-        "mp3" => probe_mp3_attributes(&bytes, file_size),
-        _ => Vec::new(),
+    match format {
+        MediaProbeFormat::Wav => probe_wav_attributes_from_file(file, file_size),
+        MediaProbeFormat::Flac => {
+            let mut streaminfo = [0_u8; 42];
+            if file.read_exact(&mut streaminfo).is_err() {
+                return Vec::new();
+            }
+            probe_flac_attributes(&streaminfo, file_size)
+        }
+        MediaProbeFormat::Mp3 => probe_mp3_attributes_from_file(file, file_size),
     }
 }
 
@@ -112,34 +136,63 @@ fn saturating_media_u32(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-fn probe_wav_attributes(bytes: &[u8]) -> Vec<FileAttribute> {
-    if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+fn probe_wav_attributes_from_file(file: &mut fs::File, file_size: u64) -> Vec<FileAttribute> {
+    if file_size < 12 {
         return Vec::new();
     }
-    let mut offset = 12_usize;
+    let mut header = [0_u8; 12];
+    if file.read_exact(&mut header).is_err() || &header[..4] != b"RIFF" || &header[8..12] != b"WAVE"
+    {
+        return Vec::new();
+    }
+
+    let mut offset = 12_u64;
     let mut sample_rate = None;
     let mut byte_rate = None;
     let mut bit_depth = None;
     let mut data_bytes = None;
-    while offset.saturating_add(8) <= bytes.len() {
-        let id = &bytes[offset..offset + 4];
-        let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
-        let data_start = offset + 8;
-        let data_end = data_start.saturating_add(size).min(bytes.len());
-        if id == b"fmt " && data_end.saturating_sub(data_start) >= 16 {
-            sample_rate = Some(u32::from_le_bytes(
-                bytes[data_start + 4..data_start + 8].try_into().unwrap(),
-            ));
-            byte_rate = Some(u32::from_le_bytes(
-                bytes[data_start + 8..data_start + 12].try_into().unwrap(),
-            ));
-            bit_depth = Some(u16::from_le_bytes(
-                bytes[data_start + 14..data_start + 16].try_into().unwrap(),
-            ) as u32);
-        } else if id == b"data" {
-            data_bytes = Some(size as u64);
+    while offset
+        .checked_add(8)
+        .is_some_and(|header_end| header_end <= file_size)
+    {
+        if file.seek(SeekFrom::Start(offset)).is_err() {
+            return Vec::new();
         }
-        offset = data_start.saturating_add(size).saturating_add(size % 2);
+        let mut chunk_header = [0_u8; 8];
+        if file.read_exact(&mut chunk_header).is_err() {
+            return Vec::new();
+        }
+        let size = u64::from(u32::from_le_bytes(chunk_header[4..8].try_into().unwrap()));
+        let data_start = offset + 8;
+        let Some(data_end) = data_start.checked_add(size) else {
+            return Vec::new();
+        };
+        if data_end > file_size {
+            return Vec::new();
+        }
+
+        if &chunk_header[..4] == b"fmt " && size >= 16 {
+            let mut format = [0_u8; 16];
+            if file.read_exact(&mut format).is_err() {
+                return Vec::new();
+            }
+            sample_rate = Some(u32::from_le_bytes(format[4..8].try_into().unwrap()));
+            byte_rate = Some(u32::from_le_bytes(format[8..12].try_into().unwrap()));
+            bit_depth = Some(u16::from_le_bytes(format[14..16].try_into().unwrap()) as u32);
+        } else if &chunk_header[..4] == b"data" {
+            data_bytes = Some(size);
+        }
+
+        if byte_rate.is_some() && data_bytes.is_some() {
+            break;
+        }
+        let Some(next_offset) = data_end.checked_add(size % 2) else {
+            return Vec::new();
+        };
+        if next_offset > file_size {
+            return Vec::new();
+        }
+        offset = next_offset;
     }
     let duration = byte_rate
         .filter(|rate| *rate > 0)
@@ -147,6 +200,84 @@ fn probe_wav_attributes(bytes: &[u8]) -> Vec<FileAttribute> {
         .map(|(rate, size)| saturating_media_u32((size / u64::from(rate)).max(1)));
     let bitrate = byte_rate.map(|rate| rate.saturating_mul(8) / 1_000);
     media_attributes(bitrate, duration, Some(false), sample_rate, bit_depth)
+}
+
+fn probe_mp3_attributes_from_file(file: &mut fs::File, file_size: u64) -> Vec<FileAttribute> {
+    const MP3_FRAME_SEARCH_BYTES: u64 = 64 * 1024;
+    const MP3_FRAME_READ_CHUNK_BYTES: usize = 4 * 1024;
+
+    let mut audio_offset = 0_u64;
+    if file_size >= 10 {
+        let mut header = [0_u8; 10];
+        if file.read_exact(&mut header).is_err() {
+            return Vec::new();
+        }
+        if &header[..3] == b"ID3" {
+            if !(2..=4).contains(&header[3])
+                || header[4] == 0xff
+                || header[6..10].iter().any(|byte| *byte & 0x80 != 0)
+            {
+                return Vec::new();
+            }
+            let tag_size = (u64::from(header[6]) << 21)
+                | (u64::from(header[7]) << 14)
+                | (u64::from(header[8]) << 7)
+                | u64::from(header[9]);
+            let footer_size = if header[3] == 4 && header[5] & 0x10 != 0 {
+                10
+            } else {
+                0
+            };
+            let Some(offset) = 10_u64
+                .checked_add(tag_size)
+                .and_then(|offset| offset.checked_add(footer_size))
+            else {
+                return Vec::new();
+            };
+            audio_offset = offset;
+            if audio_offset > file_size {
+                return Vec::new();
+            }
+        }
+    }
+
+    if file.seek(SeekFrom::Start(audio_offset)).is_err() {
+        return Vec::new();
+    }
+    let mut remaining = file_size
+        .saturating_sub(audio_offset)
+        .min(MP3_FRAME_SEARCH_BYTES);
+    if remaining < 4 {
+        return Vec::new();
+    }
+
+    let mut bytes = [0_u8; MP3_FRAME_READ_CHUNK_BYTES + 3];
+    if file.read_exact(&mut bytes[..4]).is_err() {
+        return Vec::new();
+    }
+    remaining -= 4;
+    let attributes = probe_mp3_attributes(&bytes[..4], file_size);
+    if !attributes.is_empty() {
+        return attributes;
+    }
+
+    bytes.copy_within(1..4, 0);
+    let mut carried = 3;
+    while remaining > 0 {
+        let chunk_size = (remaining as usize).min(MP3_FRAME_READ_CHUNK_BYTES);
+        let end = carried + chunk_size;
+        if file.read_exact(&mut bytes[carried..end]).is_err() {
+            return Vec::new();
+        }
+        let attributes = probe_mp3_attributes(&bytes[..end], file_size);
+        if !attributes.is_empty() {
+            return attributes;
+        }
+        carried = end.min(3);
+        bytes.copy_within(end - carried..end, 0);
+        remaining -= chunk_size as u64;
+    }
+    Vec::new()
 }
 
 fn probe_flac_attributes(bytes: &[u8], file_size: u64) -> Vec<FileAttribute> {
@@ -735,7 +866,11 @@ fn scan_share_root(
             let filename = format!("{}/{}", label, virtual_share_path(relative));
             let extension = extension_for(&filename);
             let attributes = if options.probe_media_attributes {
-                probe_media_attributes(&path, &extension, metadata.len())
+                if let Some(format) = media_probe_format(&extension) {
+                    probe_media_attributes(&path, format, metadata.len())
+                } else {
+                    Vec::new()
+                }
             } else {
                 Vec::new()
             };
@@ -867,7 +1002,11 @@ fn scan_share_root_unix(
             let filename = format!("{}/{}", label, virtual_share_path(&relative));
             let extension = extension_for(&filename);
             let attributes = if options.probe_media_attributes {
-                probe_media_attributes_from_file(&mut file, &extension, metadata.len())
+                if let Some(format) = media_probe_format(&extension) {
+                    probe_media_attributes_from_file(&mut file, format, metadata.len())
+                } else {
+                    Vec::new()
+                }
             } else {
                 Vec::new()
             };

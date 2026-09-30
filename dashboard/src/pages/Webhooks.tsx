@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, TestTube } from 'lucide-react';
 import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
+import { useAbortableRequests } from '../hooks/useAbortableRequests';
 
 interface WebhooksPageProps {
   apiUrl: string;
@@ -67,6 +68,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   const [newUrl, setNewUrl] = useState('');
   const [selectedEvents, setSelectedEvents] = useState<string[]>(['search.created']);
   const requestIdRef = useRef(0);
+  const { createController, releaseController } = useAbortableRequests();
 
   const availableEvents = [
     'search.created',
@@ -114,6 +116,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   const handleCreateWebhook = async () => {
     if (!newUrl) return;
 
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, '/api/admin/webhooks'), apiKey, {
         method: 'POST',
@@ -121,39 +124,56 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
           url: newUrl,
           events: selectedEvents,
         }),
+        signal: controller.signal,
       });
-      
+      if (controller.signal.aborted) return;
       setShowForm(false);
       setNewUrl('');
       setSelectedEvents(['search.created']);
-      await fetchWebhooks();
+      await fetchWebhooks(controller.signal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
   const handleDeleteWebhook = async (id: string) => {
     if (!window.confirm('Delete this webhook?')) return;
 
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, `/api/admin/webhooks/${encodeURIComponent(id)}`), apiKey, {
         method: 'DELETE',
+        signal: controller.signal,
       });
-      await fetchWebhooks();
+      if (!controller.signal.aborted) await fetchWebhooks(controller.signal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
   const handleTestWebhook = async (id: string) => {
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, `/api/admin/webhooks/${encodeURIComponent(id)}/test`), apiKey, {
         method: 'POST',
+        signal: controller.signal,
       });
 
-      alert('Test webhook sent!');
+      if (!controller.signal.aborted) alert('Test webhook sent!');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to test webhook');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Failed to test webhook');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 

@@ -53,7 +53,7 @@ const apiRequestCountBudgets = new Map([
   ['/users', 16],
   ['/contacts', 15],
   ['/solid', 20],
-  ['/collections', 21],
+  ['/collections', 21], // Successful GET actions display their response without reloading route data.
   ['/sharegroups', 20],
   ['/shared', 20],
   ['/browse', 8],

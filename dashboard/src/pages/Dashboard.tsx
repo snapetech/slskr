@@ -95,7 +95,7 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="bg-green-50 rounded-lg p-4">
-            <p className="text-sm text-green-600 font-medium">Session State</p>
+            <p className="text-sm text-green-800 font-medium">Session State</p>
             <p className="text-2xl font-bold text-green-900 mt-2">
               {stats?.session?.state ?? 'Unknown'}
             </p>
@@ -156,9 +156,9 @@ function StatCard({ icon: Icon, label, value, color }: StatCardProps) {
 
   const textColors = {
     blue: 'text-blue-600',
-    green: 'text-green-600',
+    green: 'text-green-800',
     purple: 'text-purple-600',
-    orange: 'text-orange-600',
+    orange: 'text-orange-800',
   };
 
   const valueColors = {

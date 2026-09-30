@@ -93,7 +93,7 @@ const renderSearches = async ({
     />
   );
 
-  render(
+  const view = render(
     <MemoryRouter initialEntries={initialEntries}>
       <Routes>
         <Route path="/searches" element={searches} />
@@ -102,7 +102,8 @@ const renderSearches = async ({
     </MemoryRouter>,
   );
 
-  return waitForInput ? screen.findByTestId('search-input') : undefined;
+  if (waitForInput) return screen.findByTestId('search-input');
+  return view;
 };
 
 describe('Searches', () => {
@@ -163,8 +164,31 @@ describe('Searches', () => {
     });
 
     await waitFor(() =>
-      expect(library.getStatus).toHaveBeenCalledWith({ id: 'search-1' }),
+      expect(library.getStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'search-1', signal: expect.any(AbortSignal) }),
+      ),
     );
+  });
+
+  it('aborts a missing-status request when its detail route unmounts', async () => {
+    let requestSignal;
+    library.getAll.mockResolvedValue([]);
+    library.getStatus.mockImplementation(({ signal }) => {
+      requestSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    });
+
+    const view = await renderSearches({
+      initialEntries: ['/searches/search-1'],
+      runtimeProfile: 'native',
+      waitForInput: false,
+    });
+    await waitFor(() => expect(library.getStatus).toHaveBeenCalled());
+    view.unmount();
+
+    expect(requestSignal.aborted).toBe(true);
   });
 
   it('preserves the freshest search projection when stop receives a stale row', async () => {

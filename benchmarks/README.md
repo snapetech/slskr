@@ -116,3 +116,15 @@ cargo run --locked -p slskr --features rf-benchmarks \
   --example share_cache_allocations -- \
   --output benchmarks/artifacts/share-cache-allocations.json
 ```
+
+The RF-045 diagnostic replays a 10,000-result search projection in 50 batches
+through both the current delta-append writer and the former full-projection
+rewrite. It also kills a child process after committed writes and checks the
+projection after reopening the database. The workload uses temporary in-memory
+or local SQLite databases and opens no network listener.
+
+```bash
+cargo run --locked -p slskr --features rf-benchmarks \
+  --example search_result_delta -- \
+  --output benchmarks/artifacts/search-result-delta.json
+```

@@ -192,9 +192,25 @@ use self::full_shares_differential::*;
 mod full_peer_network_differential;
 use self::full_peer_network_differential::*;
 
-#[path = "controller_tests/full_mesh_differential.rs"]
-mod full_mesh_differential;
-use self::full_mesh_differential::*;
+#[path = "controller_tests/full_mesh_share_contracts.rs"]
+mod full_mesh_share_contracts;
+use self::full_mesh_share_contracts::*;
+
+#[path = "controller_tests/full_mesh_overlay_contracts.rs"]
+mod full_mesh_overlay_contracts;
+use self::full_mesh_overlay_contracts::*;
+
+#[path = "controller_tests/full_mesh_service_contracts.rs"]
+mod full_mesh_service_contracts;
+use self::full_mesh_service_contracts::*;
+
+#[path = "controller_tests/full_dht_rendezvous_differential.rs"]
+mod full_dht_rendezvous_differential;
+use self::full_dht_rendezvous_differential::*;
+
+#[path = "controller_tests/full_swarm_analytics_contracts.rs"]
+mod full_swarm_analytics_contracts;
+use self::full_swarm_analytics_contracts::*;
 
 #[path = "controller_tests/full_transfers_contracts.rs"]
 mod full_transfers_contracts;

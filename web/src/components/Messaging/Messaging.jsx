@@ -50,6 +50,7 @@ import {
   Segment,
 } from 'semantic-ui-react';
 
+const WORKSPACE_EVENT_REFRESH_INTERVAL_MS = 1_000;
 
 const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const navigate = useNavigate();
@@ -70,6 +71,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const hydrateRequestIdRef = useRef(0);
   const workspaceRefreshInFlightRef = useRef(false);
   const workspaceRefreshPendingRef = useRef(false);
+  const workspaceEventRefreshTimerRef = useRef(null);
   const availableRoomsRequestIdRef = useRef(0);
   const workspaceActionRequestIdRef = useRef(new Map());
   const batchRequestIdRef = useRef(0);
@@ -85,6 +87,10 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       hydrateRequestIdRef.current += 1;
       workspaceRefreshInFlightRef.current = false;
       workspaceRefreshPendingRef.current = false;
+      if (workspaceEventRefreshTimerRef.current !== null) {
+        window.clearTimeout(workspaceEventRefreshTimerRef.current);
+        workspaceEventRefreshTimerRef.current = null;
+      }
       availableRoomsRequestIdRef.current += 1;
       workspaceActionRequestIdRef.current.clear();
       workspaceActionInFlightRef.current.clear();
@@ -296,6 +302,38 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     }
   }, [hydrate]);
 
+  const scheduleEventDrivenWorkspaceRefresh = useCallback(() => {
+    if (
+      !mountedRef.current ||
+      workspaceEventRefreshTimerRef.current !== null
+    ) {
+      return;
+    }
+
+    const refreshWhenIdle = () => {
+      if (!mountedRef.current) {
+        workspaceEventRefreshTimerRef.current = null;
+        return;
+      }
+
+      if (workspaceRefreshInFlightRef.current) {
+        workspaceEventRefreshTimerRef.current = window.setTimeout(
+          refreshWhenIdle,
+          100,
+        );
+        return;
+      }
+
+      workspaceEventRefreshTimerRef.current = null;
+      void refreshWorkspace();
+    };
+
+    workspaceEventRefreshTimerRef.current = window.setTimeout(
+      refreshWhenIdle,
+      WORKSPACE_EVENT_REFRESH_INTERVAL_MS,
+    );
+  }, [refreshWorkspace]);
+
   const beginWorkspaceAction = useCallback((key) => {
     if (!mountedRef.current || !key || workspaceActionInFlightRef.current.has(key)) {
       return false;
@@ -365,7 +403,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     const roomsHub = createRoomsHubConnection();
     const refresh = () => {
       if (disposed || !mountedRef.current) return;
-      void refreshWorkspace();
+      scheduleEventDrivenWorkspaceRefresh();
     };
     messagesHub.on('changed', refresh);
     roomsHub.on('changed', refresh);
@@ -385,7 +423,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       messagesHub.stop().catch(() => {});
       roomsHub.stop().catch(() => {});
     };
-  }, [refreshWorkspace]);
+  }, [scheduleEventDrivenWorkspaceRefresh]);
 
   useEffect(() => {
     savePanels(panels);
