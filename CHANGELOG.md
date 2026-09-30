@@ -22,6 +22,10 @@ the release is prepared. Do not rewrite audited release history.
 
 - Reduced startup share-scan I/O by skipping unsupported media files and using
   bounded, format-specific metadata probes for WAV, FLAC, and MP3 files.
+- Removed personal email attribution and machine-specific checkout paths from
+  project documentation and recovery records.
+- Kept recent-commit leak scanning focused on authored text while ignoring
+  standard Git attribution trailers.
 
 ## [0.2.41] — 2026-09-29
 

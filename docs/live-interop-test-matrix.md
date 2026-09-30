@@ -8,15 +8,17 @@ This matrix proves `slskr` behavior against itself and adjacent/community client
 - OpenBao is intentionally skipped for now.
 - Four accounts are used so login, listener, probe, room/chat, and transfer actors can run without self-collisions.
 
-## Local checkouts
+## Checkout roles
 
-| Client | Role in matrix | Local path | Current status |
+Paths use portable checkout labels rather than machine-specific absolute paths.
+
+| Client | Role in matrix | Checkout reference | Current status |
 | --- | --- | --- | --- |
-| `slskr` | Rust rewrite under test | `/home/keith/Documents/code/slskr` | Present |
-| `slskr` | Community daemon/client parity target | `/home/keith/Documents/code/slskr` | Present |
-| `slskr` | Sister fork parity target | `/home/keith/Documents/code/slskr` | Present |
-| `dotnet reference suite` | Upstream .NET library parity target | `/home/keith/Documents/code/dotnet reference suite` | Present |
-| `slskNet.Runtime` | Runtime fork parity target | `/home/keith/Documents/code/slskNet.Runtime` | Present |
+| `slskr` | Rust rewrite under test | `the slskr checkout` | Present |
+| `slskr` | Community daemon/client parity target | `the slskr checkout` | Present |
+| `slskr` | Sister fork parity target | `the slskr checkout` | Present |
+| `dotnet reference suite` | Upstream .NET library parity target | `the .NET reference checkout` | Present |
+| `slskNet.Runtime` | Runtime fork parity target | `the slskNet.Runtime checkout` | Present |
 
 ## Capability matrix
 
@@ -128,7 +130,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | daemon raw transfer-token probe | Diagnostic-only non-blocking row | `slskr` and `slskr` close the raw token echo probe with EOF because no transfer is queued; real payload proof is now covered by queued requester-listener probes |
 | `slskr -> slskr` obfuscated peer-message response | Passed with compatibility fallback | 2026-05-04 focused VPN run: type-1 obfuscated init and obfuscated request succeeded; `slskr` returned the peer message as a plain frame, and `slskr` completed via plain-response fallback |
 | `slskr` live login after repeated daemon retries | Mitigated by VPN account pool | Fresh p5-p8 accounts avoid the prior host-egress reset path for focused daemon/probe runs; raw public-host reruns may still reset under heavy retry |
-| `slskr` unit tests | Passed | `/home/keith/Documents/code/slskr`: 3863/3863 passed |
+| `slskr` unit tests | Passed | `the slskr checkout`: 3863/3863 passed |
 | `slskr` live `slskd_api` automation client smoke | Passed | 2026-07-15 local daemon rerun with Python `slskd_api` 0.2.4 passed all 91 client calls across application, session, server, search, transfer, room, conversation, user, file, relay, share, options, events, logs, and telemetry APIs. The rerun uses real storage fixtures and proves compatibility with the client's newline-terminated base64 file-route segments. |
 | Foundation certification | Passed, 8/8 | `target/certify/summary-20260716-001206.json`: live public-server login, public listener, true type-1 obfuscated request/response, indirect exchange, room/private-message paths, and the bounded listener soak passed. |
 | Phase C certification | Passed, 6/6 | `target/certify/summary-20260716-001539.json`: public-server wishlist interval/search, queued/open-commons transfer fixtures, and the remaining phase checks passed. |
@@ -137,9 +139,9 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | pinned `slskr <-> slskdN` cross-client matrix | Closed with 44 positive and 13 expected-negative checks | 2026-08-17 fresh rerun against the exact `65a14a8b821de4df4ab7ef3ab3b156d7206837a3` source build. Browse, search, exact-hash downloads, private messages, queued backfill, distributed peer, signed capability exchange, pinned overlay `dht.Ping`, authenticated signed DHT Store, mesh content bytes, mesh health/stats/transport, stream tickets, and the post-transfer soak passed. The pinned target returned the documented disabled/not-found/identity-mismatch responses for VirtualSoulfind, Pods, and private-gateway. `scripts/audit-parity-manifest.py` now source-validates those exact responses as `negative-target-contract` proof. Evidence: `target/live-interop-universal-20260817-slskdn-pinned-rerun/slskr-slskdn-cross-client-interop.failed-19885.tsv`. |
 | ordinary frozen-ledger audit | Passed; 19,216/19,216 materialized cases complete | 2026-08-17 fresh audit completed every differential slice and its browser workflow; peak was 2.0 GiB with zero swap. Configuration, live interop, operator packaging, persistence, protocol, security, both controller profiles, and Web UI workstreams all report zero partial, missing, or needs-proof cases. This is the ordinary ledger result, not the strict universal gate. |
 | strict universal live-evidence audit | Closed; 11/11 transport/lifecycle records pass, all 22 lifecycle cases pass, and the live UI comparison passes 9/9 workflow-health cases with zero semantic mismatches across 18 target/profile comparisons. Target-negative transports are explicitly classified from the frozen source. | `target/universal-transport-evidence-20260820-frozen-slskdn-mesh-retry.json`, `target/universal-transport-capability-evidence-20260820-frozen-slskdn-mesh-retry.json`, and `target/frozen-target-ui-comparison-universal-20260820-fresh12/audit.json`. |
-| vendored `slskNet.Runtime` library build | Passed | `/home/keith/Documents/code/slskr`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
-| vendored `slskNet.Runtime` unit behavior | Passed | `/home/keith/Documents/code/slskr`: 2303/2303 passed |
-| standalone `dotnet reference suite` unit behavior | Passed | `/home/keith/Documents/code/dotnet reference suite`: 2246/2246 passed |
+| vendored `slskNet.Runtime` library build | Passed | `the slskr checkout`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
+| vendored `slskNet.Runtime` unit behavior | Passed | `the slskr checkout`: 2303/2303 passed |
+| standalone `dotnet reference suite` unit behavior | Passed | `the .NET reference checkout`: 2246/2246 passed |
 
 ## Bugs fixed during matrix execution
 

@@ -108,7 +108,8 @@ if [[ "${LOCAL_IDENTITY_SCAN_COMMITS:-0}" == "1" ]]; then
     latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
   fi
   if [[ -n "$latest_tag" ]]; then
-    git log --format='%s%n%b' "${latest_tag}..HEAD" >"$tmp_commits"
+    git log --format='%s%n%b' "${latest_tag}..HEAD" |
+      sed -E '/^[[:space:]]*(Co-authored-by|Signed-off-by):[[:space:]]/d' >"$tmp_commits"
     check_file "recent commit messages" "$tmp_commits" "git log"
   fi
 fi

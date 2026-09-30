@@ -415,7 +415,7 @@ Append to this section whenever a decision in §4 needs to change. Do not edit
 existing rows; add a new dated entry.
 
 - **2026-05-04** — Initial decisions D1–D12 set above. Drafted by Claude during
-  state-of-the-project review at user's request. Author: keith@snape.tech.
+  state-of-the-project review at user's request. Author: project maintainer.
 - **2026-05-04** — Phase 0–2 complete. `openapi.rs` kept standalone (2 real call sites,
   363 LOC of swagger UI + spec generation — not worth inlining into lib.rs). 37
   dead-code warnings remain in kept modules; accepted as "unwired but real" pending Phase 3+.
