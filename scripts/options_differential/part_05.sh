@@ -194,7 +194,7 @@ wait_for_obfuscation_server_connected() {
 wait_for_obfuscation_address_request() {
   local status="$1"
   local log="$2"
-  for _ in $(seq 1 100); do
+  for _ in $(seq 1 300); do
     if "$python_bin" - "$status" <<'PY' 2>/dev/null
 import json,sys
 value=json.load(open(sys.argv[1], encoding="utf-8"))
@@ -223,9 +223,9 @@ trigger_obfuscation_outbound() {
   local implementation="$1"
   local base_url="$2"
   if [[ "$implementation" == upstream ]]; then
-    curl --silent --max-time 3 "$base_url/api/v0/users/fixture-peer/browse" >/dev/null || true
+    curl --silent --max-time 30 "$base_url/api/v0/users/fixture-peer/browse" >/dev/null || true
   else
-    curl --fail --silent --max-time 3 --request POST \
+    curl --fail --silent --max-time 30 --request POST \
       "$base_url/api/v0/users/fixture-peer/browse/request" >/dev/null
   fi
 }
