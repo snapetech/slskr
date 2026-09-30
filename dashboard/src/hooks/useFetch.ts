@@ -38,7 +38,8 @@ export function useFetch<T>(
   // Use ref to track if component is mounted
   const isMountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestRef = useRef<Promise<void> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -49,6 +50,11 @@ export function useFetch<T>(
     if (!url) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
+      requestRef.current = null;
+      if (intervalRef.current) {
+        clearTimeout(intervalRef.current);
+        intervalRef.current = null;
+      }
       if (isMountedRef.current) {
         setData(null);
         setError(null);
@@ -57,85 +63,125 @@ export function useFetch<T>(
       return;
     }
 
+    // A manual refresh supersedes a poll that has not fired yet. Clearing the
+    // timeout before checking requestRef also makes repeated manual refreshes
+    // unable to leave duplicate timers behind.
+    if (intervalRef.current !== null) {
+      clearTimeout(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    if (requestRef.current) {
+      return requestRef.current;
+    }
+
     const currentOptions = optionsRef.current;
 
-    // Cancel previous request
-    abortControllerRef.current?.abort();
     const requestController = new AbortController();
     abortControllerRef.current = requestController;
 
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(url, {
-        signal: requestController.signal,
-        headers: currentOptions?.headers || {},
-        redirect: 'error',
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const body = await readResponseText(response);
-      const result = body.trim() ? JSON.parse(body) as T : undefined as T;
-
-      // Only update state if component is still mounted
-      if (
-        isMountedRef.current &&
-        abortControllerRef.current === requestController
-      ) {
-        setData(result);
+    let request: Promise<void> | null = null;
+    request = (async () => {
+      try {
+        setLoading(true);
         setError(null);
-      }
-    } catch (err) {
-      // Ignore abort errors (caused by cleanup or new request)
-      if (isAbortError(err)) {
-        return;
-      }
 
-      const error = err instanceof Error ? err : new Error('Unknown error');
-      
-      if (
-        isMountedRef.current &&
-        abortControllerRef.current === requestController
-      ) {
-        setError(error);
-        currentOptions?.onError?.(error);
+        const response = await fetch(url, {
+          signal: requestController.signal,
+          headers: currentOptions?.headers || {},
+          redirect: 'error',
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const body = await readResponseText(response);
+        const result = body.trim() ? JSON.parse(body) as T : undefined as T;
+
+        if (
+          isMountedRef.current &&
+          abortControllerRef.current === requestController
+        ) {
+          setData(result);
+          setError(null);
+        }
+      } catch (err) {
+        if (isAbortError(err)) {
+          return;
+        }
+
+        const error = err instanceof Error ? err : new Error('Unknown error');
+
+        if (
+          isMountedRef.current &&
+          abortControllerRef.current === requestController
+        ) {
+          setError(error);
+          currentOptions?.onError?.(error);
+        }
+      } finally {
+        if (
+          isMountedRef.current &&
+          abortControllerRef.current === requestController
+        ) {
+          setLoading(false);
+        }
+        if (requestRef.current === request) {
+          requestRef.current = null;
+          if (
+            isMountedRef.current &&
+            interval &&
+            interval > 0 &&
+            document.visibilityState !== 'hidden'
+          ) {
+            intervalRef.current = setTimeout(() => {
+              intervalRef.current = null;
+              void fetchData();
+            }, interval);
+          }
+        }
       }
-    } finally {
-      if (
-        isMountedRef.current &&
-        abortControllerRef.current === requestController
-      ) {
-        setLoading(false);
-      }
-    }
-  }, [url, requestHeadersKey]);
+    })();
+    requestRef.current = request;
+    return request;
+  }, [url, requestHeadersKey, interval]);
 
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Initial fetch
-    fetchData();
+    void fetchData();
 
-    // Set up auto-refresh if interval is specified
-    if (interval && interval > 0) {
-      intervalRef.current = setInterval(fetchData, interval);
-    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (intervalRef.current !== null) {
+          clearTimeout(intervalRef.current);
+          intervalRef.current = null;
+        }
+        return;
+      }
+
+      if (!requestRef.current) {
+        if (intervalRef.current !== null) {
+          clearTimeout(intervalRef.current);
+          intervalRef.current = null;
+        }
+        void fetchData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Cleanup on unmount
     return () => {
       isMountedRef.current = false;
-      
-      // Abort any pending requests
       abortControllerRef.current?.abort();
-      
-      // Clear interval
+      abortControllerRef.current = null;
+      requestRef.current = null;
       if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+        clearTimeout(intervalRef.current);
+        intervalRef.current = null;
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [url, fetchData, interval]);
 

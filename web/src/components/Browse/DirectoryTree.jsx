@@ -1,5 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Icon, List } from 'semantic-ui-react';
+
+const setsEqual = (left, right) =>
+  left.size === right.size && Array.from(left).every((value) => right.has(value));
 
 const DirectoryNode = ({
   directory,
@@ -29,6 +32,8 @@ const DirectoryNode = ({
           {/* Expand/Collapse toggle */}
           {hasChildren ? (
             <Icon
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? `Collapse ${folderName}` : `Expand ${folderName}`}
               name={isExpanded ? 'caret down' : 'caret right'}
               onClick={() => onToggleExpand(directoryName)}
               style={{ cursor: 'pointer', width: '16px' }}
@@ -39,6 +44,7 @@ const DirectoryNode = ({
 
           {/* Checkbox */}
           <Checkbox
+            aria-label={`Select ${folderName}`}
             checked={isSelected}
             onChange={() => onToggleSelect(directory)}
             style={{ marginRight: '4px' }}
@@ -55,7 +61,7 @@ const DirectoryNode = ({
 
           {/* Folder name */}
           <span
-            onClick={() => onToggleExpand(directory.name)}
+            onClick={() => onToggleExpand(directoryName)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 onToggleExpand(directoryName);
@@ -122,14 +128,18 @@ const DirectoryTree = ({
 }) => {
   const [expandedPaths, setExpandedPaths] = useState(new Set());
   const [selectedPaths, setSelectedPaths] = useState(new Set());
-  const safeTree = Array.isArray(tree)
-    ? tree.filter(
-        (directory) =>
-          directory &&
-          typeof directory === 'object' &&
-          typeof directory.name === 'string',
-      )
-    : [];
+  const safeTree = useMemo(
+    () =>
+      Array.isArray(tree)
+        ? tree.filter(
+            (directory) =>
+              directory &&
+              typeof directory === 'object' &&
+              typeof directory.name === 'string',
+          )
+        : [],
+    [tree],
+  );
 
   useEffect(() => {
     const names = new Set();
@@ -144,13 +154,13 @@ const DirectoryTree = ({
       const next = new Set(
         Array.from(previous).filter((path) => names.has(path)),
       );
-      return next.size === previous.size ? previous : next;
+      return setsEqual(next, previous) ? previous : next;
     });
     setExpandedPaths((previous) => {
       const next = new Set(
         Array.from(previous).filter((path) => names.has(path)),
       );
-      return next.size === previous.size ? previous : next;
+      return setsEqual(next, previous) ? previous : next;
     });
   }, [safeTree]);
 

@@ -6,19 +6,22 @@ cd "$repo_root"
 
 out_dir="${1:-target/dist}"
 release_version="${2:-${SLSKR_RELEASE_VERSION:-unknown}}"
+source_commit="$(git rev-parse HEAD)"
 mkdir -p "$out_dir"
 
-OUT_DIR="$out_dir" RELEASE_VERSION="$release_version" python3 - <<'PY'
+OUT_DIR="$out_dir" RELEASE_VERSION="$release_version" SOURCE_COMMIT="$source_commit" python3 - <<'PY'
 import ast
 import json
 import os
 import pathlib
 import re
 import tomllib
+import uuid
 
 root = pathlib.Path.cwd()
 out_dir = pathlib.Path(os.environ["OUT_DIR"])
 release_version = os.environ["RELEASE_VERSION"]
+source_commit = os.environ["SOURCE_COMMIT"]
 
 components = []
 
@@ -136,7 +139,7 @@ components.sort(key=lambda item: (item["group"], item["name"].lower(), item["ver
 bom = {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+    "serialNumber": f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, f'slskr:{release_version}:{source_commit}')}",
     "version": 1,
     "metadata": {
         "component": {

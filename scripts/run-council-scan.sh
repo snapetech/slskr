@@ -20,6 +20,8 @@ scan_rg() {
 
 printf '# Council Scan Candidate Counts\n\n'
 printf 'Generated from local source patterns. Counts are candidate lines, not confirmed bugs.\n\n'
+printf 'Scan date: %s\n' "$(date +%Y-%m-%d)"
+printf 'Source digest: %s\n\n' "$(python3 scripts/council-source-digest.py)"
 printf '| Candidate Class | Count |\n'
 printf '| --- | ---: |\n'
 scan_rg 'Constructor/mutable collection candidates' \
@@ -39,11 +41,14 @@ scan_rg 'Protocol count/length candidates' \
   -e 'for _ in 0\.\.(count|attribute_count|counts_len)' \
   crates/slskr-protocol crates/slskr-client crates/slskr/src
 scan_rg 'Protocol scalar emission candidates' \
+  --glob '!**/controller_tests/**' \
+  --glob '!**/focused_controller_tests/**' \
+  --glob '!**/*_tests.rs' \
   -e 'as u(8|16|32|64)' \
   -e '\.len\(\) as u(8|16|32|64)' \
   -e 'write_len_prefixed_bytes' \
   -e 'u32::try_from\([^)]*\.len\(\)' \
-  crates/slskr-protocol/src crates/slskr-client/src crates/slskr/src/events_ws.rs crates/slskr/src/storage.rs crates/slskr/src/lib.rs
+  crates/slskr-protocol/src crates/slskr-client/src crates/slskr/src
 scan_rg 'Resolver/raw stream candidates' \
   -e 'TcpStream|TcpListener|read_exact|read_to_end|read_buf|to_socket_addrs|resolve|connect\(' \
   crates client-go client-python client-ts

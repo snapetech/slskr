@@ -210,12 +210,10 @@ export const fetchRemoteShareManifest = (ownerEndpoint, shareGrantId, token) =>
     token,
   });
 
-export const remoteBackfillShare = (ownerEndpoint, shareGrantId, token) =>
-  shareFetch(ownerEndpoint, `/api/v0/share-grants/${encodeURIComponent(shareGrantId)}/backfill`, {
-    body: {},
-    method: 'POST',
-    token,
-  });
+export const backfillIncomingShare = (shareGrantId) =>
+  api
+    .post(`/share-grants/${encodePathSegment(shareGrantId)}/backfill`, {})
+    .then((response) => response?.data);
 
 export const createRemoteShareStreamTicket = (ownerEndpoint, contentId, token) =>
   shareFetch(ownerEndpoint, `/api/v0/streams/${encodeURIComponent(contentId)}/share-ticket`, {

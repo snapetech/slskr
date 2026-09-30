@@ -104,7 +104,8 @@ navSystem: 'nav-system',
 groupRow: (groupName: string) => `group-row-${groupName}`,
 
   // System tabs (if needed)
-systemTabShares: 'system-tab-shares',
+  systemTabShares: 'system-tab-shares',
+  systemRoot: 'system-root',
 
   // Groups
   groupsCreate: 'groups-create',

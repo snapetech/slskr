@@ -1,0 +1,69 @@
+{
+  "protocol": "rf-042-live-subscription-v1",
+  "path": "/api/events/ws",
+  "frames": {
+    "subscribe": {
+      "type": "subscribe",
+      "data": {
+        "topics": [
+          "search.completed",
+          "transfer.completed"
+        ]
+      }
+    },
+    "unsubscribe": {
+      "type": "unsubscribe",
+      "data": {
+        "topics": [
+          "transfer.completed"
+        ]
+      }
+    },
+    "reconnectSubscribeTopics": [
+      "search.completed"
+    ]
+  },
+  "events": {
+    "initial": {
+      "id": "rf042-initial",
+      "topic": "searches",
+      "type": "search.completed",
+      "data": {
+        "phase": "initial"
+      },
+      "timestamp": "2026-09-15T00:00:01Z"
+    },
+    "filtered": {
+      "id": "rf042-filtered",
+      "topic": "transfers",
+      "type": "transfer.completed",
+      "data": {
+        "phase": "filtered"
+      },
+      "timestamp": "2026-09-15T00:00:02Z"
+    },
+    "afterUnsubscribe": {
+      "id": "rf042-after-unsubscribe",
+      "topic": "searches",
+      "type": "search.completed",
+      "data": {
+        "phase": "after-unsubscribe"
+      },
+      "timestamp": "2026-09-15T00:00:03Z"
+    },
+    "reconnect": {
+      "id": "rf042-reconnect",
+      "topic": "searches",
+      "type": "search.completed",
+      "data": {
+        "phase": "reconnect"
+      },
+      "timestamp": "2026-09-15T00:00:04Z"
+    }
+  },
+  "expectedEventIds": [
+    "rf042-initial",
+    "rf042-after-unsubscribe",
+    "rf042-reconnect"
+  ]
+}

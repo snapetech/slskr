@@ -149,12 +149,11 @@ const LyricsPane = ({ audioElement, current, visible }) => {
     if (!audioElement || !visible) return undefined;
 
     const updatePosition = () => setPosition(audioElement.currentTime || 0);
+    updatePosition();
     audioElement.addEventListener('timeupdate', updatePosition);
-    const interval = window.setInterval(updatePosition, 500);
 
     return () => {
       audioElement.removeEventListener('timeupdate', updatePosition);
-      window.clearInterval(interval);
     };
   }, [audioElement, visible]);
 

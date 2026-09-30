@@ -65,9 +65,10 @@ export const update = async (podId, pod, requestingPeerId = 'local-peer') => {
   return readJsonResponse(response);
 };
 
-export const getMembers = async (podId) => {
+export const getMembers = async (podId, signal) => {
   const response = await fetchWithoutRedirects(`${baseUrl}/${encodePathSegment(podId)}/members`, {
     headers: session.authHeaders(),
+    ...(signal ? { signal } : {}),
   });
 
   if (!response.ok) {
@@ -111,14 +112,14 @@ export const leave = async (podId, peerId) => {
   return readJsonResponse(response);
 };
 
-export const getMessages = async (podId, channelId, since = null) => {
-  const parameters = since
-    ? `?since=${encodeURIComponent(String(since))}`
-    : '';
+export const getMessages = async (podId, channelId, since = null, signal) => {
+  const parameters =
+    since == null ? '' : `?since=${encodeURIComponent(String(since))}`;
   const response = await fetchWithoutRedirects(
     `${baseUrl}/${encodePathSegment(podId)}/channels/${encodePathSegment(channelId)}/messages${parameters}`,
     {
       headers: session.authHeaders(),
+      ...(signal ? { signal } : {}),
     },
   );
 

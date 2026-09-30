@@ -129,7 +129,10 @@ function inventory(root) {
         ['get', 'post', 'put', 'patch', 'delete'].includes(node.callee.property.name)
       ) {
         method = node.callee.property.name.toUpperCase();
-      } else if (node.callee?.type === 'Identifier' && node.callee.name === 'safeGet') {
+      } else if (
+        node.callee?.type === 'Identifier' &&
+        ['safeGet', 'getWithOptionalSignal'].includes(node.callee.name)
+      ) {
         method = 'GET';
       } else {
         return;

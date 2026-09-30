@@ -131,6 +131,29 @@ impl PodChannelStore {
         Ok(())
     }
 
+    /// Drops persisted messages whose pod or channel no longer exists.
+    /// Parent-first pod mutations can be interrupted before this store is
+    /// updated, so startup runs this repair before exposing either store.
+    pub fn remove_orphaned_channels(
+        &mut self,
+        pods: &super::pods::PodStore,
+    ) -> Result<usize, String> {
+        self.validate_storage()?;
+        let messages = self
+            .messages
+            .iter()
+            .filter(|message| pods.channel_exists(&message.pod_id, &message.channel_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed = self.messages.len().saturating_sub(messages.len());
+        if removed == 0 {
+            return Ok(0);
+        }
+        write_state(&self.state_path, &messages)?;
+        self.messages = messages;
+        Ok(removed)
+    }
+
     pub fn rebuild_search_index(&mut self) -> Result<bool, String> {
         self.validate_storage()?;
         write_state(&self.state_path, &self.messages)?;
@@ -344,6 +367,7 @@ impl PodChannelStore {
         Ok(removed)
     }
 
+    #[cfg(test)]
     pub fn restore(&mut self, restored: Vec<PodChannelMessage>) -> Result<(), String> {
         if restored.is_empty() {
             return Ok(());
@@ -394,6 +418,7 @@ fn validate_field(name: &str, value: &str, maximum: usize) -> Result<(), String>
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_message(message: &PodChannelMessage) -> Result<(), String> {
     validate_field("PodId", &message.pod_id, MAX_POD_ID_BYTES)?;
     validate_field("ChannelId", &message.channel_id, MAX_CHANNEL_ID_BYTES)?;

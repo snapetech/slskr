@@ -12,6 +12,8 @@ use tokio::{
     time,
 };
 
+use crate::script_process_group;
+
 use crate::config::{ControllerProfile, ScriptIntegrationSettings};
 
 const MAX_CONCURRENT_SCRIPT_RUNS: usize = 32;
@@ -111,9 +113,12 @@ async fn run_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    script_process_group::configure(&mut command);
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to run script: {error}"))?;
+    // Declared after child: group cancellation happens before child drop.
+    let mut process_group = script_process_group::ProcessGroup::new(child.id());
     let mut stdout = child
         .stdout
         .take()
@@ -131,6 +136,8 @@ async fn run_with_timeout(
             .wait()
             .await
             .map_err(|error| format!("failed to wait for script: {error}"))?;
+        // There is no await between reaping and disarming the numeric ID.
+        process_group.completed();
         Ok::<_, String>((status, stdout, stderr))
     })
     .await
@@ -178,6 +185,7 @@ where
 }
 
 pub(crate) fn dispatch(
+    tasks: &crate::managed_tasks::ManagedTaskRegistry,
     scripts: std::collections::BTreeMap<String, ScriptIntegrationSettings>,
     script_directory: std::path::PathBuf,
     target: ControllerProfile,
@@ -212,7 +220,7 @@ pub(crate) fn dispatch(
         let payload = payload.clone();
         let directory = script_directory.clone();
         let event_name = event_name.to_owned();
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let _permit = permit;
             match run(&script, &directory, target, &payload).await {
                 Ok(output) => eprintln!(
@@ -227,166 +235,5 @@ pub(crate) fn dispatch(
 }
 
 #[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use crate::config::ScriptRunSettings;
-
-    fn script(run: ScriptRunSettings) -> ScriptIntegrationSettings {
-        ScriptIntegrationSettings {
-            on: vec!["DownloadFileComplete".to_owned()],
-            run,
-        }
-    }
-
-    #[tokio::test]
-    async fn executable_args_and_arglist_modes_receive_event_payload_in_script_directory() {
-        let directory =
-            std::env::temp_dir().join(format!("slskr-script-modes-{}", uuid::Uuid::new_v4()));
-        let payload = r#"{"type":"DownloadFileComplete","version":0}"#;
-        let args = script(ScriptRunSettings {
-            executable: "/bin/sh".to_owned(),
-            args: "-c 'printf %s \"$SLSKD_SCRIPT_DATA\" > args.json'".to_owned(),
-            ..Default::default()
-        });
-        run(&args, &directory, ControllerProfile::Legacy, payload)
-            .await
-            .unwrap();
-        assert_eq!(
-            tokio::fs::read_to_string(directory.join("args.json"))
-                .await
-                .unwrap(),
-            payload
-        );
-
-        let arglist = script(ScriptRunSettings {
-            executable: "/bin/sh".to_owned(),
-            arglist: Some(vec![
-                "-c".to_owned(),
-                "printf %s \"$SLSKD_SCRIPT_DATA\" > arglist.json".to_owned(),
-            ]),
-            ..Default::default()
-        });
-        run(&arglist, &directory, ControllerProfile::Native, payload)
-            .await
-            .unwrap();
-        assert_eq!(
-            tokio::fs::read_to_string(directory.join("arglist.json"))
-                .await
-                .unwrap(),
-            payload
-        );
-        tokio::fs::remove_dir_all(directory).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn compatibility_script_timeout_bounds_hung_commands() {
-        let directory =
-            std::env::temp_dir().join(format!("slskr-script-timeout-{}", uuid::Uuid::new_v4()));
-        let script = script(ScriptRunSettings {
-            executable: "/bin/sh".to_owned(),
-            arglist: Some(vec!["-c".to_owned(), "sleep 1".to_owned()]),
-            ..Default::default()
-        });
-
-        let error = run_with_timeout(
-            &script,
-            &directory,
-            ControllerProfile::Legacy,
-            "{}",
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap_err();
-
-        assert_eq!(error, "script timed out after 10ms");
-        tokio::fs::remove_dir_all(directory).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn script_nonzero_exit_without_stderr_is_reported() {
-        let directory =
-            std::env::temp_dir().join(format!("slskr-script-exit-{}", uuid::Uuid::new_v4()));
-        let script = script(ScriptRunSettings {
-            executable: "/bin/sh".to_owned(),
-            arglist: Some(vec!["-c".to_owned(), "exit 7".to_owned()]),
-            ..Default::default()
-        });
-
-        let error = run(&script, &directory, ControllerProfile::Native, "{}")
-            .await
-            .expect_err("non-zero script exit");
-
-        assert!(error.contains("script exited unsuccessfully"), "{error}");
-        tokio::fs::remove_dir_all(directory).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn script_output_reader_rejects_oversized_output() {
-        let data = vec![b'x'; MAX_SCRIPT_OUTPUT_BYTES + 1];
-        let mut reader = &data[..];
-        let error = read_script_output(&mut reader, "stdout")
-            .await
-            .expect_err("oversized script output");
-
-        assert!(error.contains("output limit"), "{error}");
-    }
-
-    #[test]
-    fn native_command_safeguard_preserves_the_frozen_target_difference() {
-        let command = script(ScriptRunSettings {
-            command: "echo $SLSKD_SCRIPT_DATA".to_owned(),
-            ..Default::default()
-        });
-        assert!(command_for(&command, ControllerProfile::Legacy).is_ok());
-        assert_eq!(
-            command_for(&command, ControllerProfile::Native).unwrap_err(),
-            "Command contains disallowed shell metacharacters"
-        );
-    }
-
-    #[tokio::test]
-    async fn any_event_dispatch_runs_only_matching_scripts() {
-        let directory =
-            std::env::temp_dir().join(format!("slskr-script-dispatch-{}", uuid::Uuid::new_v4()));
-        let mut scripts = std::collections::BTreeMap::new();
-        scripts.insert(
-            "any".to_owned(),
-            ScriptIntegrationSettings {
-                on: vec!["Any".to_owned()],
-                run: ScriptRunSettings {
-                    executable: "/bin/sh".to_owned(),
-                    arglist: Some(vec![
-                        "-c".to_owned(),
-                        "printf %s \"$SLSKD_SCRIPT_DATA\" > event.json".to_owned(),
-                    ]),
-                    ..Default::default()
-                },
-            },
-        );
-        dispatch(
-            scripts,
-            directory.clone(),
-            ControllerProfile::Native,
-            "DownloadFileComplete",
-            &serde_json::json!({"localFilename": "/downloads/file.flac"}),
-        );
-        let event_path = directory.join("event.json");
-        let mut payload = None;
-        for _ in 0..100 {
-            if let Ok(contents) = tokio::fs::read_to_string(&event_path).await {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    payload = Some(value);
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        let payload = payload.expect("script event payload was not written as valid JSON");
-        assert_eq!(payload["type"], "DownloadFileComplete");
-        assert_eq!(payload["version"], 0);
-        assert_eq!(payload["localFilename"], "/downloads/file.flac");
-        assert!(payload["id"].is_string());
-        assert!(payload["timestamp"].is_string());
-        tokio::fs::remove_dir_all(directory).await.unwrap();
-    }
-}
+#[path = "scripts_tests.rs"]
+mod tests;

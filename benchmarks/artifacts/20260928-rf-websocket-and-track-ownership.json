@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local Cargo tests; relay registrations and broader RF-006 remain open",
+  "sourceSha": "eb90e63dde588a22cc06c6faf91d80347e865892",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/events_ws.rs": "290bad8d5062f7cb049044c2f2cf45ff34f108925669a3f182722071b8308b50",
+    "crates/slskr/src/signalr_ws.rs": "355571091609ed6c1d2358ae7db76cf318e372da8b72b0af3a76ab4d0286ab29",
+    "crates/slskr/src/relay_ws.rs": "f9117977a64e824d3546367ac92cf02d69d174bb95d0523028f5b8ca5792f5ba",
+    "crates/slskr/src/virtual_soulfind_v2_controller.rs": "ca3ebf206ba6980466418e74608baceb618a4defd10c04e1888d76cc89f07021",
+    "crates/slskr/src/focused_controller_tests/websocket_ownership.rs": "8b2ec6657609d802a81b4d3fbdb6b48db2202c1b244669387e3401c4501512c2",
+    "scripts/check-runtime-boundary-hardening.sh": "e17d2d8246d3ebfdc75bb49a02ffe87ce9083bea9c57a011e94883a17d317632"
+  },
+  "logsSha256": {
+    "target/rf-websocket-ownership-focused.log": "c536d279605e045c84e06bfb0c4ea6a42d429efba4e4f322ea44e56b98e61784",
+    "target/rf-websocket-ownership-daemon-tests.log": "eeca75796a28e587e5d2b9830837fe0eed932b57eb427c7fc46f9b8cbc44505e",
+    "target/rf-websocket-ownership-clippy.log": "4cea07ec5a8c3d039feda4afdd0a01ef393fa744cd38473c45f7f74458072de9",
+    "target/rf-websocket-ownership-full-controller.log": "cb2878faf341de051dab67268de50ae8657ca97ade41c59c301e80eacfc4e729"
+  },
+  "tests": {
+    "daemonPassed": 688,
+    "defaultIgnoredMountFixture": 1,
+    "focusedOwnershipTestsPassed": 2,
+    "eventAndSignalrReadersDropOnParentCancellation": true,
+    "trackProcessingRejectsClosedAdmission": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  }
+}

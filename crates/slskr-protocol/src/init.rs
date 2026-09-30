@@ -4,6 +4,17 @@ use crate::{
     primitives::{Reader, Writer},
 };
 
+/// Maximum number of wire bytes accepted for one length-prefixed init field.
+///
+/// Init frames are exchanged before a connection has been authenticated. Keep
+/// this aligned with the client-side peer identity bound so malformed handshakes
+/// cannot turn a field length into a large owned string.
+pub const MAX_INIT_FIELD_BYTES: usize = 4 * 1024;
+
+/// Maximum body length for a valid `PeerInit` frame, including its code byte.
+pub const MAX_PEER_INIT_FRAME_LEN: usize =
+    1 + 4 + MAX_INIT_FIELD_BYTES + 4 + MAX_INIT_FIELD_BYTES + 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum InitCode {
@@ -63,8 +74,8 @@ impl InitMessage {
                 token: reader.read_u32_le()?,
             },
             InitCode::PeerInit => Self::PeerInit {
-                username: reader.read_string()?,
-                connection_type: reader.read_string()?,
+                username: reader.read_string_with_max(MAX_INIT_FIELD_BYTES)?,
+                connection_type: reader.read_string_with_max(MAX_INIT_FIELD_BYTES)?,
                 token: reader.read_u32_le()?,
             },
         };

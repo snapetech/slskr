@@ -74,11 +74,17 @@ GATES=(
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh
   scripts/check-aur-packaging-checksums.sh
+  scripts/check-aur-package-smoke.sh
   scripts/check-rust-dependency-hygiene.sh
   scripts/check-release-version-metadata.sh
   scripts/check-secret-scanning.sh
   scripts/check-python-client-quality.sh
+  scripts/check-python-client-package.sh
   scripts/check-client-sdk-gates.sh
+  scripts/check-typescript-client-package.sh
+  scripts/check-sdk-example-contracts.sh
+  scripts/check-fixture-manifest.sh
+  scripts/test-check-fixture-manifest.sh
   scripts/check-audit-tooling.sh
   scripts/check-rust-module-hygiene.sh
   scripts/check-web-audit.sh
@@ -86,6 +92,13 @@ GATES=(
   scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
   scripts/check-docs-freshness.sh
+  scripts/test-check-docs-freshness.sh
+  scripts/check-plan-freshness.sh
+  scripts/test-check-plan-freshness.sh
+  scripts/check-council-freshness.sh
+  scripts/test-check-council-freshness.sh
+  scripts/check-web-ownership-inventory.sh
+  scripts/check-reproducibility-metadata.sh
   scripts/check-council-loop.sh
   scripts/check-bug-council-all-phases.sh
   scripts/check-council-negative-space.sh

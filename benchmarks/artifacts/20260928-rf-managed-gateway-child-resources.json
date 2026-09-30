@@ -1,0 +1,19 @@
+{
+  "scope": "RF-006 gateway child resource cancellation and joined shutdown",
+  "gates": {
+    "daemonLibTests": 667,
+    "strictAllTargetsClippy": "passed",
+    "fullControllerAndLegacyAllTargetsCompile": "passed"
+  },
+  "regressions": [
+    "proxy cancellation on session Drop and managed shutdown releases backend UDP socket and lease",
+    "late proxy creation rejected with Interrupted and admission lease released",
+    "managed tunnel reader joined before clearing connection records and destination socket EOF",
+    "outbound overlay guard dropped on a thread without Tokio immediately removes metadata"
+  ],
+  "productionDetachedGatewaySpawns": 0,
+  "portsAdded": 0,
+  "remainingScope": [
+    "broader managed service clean-runner evidence"
+  ]
+}

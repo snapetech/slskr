@@ -6,6 +6,11 @@ on:
       tag:
         description: Release tag to publish
         required: true
+      publish:
+        description: Push the validated package to Chocolatey
+        type: boolean
+        default: true
+        required: false
 
 permissions:
   contents: read
@@ -13,15 +18,47 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 1
       - name: Download release asset
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          gh release download $env:RELEASE_TAG --pattern 'slskr-*-x86_64-pc-windows-msvc.zip' --dir release-assets
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+            --pattern 'slskr-*-x86_64-pc-windows-msvc.zip' `
+            --pattern 'SHA256SUMS.txt' --dir release-assets
+      - name: Verify release asset checksum
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $asset = @(Get-ChildItem release-assets\*.zip)
+          if ($asset.Count -ne 1) {
+            throw "Expected exactly one Windows release asset, found $($asset.Count)"
+          }
+          $checksumPath = Join-Path $PWD 'release-assets\SHA256SUMS.txt'
+          if (-not (Test-Path $checksumPath)) {
+            throw "SHA256SUMS.txt was not downloaded"
+          }
+          $escapedName = [regex]::Escape($asset[0].Name)
+          $matches = @(Select-String -Path $checksumPath `
+            -Pattern "^\s*([0-9a-fA-F]{64})\s+\*?(?:\./)?$escapedName\s*$")
+          if ($matches.Count -ne 1) {
+            throw "SHA256SUMS.txt does not contain one entry for $($asset[0].Name)"
+          }
+          $expected = $matches[0].Matches[0].Groups[1].Value.ToLowerInvariant()
+          $actual = (Get-FileHash $asset[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Checksum mismatch for $($asset[0].Name): expected $expected, got $actual"
+          }
+          Write-Host "Verified SHA256 for $($asset[0].Name)"
       - name: Resolve package version
         shell: pwsh
         env:
@@ -34,11 +71,14 @@ jobs:
           "PACKAGE_VERSION=$($Matches['version'])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Render and pack Chocolatey artifact
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           $asset = Get-ChildItem release-assets\*.zip | Select-Object -First 1
           $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($asset.Name)"
           (Get-Content packaging\chocolatey\tools\chocolateyinstall.ps1) `
-            -replace '\$url\s*=\s*".*"', "`$url = `"$($asset.Name)`"" `
+            -replace '\$url\s*=\s*".*"', "`$url = `"$url`"" `
             -replace '\$checksum\s*=\s*".*"', "`$checksum = `"$hash`"" |
             Set-Content packaging\chocolatey\tools\chocolateyinstall.ps1
           $nuspecPath = 'packaging\chocolatey\slskr.nuspec'
@@ -46,7 +86,67 @@ jobs:
           $nuspec = $nuspec -replace '<version>[^<]+</version>', "<version>$env:PACKAGE_VERSION</version>"
           Set-Content $nuspecPath $nuspec
           choco pack packaging\chocolatey\slskr.nuspec --outputdirectory release-assets
+      - name: Smoke-check nupkg contents
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = Get-ChildItem release-assets\*.nupkg | Select-Object -First 1
+          if ($null -eq $package) {
+            throw "Chocolatey pack did not produce an nupkg"
+          }
+          $extractDir = Join-Path $env:RUNNER_TEMP 'slskr-chocolatey-smoke'
+          $archivePath = Join-Path $env:RUNNER_TEMP 'slskr-chocolatey-smoke.zip'
+          Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item $package.FullName $archivePath -Force
+          Expand-Archive -Path $archivePath -DestinationPath $extractDir
+          $installScript = Get-Content (Join-Path $extractDir 'tools\chocolateyinstall.ps1') -Raw
+          $releaseUrlPattern = 'https://github\.com/[^/]+/[^/]+/releases/download/' + [regex]::Escape($env:RELEASE_TAG)
+          if ($installScript -notmatch $releaseUrlPattern) {
+            throw "nupkg installer does not contain a fully qualified release URL for $env:RELEASE_TAG"
+          }
+          if ($installScript -notmatch '\$checksum\s*=\s*"[0-9a-fA-F]{64}"') {
+            throw "nupkg installer does not contain a SHA-256 checksum"
+          }
+      - name: Record validated package evidence
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $asset = Get-ChildItem release-assets\*.zip | Select-Object -First 1
+          $package = Get-ChildItem release-assets\*.nupkg | Select-Object -First 1
+          $sourceCommit = (git rev-parse HEAD).Trim()
+          $receipt = [ordered]@{
+            schemaVersion = 1
+            evidenceMode = 'actual release asset; clean Windows package runner'
+            tag = $env:RELEASE_TAG
+            sourceCommit = $sourceCommit
+            workflowSourceCommit = $env:GITHUB_SHA
+            runUrl = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            assetName = $asset.Name
+            assetSha256 = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            packageName = $package.Name
+            packageSha256 = (Get-FileHash $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            releaseAssetChecksumVerified = $true
+            packageUrlAndChecksumSmokePassed = $true
+            publishRequested = ($env:PUBLISH_REQUESTED -eq 'true')
+          }
+          $receipt | ConvertTo-Json | Set-Content release-assets\chocolatey-validation.json -Encoding utf8
+      - name: Retain validated Chocolatey package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
+        with:
+          name: chocolatey-validation-${{ github.run_id }}
+          path: |
+            release-assets/*.nupkg
+            release-assets/chocolatey-validation.json
+            release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Push package when credentials are configured
+        if: inputs.publish
         shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}

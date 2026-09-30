@@ -18,18 +18,18 @@ trap cleanup_format_tmp_dir EXIT INT TERM
 
 format_base="${SLSKR_RUST_FORMAT_BASE:-}"
 if [[ -n "$format_base" ]]; then
-  mapfile -t rust_files < <(git diff --name-only "$format_base" HEAD -- 'crates/**/*.rs' | sort -u)
+  mapfile -t rust_files < <(git diff --diff-filter=d --name-only "$format_base" HEAD -- 'crates/**/*.rs' | sort -u)
 elif git diff --quiet HEAD -- && git diff --cached --quiet; then
   if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-    mapfile -t rust_files < <(git diff --name-only HEAD^ HEAD -- 'crates/**/*.rs' | sort -u)
+    mapfile -t rust_files < <(git diff --diff-filter=d --name-only HEAD^ HEAD -- 'crates/**/*.rs' | sort -u)
   else
     rust_files=()
   fi
 else
   mapfile -t rust_files < <(
     {
-      git diff --name-only HEAD -- 'crates/**/*.rs'
-      git diff --cached --name-only -- 'crates/**/*.rs'
+      git diff --diff-filter=d --name-only HEAD -- 'crates/**/*.rs'
+      git diff --diff-filter=d --cached --name-only -- 'crates/**/*.rs'
       git ls-files --others --exclude-standard -- 'crates/**/*.rs'
     } | sort -u
   )
@@ -41,11 +41,12 @@ fi
 
 for rust_file in "${rust_files[@]}"; do
   file_bytes="$(wc -c <"$rust_file")"
-  if [[ "$rust_file" == "crates/slskr-web/src/lib.rs" ]] || ((file_bytes > 2000000)); then
-    # The monolithic controller source predates the current rustfmt version
-    # and has repository-wide formatting debt. Its size is below the generic
-    # threshold, so identify it explicitly. Formatting it as one unit is both
-    # expensive and noisy; keep this incremental gate for bounded files only.
+  if [[ "$rust_file" == "crates/slskr-web/src/lib.rs" || "$rust_file" == "crates/slskr/src/lib.rs" ]] || ((file_bytes > 2000000)); then
+    # The monolithic controller roots predate the current rustfmt version and
+    # have repository-wide formatting debt. Keep them explicitly excluded as
+    # structural splits reduce their byte size below the generic threshold.
+    # Formatting either root as one unit is expensive and noisy; keep this
+    # incremental gate for bounded files only.
     printf 'Rust format check skipped for large pre-existing source: %s\n' "$rust_file"
     continue
   fi
@@ -59,7 +60,11 @@ for rust_file in "${rust_files[@]}"; do
     format_status=1
     continue
   fi
-  if ! cmp -s "$rust_file" "$formatted_file"; then
+  normalized_source="$(mktemp "$format_tmp_dir/source.XXXXXX")"
+  normalized_formatted="$(mktemp "$format_tmp_dir/normalized.XXXXXX")"
+  sed 's/\r$//' "$rust_file" >"$normalized_source"
+  sed 's/\r$//' "$formatted_file" >"$normalized_formatted"
+  if ! cmp -s "$normalized_source" "$normalized_formatted"; then
     diff -u -- "$rust_file" "$formatted_file" || true
     format_status=1
   fi

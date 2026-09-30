@@ -145,6 +145,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
             )}
             {httpsUrl && (
               <Message
+                className="login-https-hint"
                 icon
                 info
                 size="small"
@@ -153,7 +154,9 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
                 <Message.Content>
                   <Message.Header>HTTPS Option</Message.Header>
                   If your instance exposes TLS, sign in securely at{' '}
-                  <a href={httpsUrl}>{httpsUrl}</a>.
+                  <a className="login-https-hint-link" href={httpsUrl}>
+                    {httpsUrl}
+                  </a>.
                 </Message.Content>
               </Message>
             )}

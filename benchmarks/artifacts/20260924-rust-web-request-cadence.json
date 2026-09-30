@@ -1,0 +1,286 @@
+{
+  "apiRequestBudget": {
+    "enabled": true,
+    "maximumByRoute": {
+      "/browse": 8,
+      "/collections": 21,
+      "/contacts": 15,
+      "/discovery-graph": 13,
+      "/downloads": 14,
+      "/messages": 13,
+      "/playlist-intake": 19,
+      "/searches": 14,
+      "/shared": 20,
+      "/sharegroups": 20,
+      "/solid": 20,
+      "/system": 39,
+      "/uploads": 14,
+      "/users": 16,
+      "/wishlist": 10
+    },
+    "minimumRepeatedEndpointIntervalMs": 200,
+    "settleMs": 500
+  },
+  "benchmark": "slskr-rust-web-api-request-cadence",
+  "evidenceMode": "mock",
+  "initialWindowRequests": 498,
+  "maximumRouteLifecycleRequests": 39,
+  "routeLifecycleRequests": 512,
+  "routeViewCount": 30,
+  "routes": [
+    {
+      "apiRequestCount": 14,
+      "apiRequestCountBudget": 14,
+      "initialApiRequestCount": 13,
+      "path": "/searches",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 14,
+      "apiRequestCountBudget": 14,
+      "initialApiRequestCount": 13,
+      "path": "/searches",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 13,
+      "apiRequestCountBudget": 13,
+      "initialApiRequestCount": 13,
+      "path": "/discovery-graph",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 13,
+      "apiRequestCountBudget": 13,
+      "initialApiRequestCount": 13,
+      "path": "/discovery-graph",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 19,
+      "apiRequestCountBudget": 19,
+      "initialApiRequestCount": 19,
+      "path": "/playlist-intake",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 19,
+      "apiRequestCountBudget": 19,
+      "initialApiRequestCount": 19,
+      "path": "/playlist-intake",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 10,
+      "apiRequestCountBudget": 10,
+      "initialApiRequestCount": 9,
+      "path": "/wishlist",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 10,
+      "apiRequestCountBudget": 10,
+      "initialApiRequestCount": 9,
+      "path": "/wishlist",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 14,
+      "apiRequestCountBudget": 14,
+      "initialApiRequestCount": 14,
+      "path": "/downloads",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 14,
+      "apiRequestCountBudget": 14,
+      "initialApiRequestCount": 14,
+      "path": "/downloads",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 14,
+      "apiRequestCountBudget": 14,
+      "initialApiRequestCount": 14,
+      "path": "/uploads",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 14,
+      "apiRequestCountBudget": 14,
+      "initialApiRequestCount": 14,
+      "path": "/uploads",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 13,
+      "apiRequestCountBudget": 13,
+      "initialApiRequestCount": 12,
+      "path": "/messages",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 13,
+      "apiRequestCountBudget": 13,
+      "initialApiRequestCount": 12,
+      "path": "/messages",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 16,
+      "apiRequestCountBudget": 16,
+      "initialApiRequestCount": 15,
+      "path": "/users",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 16,
+      "apiRequestCountBudget": 16,
+      "initialApiRequestCount": 15,
+      "path": "/users",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 15,
+      "apiRequestCountBudget": 15,
+      "initialApiRequestCount": 15,
+      "path": "/contacts",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 15,
+      "apiRequestCountBudget": 15,
+      "initialApiRequestCount": 15,
+      "path": "/contacts",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 20,
+      "apiRequestCountBudget": 20,
+      "initialApiRequestCount": 19,
+      "path": "/solid",
+      "repeatedEndpoints": [
+        {
+          "count": 2,
+          "endpoint": "GET /api/v0/solid/status",
+          "minimumIntervalMs": 608.3
+        }
+      ],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 20,
+      "apiRequestCountBudget": 20,
+      "initialApiRequestCount": 19,
+      "path": "/solid",
+      "repeatedEndpoints": [
+        {
+          "count": 2,
+          "endpoint": "GET /api/v0/solid/status",
+          "minimumIntervalMs": 594.8
+        }
+      ],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 21,
+      "apiRequestCountBudget": 21,
+      "initialApiRequestCount": 20,
+      "path": "/collections",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 21,
+      "apiRequestCountBudget": 21,
+      "initialApiRequestCount": 20,
+      "path": "/collections",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 20,
+      "apiRequestCountBudget": 20,
+      "initialApiRequestCount": 20,
+      "path": "/sharegroups",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 20,
+      "apiRequestCountBudget": 20,
+      "initialApiRequestCount": 20,
+      "path": "/sharegroups",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 20,
+      "apiRequestCountBudget": 20,
+      "initialApiRequestCount": 20,
+      "path": "/shared",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 20,
+      "apiRequestCountBudget": 20,
+      "initialApiRequestCount": 20,
+      "path": "/shared",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 8,
+      "apiRequestCountBudget": 8,
+      "initialApiRequestCount": 8,
+      "path": "/browse",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 8,
+      "apiRequestCountBudget": 8,
+      "initialApiRequestCount": 8,
+      "path": "/browse",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    },
+    {
+      "apiRequestCount": 39,
+      "apiRequestCountBudget": 39,
+      "initialApiRequestCount": 38,
+      "path": "/system",
+      "repeatedEndpoints": [],
+      "viewport": "desktop"
+    },
+    {
+      "apiRequestCount": 39,
+      "apiRequestCountBudget": 39,
+      "initialApiRequestCount": 38,
+      "path": "/system",
+      "repeatedEndpoints": [],
+      "viewport": "mobile"
+    }
+  ],
+  "scenario": "success",
+  "schemaVersion": 1
+}

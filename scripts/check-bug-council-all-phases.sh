@@ -44,6 +44,7 @@ if [ ! -x "$runner" ]; then
 fi
 
 require_literal "run-council-scan.sh" "$runner"
+require_literal "check-council-freshness.sh" "$runner"
 require_literal "check-council-active-backlog.sh" "$runner"
 require_literal "check-council-inventory-closure.sh" "$runner"
 require_literal "check-council-loop.sh" "$runner"
@@ -53,6 +54,7 @@ require_literal "check-rust-protocol-adversarial-corpus.sh" "$runner"
 require_literal "Pending" "$runner"
 
 require_literal 'scripts/check-bug-council-all-phases.sh' "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "check-council-freshness.sh" "$repo_root/scripts/check-remediation-baseline.sh"
 require_literal "bug-council-active-backlog.md" "$repo_root/scripts/check-remediation-baseline.sh"
 require_literal "check-council-inventory-closure.sh" "$repo_root/scripts/check-remediation-baseline.sh"
 

@@ -1,0 +1,1840 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-006 later script and WebSocket ownership hosted baseline",
+  "run": {
+    "conclusion": "success",
+    "event": "push",
+    "headSha": "59ddda1744af756dbe65bc19faed7474fbcb99d8",
+    "jobs": [
+      {
+        "completedAt": "2026-09-28T07:32:11Z",
+        "conclusion": "success",
+        "databaseId": 108829236991,
+        "name": "Production web assets",
+        "startedAt": "2026-09-28T07:31:50Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:31:51Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:31:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:31:53Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:31:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:31:55Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "number": 3,
+            "startedAt": "2026-09-28T07:31:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:08Z",
+            "conclusion": "success",
+            "name": "Build production web assets",
+            "number": 4,
+            "startedAt": "2026-09-28T07:31:55Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:09Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:08Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:10Z",
+            "conclusion": "success",
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:09Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:10Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 10,
+            "startedAt": "2026-09-28T07:32:10Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:10Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 11,
+            "startedAt": "2026-09-28T07:32:10Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108829236991"
+      },
+      {
+        "completedAt": "2026-09-28T07:45:23Z",
+        "conclusion": "success",
+        "databaseId": 108829237130,
+        "name": "rust",
+        "startedAt": "2026-09-28T07:32:14Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:17Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:19Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:29Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:41Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:44Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:44Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+            "number": 8,
+            "startedAt": "2026-09-28T07:32:44Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:01Z",
+            "conclusion": "success",
+            "name": "Install workflow and shell linters",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:44Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:04Z",
+            "conclusion": "success",
+            "name": "Restore cargo-audit",
+            "number": 10,
+            "startedAt": "2026-09-28T07:33:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:04Z",
+            "conclusion": "skipped",
+            "name": "Install cargo-audit",
+            "number": 11,
+            "startedAt": "2026-09-28T07:33:04Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:04Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-process-memory-guard.sh",
+            "number": 12,
+            "startedAt": "2026-09-28T07:33:04Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:04Z",
+            "conclusion": "success",
+            "name": "Run scripts/test-process-memory-guard.sh",
+            "number": 13,
+            "startedAt": "2026-09-28T07:33:04Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:21Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-audit-tooling.sh",
+            "number": 14,
+            "startedAt": "2026-09-28T07:33:04Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:21Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-public-posture.sh",
+            "number": 15,
+            "startedAt": "2026-09-28T07:33:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:21Z",
+            "conclusion": "success",
+            "name": "Run scripts/validate-changelog.sh",
+            "number": 16,
+            "startedAt": "2026-09-28T07:33:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:21Z",
+            "conclusion": "success",
+            "name": "Run python3 scripts/test_release_notes.py",
+            "number": 17,
+            "startedAt": "2026-09-28T07:33:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:22Z",
+            "conclusion": "success",
+            "name": "Run python3 -m unittest -v scripts.test_compare_benchmark scripts.test_profile_sqlite",
+            "number": 18,
+            "startedAt": "2026-09-28T07:33:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:22Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-docs-freshness.sh",
+            "number": 19,
+            "startedAt": "2026-09-28T07:33:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:22Z",
+            "conclusion": "success",
+            "name": "Run scripts/test-check-docs-freshness.sh",
+            "number": 20,
+            "startedAt": "2026-09-28T07:33:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:22Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-plan-freshness.sh",
+            "number": 21,
+            "startedAt": "2026-09-28T07:33:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:22Z",
+            "conclusion": "success",
+            "name": "Run scripts/test-check-plan-freshness.sh",
+            "number": 22,
+            "startedAt": "2026-09-28T07:33:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:22Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-rust-format.sh",
+            "number": 23,
+            "startedAt": "2026-09-28T07:33:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:34:55Z",
+            "conclusion": "success",
+            "name": "Run cargo clippy --locked --workspace --all-targets -- -D warnings",
+            "number": 24,
+            "startedAt": "2026-09-28T07:33:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:34:57Z",
+            "conclusion": "success",
+            "name": "Run cargo check --locked -p slskr-web --target wasm32-unknown-unknown",
+            "number": 25,
+            "startedAt": "2026-09-28T07:34:55Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:37:58Z",
+            "conclusion": "success",
+            "name": "Run cargo test --locked --workspace",
+            "number": 26,
+            "startedAt": "2026-09-28T07:34:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:01Z",
+            "conclusion": "success",
+            "name": "Run cargo audit",
+            "number": 27,
+            "startedAt": "2026-09-28T07:37:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:39:18Z",
+            "conclusion": "success",
+            "name": "Run scripts/run-security-scans.sh",
+            "number": 28,
+            "startedAt": "2026-09-28T07:38:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:39:55Z",
+            "conclusion": "success",
+            "name": "Run scripts/check-client-sdk-gates.sh",
+            "number": 29,
+            "startedAt": "2026-09-28T07:39:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:40:12Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix web ci --allow-git=root --legacy-peer-deps",
+            "number": 30,
+            "startedAt": "2026-09-28T07:39:55Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:40:13Z",
+            "conclusion": "success",
+            "name": "Run bash scripts/check-web-audit.sh",
+            "number": 31,
+            "startedAt": "2026-09-28T07:40:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:40:19Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix web run lint",
+            "number": 32,
+            "startedAt": "2026-09-28T07:40:13Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:30Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix web test",
+            "number": 33,
+            "startedAt": "2026-09-28T07:40:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:37Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix web run test:api-lifecycle-coverage",
+            "number": 34,
+            "startedAt": "2026-09-28T07:43:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:40Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix web run build",
+            "number": 35,
+            "startedAt": "2026-09-28T07:43:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:40Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix web run test:bundle-budget",
+            "number": 36,
+            "startedAt": "2026-09-28T07:43:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:40Z",
+            "conclusion": "success",
+            "name": "Run node web/scripts/verify-build-output.mjs",
+            "number": 37,
+            "startedAt": "2026-09-28T07:43:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:46Z",
+            "conclusion": "success",
+            "name": "Run node web/scripts/smoke-subpath-build.mjs",
+            "number": 38,
+            "startedAt": "2026-09-28T07:43:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:54Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix dashboard ci",
+            "number": 39,
+            "startedAt": "2026-09-28T07:43:46Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:54Z",
+            "conclusion": "success",
+            "name": "Run bash scripts/check-web-audit.sh dashboard",
+            "number": 40,
+            "startedAt": "2026-09-28T07:43:54Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:43:58Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix dashboard run type-check",
+            "number": 41,
+            "startedAt": "2026-09-28T07:43:54Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:01Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix dashboard run lint",
+            "number": 42,
+            "startedAt": "2026-09-28T07:43:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:11Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix dashboard run test:coverage",
+            "number": 43,
+            "startedAt": "2026-09-28T07:44:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:12Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix dashboard run build",
+            "number": 44,
+            "startedAt": "2026-09-28T07:44:11Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:12Z",
+            "conclusion": "success",
+            "name": "Run npm --prefix dashboard run test:bundle-budget",
+            "number": 45,
+            "startedAt": "2026-09-28T07:44:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:17Z",
+            "conclusion": "success",
+            "name": "Prove shared peer gateway shutdown",
+            "number": 46,
+            "startedAt": "2026-09-28T07:44:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:17Z",
+            "conclusion": "success",
+            "name": "Collect reproducibility evidence",
+            "number": 47,
+            "startedAt": "2026-09-28T07:45:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:18Z",
+            "conclusion": "success",
+            "name": "Retain reproducibility evidence",
+            "number": 48,
+            "startedAt": "2026-09-28T07:45:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:18Z",
+            "conclusion": "success",
+            "name": "Link reproducibility evidence",
+            "number": 49,
+            "startedAt": "2026-09-28T07:45:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:18Z",
+            "conclusion": "success",
+            "name": "Post Restore cargo-audit",
+            "number": 93,
+            "startedAt": "2026-09-28T07:45:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:18Z",
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+            "number": 94,
+            "startedAt": "2026-09-28T07:45:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:19Z",
+            "conclusion": "success",
+            "name": "Post Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "number": 95,
+            "startedAt": "2026-09-28T07:45:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:19Z",
+            "conclusion": "success",
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "number": 96,
+            "startedAt": "2026-09-28T07:45:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:19Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 97,
+            "startedAt": "2026-09-28T07:45:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:19Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 98,
+            "startedAt": "2026-09-28T07:45:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:45:19Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 99,
+            "startedAt": "2026-09-28T07:45:19Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108829237130"
+      },
+      {
+        "completedAt": "2026-09-28T07:38:23Z",
+        "conclusion": "success",
+        "databaseId": 108829237206,
+        "name": "Linux AArch64",
+        "startedAt": "2026-09-28T07:32:15Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:17Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:18Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:25Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:34Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:34Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:34Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:54Z",
+            "conclusion": "success",
+            "name": "Install musl toolchain",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:34Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:34:08Z",
+            "conclusion": "success",
+            "name": "Check native GNU build",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:54Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:37:49Z",
+            "conclusion": "success",
+            "name": "Run native GNU tests",
+            "number": 8,
+            "startedAt": "2026-09-28T07:34:08Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:21Z",
+            "conclusion": "success",
+            "name": "Check static musl build",
+            "number": 9,
+            "startedAt": "2026-09-28T07:37:49Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:21Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 17,
+            "startedAt": "2026-09-28T07:38:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:21Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 18,
+            "startedAt": "2026-09-28T07:38:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:21Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 19,
+            "startedAt": "2026-09-28T07:38:21Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108829237206"
+      },
+      {
+        "completedAt": "2026-09-28T07:55:52Z",
+        "conclusion": "success",
+        "databaseId": 108830244168,
+        "name": "Platform macos-arm64",
+        "startedAt": "2026-09-28T07:32:20Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:26Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:30Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:41Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:58Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:58Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:58Z",
+            "conclusion": "skipped",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:58Z",
+            "conclusion": "skipped",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:58Z",
+            "conclusion": "skipped",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:32:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:58Z",
+            "conclusion": "skipped",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:39:01Z",
+            "conclusion": "success",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:32:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:39:02Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:39:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:45Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:39:02Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:46Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:55:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:46Z",
+            "conclusion": "skipped",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:55:46Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:48Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:55:46Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:48Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:55:48Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:48Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:55:48Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:50Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:55:48Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244168"
+      },
+      {
+        "completedAt": "2026-09-28T07:57:45Z",
+        "conclusion": "success",
+        "databaseId": 108830244208,
+        "name": "Platform macos-x64",
+        "startedAt": "2026-09-28T07:32:17Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:21Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:25Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:00Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:01Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:33:00Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:01Z",
+            "conclusion": "skipped",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:33:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:01Z",
+            "conclusion": "skipped",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:33:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:01Z",
+            "conclusion": "skipped",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:33:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:01Z",
+            "conclusion": "skipped",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:33:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:44Z",
+            "conclusion": "success",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:33:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:38:45Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:38:44Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:39Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:38:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:40Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:57:39Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:40Z",
+            "conclusion": "skipped",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:57:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:42Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:57:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:42Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:57:42Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:43Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:57:42Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:57:44Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:57:43Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244208"
+      },
+      {
+        "completedAt": "2026-09-28T07:44:35Z",
+        "conclusion": "success",
+        "databaseId": 108830244229,
+        "name": "Platform linux-x64",
+        "startedAt": "2026-09-28T07:32:17Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:20Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:22Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:32Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:32Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "skipped",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "skipped",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "skipped",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "skipped",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:38Z",
+            "conclusion": "skipped",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:39Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:32:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:30Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:32:39Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:31Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:44:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:31Z",
+            "conclusion": "skipped",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:44:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:33Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:44:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:33Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:44:33Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:33Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:44:33Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:33Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:44:33Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244229"
+      },
+      {
+        "completedAt": "2026-09-28T07:44:56Z",
+        "conclusion": "success",
+        "databaseId": 108830244268,
+        "name": "Platform linux-arm64",
+        "startedAt": "2026-09-28T07:32:19Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:21Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:24Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:30Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:37Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:51Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:32:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:52Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:44:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:52Z",
+            "conclusion": "skipped",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:44:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:54Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:44:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:54Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:44:54Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:54Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:44:54Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:44:54Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:44:54Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244268"
+      },
+      {
+        "completedAt": "2026-09-28T07:50:28Z",
+        "conclusion": "success",
+        "databaseId": 108830244277,
+        "name": "Platform linux-musl-arm64",
+        "startedAt": "2026-09-28T07:32:18Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:20Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:22Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:29Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:34Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:34Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "skipped",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:53Z",
+            "conclusion": "success",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:53Z",
+            "conclusion": "skipped",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:32:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:53Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:32:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:24Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:32:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:25Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:50:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:25Z",
+            "conclusion": "skipped",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:50:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:26Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:50:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:26Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:50:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:27Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:50:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:50:27Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:50:27Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244277"
+      },
+      {
+        "completedAt": "2026-09-28T07:55:50Z",
+        "conclusion": "success",
+        "databaseId": 108830244307,
+        "name": "Platform windows-x64",
+        "startedAt": "2026-09-28T07:32:18Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:26Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:45Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:33:17Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:35:58Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:33:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:35:58Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:35:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:35:58Z",
+            "conclusion": "success",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:35:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:35:58Z",
+            "conclusion": "success",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:35:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:36:01Z",
+            "conclusion": "success",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:35:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:36:01Z",
+            "conclusion": "skipped",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:36:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:42:15Z",
+            "conclusion": "success",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:36:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:42:17Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:42:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:37Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:42:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:43Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:55:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:44Z",
+            "conclusion": "success",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:55:43Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:47Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:55:44Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:47Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:55:47Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:48Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:55:47Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:55:48Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:55:48Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244307"
+      },
+      {
+        "completedAt": "2026-09-28T07:49:35Z",
+        "conclusion": "success",
+        "databaseId": 108830244363,
+        "name": "Platform linux-musl-x64",
+        "startedAt": "2026-09-28T07:32:19Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T07:32:21Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T07:32:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:23Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T07:32:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:35Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 3,
+            "startedAt": "2026-09-28T07:32:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:40Z",
+            "conclusion": "success",
+            "name": "Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 4,
+            "startedAt": "2026-09-28T07:32:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:40Z",
+            "conclusion": "success",
+            "name": "Prefer rustup toolchain binaries",
+            "number": 5,
+            "startedAt": "2026-09-28T07:32:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:40Z",
+            "conclusion": "skipped",
+            "name": "Clear Unix compiler wrapper on Windows",
+            "number": 6,
+            "startedAt": "2026-09-28T07:32:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:40Z",
+            "conclusion": "skipped",
+            "name": "Enable long Git paths",
+            "number": 7,
+            "startedAt": "2026-09-28T07:32:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:40Z",
+            "conclusion": "skipped",
+            "name": "Select full Perl for vendored OpenSSL",
+            "number": 8,
+            "startedAt": "2026-09-28T07:32:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:56Z",
+            "conclusion": "success",
+            "name": "Install native packages",
+            "number": 9,
+            "startedAt": "2026-09-28T07:32:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:56Z",
+            "conclusion": "skipped",
+            "name": "Run native workspace tests",
+            "number": 10,
+            "startedAt": "2026-09-28T07:32:56Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:32:57Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 11,
+            "startedAt": "2026-09-28T07:32:56Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:30Z",
+            "conclusion": "success",
+            "name": "Build release archive",
+            "number": 12,
+            "startedAt": "2026-09-28T07:32:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:31Z",
+            "conclusion": "success",
+            "name": "Verify release archive",
+            "number": 13,
+            "startedAt": "2026-09-28T07:49:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:31Z",
+            "conclusion": "skipped",
+            "name": "Run Windows archive smoke",
+            "number": 14,
+            "startedAt": "2026-09-28T07:49:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:33Z",
+            "conclusion": "success",
+            "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "number": 15,
+            "startedAt": "2026-09-28T07:49:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:33Z",
+            "conclusion": "success",
+            "name": "Post Run Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16",
+            "number": 29,
+            "startedAt": "2026-09-28T07:49:33Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:33Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 30,
+            "startedAt": "2026-09-28T07:49:33Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T07:49:33Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "startedAt": "2026-09-28T07:49:33Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108830244363"
+      },
+      {
+        "completedAt": "2026-09-28T08:08:38Z",
+        "conclusion": "success",
+        "databaseId": 108837739600,
+        "name": "Package and deployment surfaces",
+        "startedAt": "2026-09-28T08:06:18Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T08:06:19Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T08:06:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:06:21Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T08:06:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:06:23Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "number": 3,
+            "startedAt": "2026-09-28T08:06:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:07:06Z",
+            "conclusion": "success",
+            "name": "Install package builders",
+            "number": 4,
+            "startedAt": "2026-09-28T08:06:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:07:21Z",
+            "conclusion": "success",
+            "name": "Run release surface policy checks",
+            "number": 5,
+            "startedAt": "2026-09-28T08:07:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:07:21Z",
+            "conclusion": "success",
+            "name": "Lint deployment charts",
+            "number": 6,
+            "startedAt": "2026-09-28T08:07:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:07:22Z",
+            "conclusion": "success",
+            "name": "Validate Flatpak sources for both Linux architectures",
+            "number": 7,
+            "startedAt": "2026-09-28T08:07:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:08:23Z",
+            "conclusion": "success",
+            "name": "Build Debian packages for amd64 and arm64",
+            "number": 8,
+            "startedAt": "2026-09-28T08:07:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:08:36Z",
+            "conclusion": "success",
+            "name": "Build RPMs for x86_64 and aarch64",
+            "number": 9,
+            "startedAt": "2026-09-28T08:08:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:08:36Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 18,
+            "startedAt": "2026-09-28T08:08:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T08:08:36Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 19,
+            "startedAt": "2026-09-28T08:08:36Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36391848047/job/108837739600"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/snapetech/slskr/actions/runs/36391848047"
+  },
+  "receiptSha256": "1ca913462f8a32fd3864945c94e2be786694916b845f99323a43207ab006dfcc",
+  "scope": "All eleven CI jobs succeeded at exactly 59ddda17. Includes script process groups and scoped WebSocket readers. Later CLI, FTP, webhook, relay, fixture, and profile changes require their own hosted results."
+}

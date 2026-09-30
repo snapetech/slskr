@@ -139,6 +139,25 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.js'],
+    testTimeout: 15000,
     exclude: ['e2e/**', 'node_modules/**'],
+    coverage: {
+      provider: 'v8',
+      include: [
+        'src/lib/api.js',
+        'src/lib/http.js',
+        'src/lib/session.js',
+        'src/lib/events.js',
+        'src/lib/hubFactory.js',
+        'src/lib/streaming.js',
+      ],
+      reporter: ['text'],
+      thresholds: {
+        statements: 84,
+        branches: 75,
+        functions: 72,
+        lines: 86,
+      },
+    },
   },
 });

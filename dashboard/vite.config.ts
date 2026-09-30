@@ -5,6 +5,18 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/main.tsx'],
+      reporter: ['text', 'json-summary'],
+      thresholds: {
+        statements: 67,
+        branches: 55,
+        functions: 55,
+        lines: 71,
+      },
+    },
   },
   server: {
     port: 3000,

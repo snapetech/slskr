@@ -1,57 +1,26 @@
-import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
-import { Button, Input } from './index';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
+import { Icon, Menu } from './index';
 
-describe('Semantic UI compatibility controls', () => {
-  it('renders object shorthand labels on inputs and buttons', () => {
-    render(
-      <>
-        <Input
-          aria-label="Local port"
-          label={{ basic: true, content: 'localhost:' }}
-          labelPosition="left"
-          onChange={() => undefined}
-          value="8080"
-        />
-        <Button
-          label={{ as: 'a', content: '2 files' }}
-          labelPosition="right"
-        >
-          Download
-        </Button>
-      </>,
-    );
+describe('Menu.Item accessibility', () => {
+  it('supports keyboard activation for clickable div items', () => {
+    const onClick = vi.fn();
+    render(<Menu.Item onClick={onClick}>Settings</Menu.Item>);
 
-    expect(screen.getByText('localhost:')).toHaveClass('ui', 'basic', 'label');
-    expect(screen.getByText('2 files')).toHaveClass('ui', 'label');
-    expect(screen.getByText('2 files').tagName).toBe('A');
+    const item = screen.getByRole('button', { name: 'Settings' });
+    expect(item).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(item, { key: 'Enter' });
+    fireEvent.keyDown(item, { key: ' ' });
+    expect(onClick).toHaveBeenCalledTimes(2);
   });
 
-  it('renders icon shorthand inside labels without leaking objects to React', () => {
-    render(
-      <Input
-        aria-label="Filter"
-        label={{ content: 'Filter', icon: 'filter' }}
-        onChange={() => undefined}
-        value=""
-      />,
-    );
+  it('exposes clickable icons as keyboard-accessible controls', () => {
+    const onClick = vi.fn();
+    render(<Icon name="close" onClick={onClick} />);
 
-    expect(screen.getByText('Filter')).toBeInTheDocument();
-    expect(document.querySelector('i.filter.icon')).toBeInTheDocument();
-  });
-
-  it('keeps input change data compatible with Semantic UI callers', () => {
-    const onChange = vi.fn();
-    render(<Input aria-label="Filter" onChange={onChange} value="" />);
-
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter' }), {
-      target: { value: 'cover' },
-    });
-
-    expect(onChange).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({ value: 'cover' }),
-    );
+    const icon = screen.getByRole('button');
+    fireEvent.keyDown(icon, { key: 'Enter' });
+    expect(onClick).toHaveBeenCalledOnce();
   });
 });

@@ -33,15 +33,29 @@ older counts or phrases such as “open” describe their checkpoint, not the
 current frozen-boundary status. A newer upstream revision requires a new
 comparison pin and certification run.
 
-The current shared-UDP implementation owns the configured public DHT port in
-the gateway when the frozen sharing predicate is active. It forwards only
-DHT-shaped datagrams to a bounded internal mainline endpoint, gives mainline a
-clone of that same public socket for outbound requests/responses, and leaves
-overlay and QUIC traffic in the gateway classifier. A localhost runtime probe,
-dependency-level source-port regression, and socket-level forwarding
-regression confirm the public bind, internal endpoint, outbound/response
-source port, and public-port status projection. Live cross-client DHT/QUIC
-receiver interoperability remains unproven.
+Native/current peer services use one public TCP/UDP port. QUIC control and data
+send directly through that UDP socket and receive classified packets through
+bounded in-process queues, with no loopback backend listeners or per-peer
+forwarding sockets. GRO boundaries, remote addresses, destination IP, and ECN
+are preserved. One QUIC endpoint negotiates both ALPNs after authenticated
+TLS reassembly, then dispatches control/data connections. Real certificate-
+verified fragmented handshakes exercise both ALPNs from one peer socket;
+native gateway tests independently verify pinned control/data and DHT routing.
+The frozen relay selector is checked against independently encrypted rustls
+v1/v2 Initials. Binary short headers beginning with `d` are distinguished from
+valid DHT messages. Disabled ALPNs are rejected by TLS. Frozen compatibility
+configuration remains distinct.
+
+The shared-UDP implementation gives mainline a clone of the existing public
+socket and delivers DHT-shaped packets through a bounded in-process queue.
+It preserves each original remote address and does not create a dedicated
+DHT receive or forwarding socket. Admission caps packets at 2,048 bytes and
+the queue at 256 packets, rejecting full, closed, and oversized input. Actual
+localhost ping request/reply proof verifies delivery to the original remote
+from the public source port. Overlay and QUIC remain in the gateway classifier.
+The former raw-UDP forwarding path changed the peer identity and returned
+replies to its forwarder; that path is now bypassed by the shared transport.
+Live cross-client DHT/QUIC receiver interoperability remains separate proof.
 
 ## Baseline
 

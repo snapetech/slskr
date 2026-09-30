@@ -11,6 +11,10 @@ use tokio_rustls::rustls;
 
 use crate::config::{ControllerProfile, FtpIntegrationSettings};
 
+#[path = "ftp_upload_queue.rs"]
+mod upload_queue;
+pub(crate) use upload_queue::FtpUploadQueue;
+
 #[derive(Debug)]
 struct AcceptAnyServerCertificate {
     standard: Arc<rustls::client::WebPkiServerVerifier>,

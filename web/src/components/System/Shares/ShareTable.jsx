@@ -5,7 +5,7 @@ import { Icon, Table } from 'semantic-ui-react';
 
 const ShareTable = ({ onClick, shares }) => {
   return (
-    <Table>
+    <Table data-testid="system-shares-table">
       <Table.Header>
         <Table.Row>
           <Table.HeaderCell>Host</Table.HeaderCell>

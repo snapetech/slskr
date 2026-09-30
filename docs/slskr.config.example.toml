@@ -56,16 +56,21 @@ prefer_outbound = true # effective only in prefer mode
 [listeners]
 regular_bind = "0.0.0.0:2234"
 advertised_port = 2234
+# Native/current type-1 obfuscation shares the regular peer listener. Keep a
+# separate bind/advertised port only when running a frozen compatibility
+# profile; native/current rejects a different endpoint.
 # obfuscated_bind = "0.0.0.0:2235"
 # obfuscated_advertised_port = 2235
 # Current native defaults share the Soulseek TCP listener with the TLS 1.3
-# mesh-service/private-gateway listener. Set this only for an explicit
-# dedicated compatibility listener, for example 0.0.0.0:50305.
+# mesh-service/private-gateway listener. A different overlay bind is rejected
+# in native/current mode. Frozen compatibility profiles retain old behavior.
 # overlay_bind = "0.0.0.0:50305"
 
 [dht]
-# Native/current defaults enable DHT and use UDP port 50300, independently of
-# a customized Soulseek TCP port. Port 0 is accepted only when DHT is disabled.
+# Native/current defaults enable DHT and share the peer port number across
+# peer TCP and DHT/mesh/QUIC UDP. This example sets that number to 2234 above;
+# without an override, the peer port defaults to 50300.
+# Port 0 is accepted only when DHT is disabled.
 # enabled = true
 # port = 0
 

@@ -1,0 +1,16 @@
+[
+  "style_parts/shell_base.css",
+  "style_parts/workspace_tables.css",
+  "style_parts/player_visualizer.css",
+  "style_parts/route_reference_workflows.css",
+  "style_parts/native_workspace.css",
+  "style_parts/wishlist_rules.css",
+  "style_parts/transfer_policies.css",
+  "style_parts/wishlist_history.css",
+  "style_parts/native_table_projection.css",
+  "style_parts/native_editors_messaging.css",
+  "style_parts/native_selection_dialogs.css",
+  "style_parts/native_domain_workflows.css",
+  "style_parts/local_preferences.css",
+  "style_parts/responsive_layout.css"
+]

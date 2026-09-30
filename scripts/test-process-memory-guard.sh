@@ -56,10 +56,11 @@ if [[ "$node_options" != *--max-old-space-size=1024* ]]; then
   exit 1
 fi
 
+expected_working_directory="$(node -e 'process.stdout.write(process.cwd())')"
 working_directory="$(
   "$guard" node -e 'process.stdout.write(process.cwd())'
 )"
-if [[ "$working_directory" != "$repo_root" ]]; then
+if [[ "$working_directory" != "$expected_working_directory" ]]; then
   printf 'Process memory guard test failed: working directory was %s\n' "$working_directory" >&2
   exit 1
 fi
@@ -72,6 +73,35 @@ forwarded_environment="$(
 if [[ "$forwarded_environment" != "/tmp/frozen-slskdn|bounded|1" ]]; then
   printf 'Process memory guard test failed: caller environment was not forwarded: %s\n' "$forwarded_environment" >&2
   exit 1
+fi
+
+# A verified fallback may be reused, but a tighter nested request must apply.
+nested_fallback_limit="$(
+  SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD=1 \
+  SLSKR_PROCESS_MEMORY_MAX_KIB=262144 \
+    "$guard" bash -c 'SLSKR_PROCESS_MEMORY_MAX_KIB=131072 "$1" bash -c "ulimit -v"' _ "$guard"
+)"
+expected_nested_limit=131072
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  expected_nested_limit=unlimited
+fi
+if [[ "$nested_fallback_limit" != "$expected_nested_limit" ]]; then
+  printf 'Process memory guard test failed: tighter nested limit was %s\n' "$nested_fallback_limit" >&2
+  exit 1
+fi
+
+# Linux cgroup nesting must retain real memory/swap limits without RLIMIT_AS.
+if [[ "$(uname -s)" == "Linux" ]] \
+  && command -v systemd-run >/dev/null 2>&1 \
+  && systemctl --user show-environment >/dev/null 2>&1 \
+  && [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]]; then
+  nested_cgroup_limit="$(
+    "$guard" bash -c '"$1" bash -c "ulimit -v"' _ "$guard"
+  )"
+  if [[ "$nested_cgroup_limit" != "unlimited" ]]; then
+    printf 'Process memory guard test failed: verified cgroup gained virtual limit %s\n' "$nested_cgroup_limit" >&2
+    exit 1
+  fi
 fi
 
 printf 'Process memory guard tests passed\n'

@@ -39,7 +39,12 @@ flip on.
 Remaining product work is narrower than the historical phase list below:
 single-node daemon hardening, exact universal replacement parity, production
 policy, live interop proof, public provenance/branding review, and
-release-readiness evidence.
+release-readiness evidence. The active whole-project refactor program is tracked
+separately in
+[`docs/dev/refactoring-efficiency-plan.md`](docs/dev/refactoring-efficiency-plan.md)
+with the evidence snapshot in
+[`docs/dev/refactor-audit-20260915.md`](docs/dev/refactor-audit-20260915.md);
+those documents supersede the historical phase checklist for refactor status.
 
 The frozen parity boundary is closed, but the current-upstream code boundary is
 now implemented and verified against controlled fixtures. The implementation
@@ -140,7 +145,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 
 ### Phase 4 — Connection layer (`slskr-client`) *(initial cut done)*
 - Server connection: dial, login, keepalive, server-message dispatch. *(done: TCP dial, typed server stream wrapper, login handshake, wait-port send, ping send, and public send/receive helpers)*
-- Listener: accept inbound; demux on first byte (init code) or connection-type byte (`P`/`F`/`D`). *(done: bind/accept wrapper, connection-type tags, async frame I/O, and inbound demux for tagged sockets plus `PeerInit`/`PierceFirewall`; `F` sockets wrap typed file-transfer I/O)*
+- Listener: accept inbound; use bounded framed initialization on shared endpoints and raw connection-type tags only on the dedicated listener contract. *(done: bind/accept wrapper, bounded plain/obfuscated init candidate validation, connection-type tags, async frame I/O, and inbound demux for tagged sockets plus `PeerInit`/`PierceFirewall`; `F` sockets wrap typed file-transfer I/O)*
 - Outbound peer connect: dial → send `PeerInit` → race with indirect path. *(done: direct `PeerInit` helpers for `P`/`F`/`D`, with typed peer/distributed/file-transfer stream wrappers)*
 - Indirect connect: receive `ConnectToPeer` from server → inbound peer dials us → expect `PierceFirewall` with token. *(done: `ConnectToPeer` request builder, token generator, server request issuance, plus `PeerInit`/`PierceFirewall`/tagged inbound completion validation for `P`/`F`/`D`)*
 - Per-peer `P`-connection cache (one per username). *(done: async cache with insert/replace/remove, typed send/receive helpers, and manager-level direct acquisition/reuse)*

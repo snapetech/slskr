@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "live isolated daemon process; not deployed interop proof",
+  "sourceSha": "37f2e049c436c84188900a1e9b644c8b221977d8",
+  "dirtyWorktree": true,
+  "binarySha256": "99761b28d1c9b857bc98aaefc45994f8bd2fb9553acfd6f6fce79d6f95ca3aeb",
+  "harnessSha256": "3e92823cd708c3f2efda9c050b4a71b05dfe12e71678a101db87ac0f92eb9c99",
+  "startedUtc": "2026-09-28T05:06:49.836855+00:00",
+  "dhtEnabled": false,
+  "meshDhtEnabled": false,
+  "quicEnabled": false,
+  "productionPortsAdded": 0,
+  "cycles": [
+    {
+      "cycle": 1,
+      "tcpListeners": 2,
+      "peerTcpListeners": 1,
+      "gatewayUdpListeners": 1,
+      "peerTcpAndUdpSamePort": true,
+      "stalledPartialTlsClients": 1,
+      "perIpCapacityRejectedFourthClient": null,
+      "establishedTlsAwaitingOverlayInit": 1,
+      "certificateSha256": "1286f507b4a5be541d9ab67457e805878313e71059a1a2d17b06e63da4af05fc",
+      "exitCode": 0,
+      "shutdownSeconds": 0.113513,
+      "allClientSocketsClosed": true,
+      "peerTcpAndUdpRebound": true
+    },
+    {
+      "cycle": 2,
+      "tcpListeners": 2,
+      "peerTcpListeners": 1,
+      "gatewayUdpListeners": 1,
+      "peerTcpAndUdpSamePort": true,
+      "stalledPartialTlsClients": 0,
+      "perIpCapacityRejectedFourthClient": true,
+      "establishedTlsAwaitingOverlayInit": 3,
+      "certificateSha256": "1cd7db186f1a65f87ae788bc0ccdb8cd533333bea2fd5f01063a308917b7a290",
+      "exitCode": 0,
+      "shutdownSeconds": 0.113449,
+      "allClientSocketsClosed": true,
+      "peerTcpAndUdpRebound": true
+    },
+    {
+      "cycle": 3,
+      "tcpListeners": 2,
+      "peerTcpListeners": 1,
+      "gatewayUdpListeners": 1,
+      "peerTcpAndUdpSamePort": true,
+      "stalledPartialTlsClients": 1,
+      "perIpCapacityRejectedFourthClient": null,
+      "establishedTlsAwaitingOverlayInit": 1,
+      "certificateSha256": "c1e364b16cabc134b0ba8e821b12160619aecbe735d851a38e33f84a442c5b8e",
+      "exitCode": 0,
+      "shutdownSeconds": 0.113495,
+      "allClientSocketsClosed": true,
+      "peerTcpAndUdpRebound": true
+    }
+  ],
+  "success": true,
+  "validation": {
+    "daemonLibraryTests": 668,
+    "strictClippy": "passed",
+    "fullControllerLegacyCheck": "passed",
+    "helperTests": 6,
+    "auditTooling": "passed",
+    "workflowPolicy": "passed",
+    "packageMatrixPolicy": "passed",
+    "hostedProof": "pending"
+  }
+}

@@ -1,6 +1,7 @@
 import api from './api';
 import {
   buildRemoteShareStreamUrl,
+  backfillIncomingShare,
   createShareToken,
   fetchRemoteShareManifest,
   getCollectionItems,
@@ -12,7 +13,6 @@ import {
   getSharesByCollection,
   browseLibraryItems,
   getShareManifest,
-  remoteBackfillShare,
   searchLibraryItems,
 } from './collections';
 
@@ -70,27 +70,16 @@ describe('share API helpers', () => {
     );
   });
 
-  it('authenticates remote backfill with the delegated share token', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{"backfilled":1}', {
-        status: 202,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+  it('requests incoming share backfill from the authenticated local daemon', async () => {
+    api.post.mockResolvedValue({ data: { backfilled: 1 } });
 
-    await expect(
-      remoteBackfillShare('https://owner.example', 'grant/1', 'share-secret'),
-    ).resolves.toEqual({ backfilled: 1 });
+    await expect(backfillIncomingShare('grant/1')).resolves.toEqual({
+      backfilled: 1,
+    });
 
-    expect(fetchMock.mock.calls[0][1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        redirect: 'error',
-        headers: {
-          'X-Share-Token': 'share-secret',
-          'Content-Type': 'application/json',
-        },
-      }),
+    expect(api.post).toHaveBeenCalledWith(
+      '/share-grants/grant%2F1/backfill',
+      {},
     );
   });
 

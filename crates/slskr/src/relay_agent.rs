@@ -53,8 +53,9 @@ type RelaySocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub(crate) fn spawn(state: Arc<AppState>) {
-    tokio::spawn(async move {
-        run(state).await;
+    let task_state = Arc::clone(&state);
+    state.spawn_managed_task(async move {
+        run(task_state).await;
     });
 }
 

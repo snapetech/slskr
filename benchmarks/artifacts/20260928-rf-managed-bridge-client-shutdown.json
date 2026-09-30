@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "c900fc34e73eb7d493aa587d7ef875c8759c58fe",
+  "scope": "managed bridge accepted-client lifetime and runtime bookkeeping",
+  "daemonLibraryTests": 660,
+  "socketLifecycleRegressions": 4,
+  "regressionCases": [
+    "listener stop cancels and joins stalled clients",
+    "daemon shutdown joins clients and clears records",
+    "late admission closes rejected sockets",
+    "dropping listener owner cancels stalled clients"
+  ],
+  "handlerRegistry": "ManagedTaskRegistry",
+  "listenerCancellation": "watch channel with completion acknowledgements",
+  "completedHandlersReaped": true,
+  "productionListenerPortsAdded": 0,
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "aa246e7996f777bd8638a69a1329084e8aa0c18e95ee6800468410c33efc1e2a"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "ce4bcf2d6207f5d39edf1570dce584d3b4c5166bcfe018557b1924e40f068233"
+    },
+    "features": {
+      "passed": true,
+      "sha256": "6f4c79343956913176e92eb2ee8bb6206dd64bf7849391dd7866783167cc9b2f"
+    }
+  },
+  "sources": {
+    "crates/slskr/src/soulfind_bridge_runtime.rs": "fa280cc73d9a29476414b7c49f5dadbfa3d1d2fd9877689f613c6d3b272375e2",
+    "crates/slskr/src/app_state.rs": "0aa40b03ef4f4e63806ec24ebd0a600892cddcb21331f09d7b61cbb810b5c714",
+    "crates/slskr/src/focused_controller_tests/lifecycle.rs": "c42775ac0d14c581d4f7fbcef6508f4a4efbf4f70b1a352a058d3c3227ab3523"
+  }
+}

@@ -1,0 +1,563 @@
+{
+  "benchmark": "slskr-sqlite-index-cardinality",
+  "databaseSize": {
+    "allIndexesAddedBytes": 47071232,
+    "existingIndexes": {
+      "bytes": 493268992,
+      "pageCount": 120427,
+      "pageSizeBytes": 4096
+    },
+    "redundantSearchIndexBytes": 24059904,
+    "withAllCompositeIndexes": {
+      "bytes": 540340224,
+      "pageCount": 131919,
+      "pageSizeBytes": 4096
+    },
+    "withRetainedCompositeIndexes": {
+      "bytes": 516280320,
+      "pageCount": 126045,
+      "pageSizeBytes": 4096
+    }
+  },
+  "dataset": {
+    "deepPageOffset": 1000,
+    "limit": 100,
+    "logsPerWebhookAverage": 5000.0,
+    "queuedTransferPercent": 1.0,
+    "resultsPerSearchAverage": 1000.0,
+    "searchIds": 1000,
+    "searchResults": 1000000,
+    "transfers": 500000,
+    "webhookIds": 100,
+    "webhookLogs": 500000
+  },
+  "evidenceMode": "synthetic-cardinality",
+  "existingIndexes": {
+    "benchmark": "slskr-sqlite",
+    "cases": {
+      "queued-transfers-deep-page": {
+        "latencyMs": {
+          "maximum": 15.622,
+          "median": 14.936,
+          "minimum": 14.675,
+          "p95": 15.566
+        },
+        "plan": [
+          {
+            "detail": "SCAN transfers USING INDEX idx_transfers_started",
+            "id": 8,
+            "notUsed": 211,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 1000"
+      },
+      "queued-transfers-first-page": {
+        "latencyMs": {
+          "maximum": 1.462,
+          "median": 1.363,
+          "minimum": 1.356,
+          "p95": 1.444
+        },
+        "plan": [
+          {
+            "detail": "SCAN transfers USING INDEX idx_transfers_started",
+            "id": 8,
+            "notUsed": 211,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 0"
+      },
+      "search-results-deep-page": {
+        "latencyMs": {
+          "maximum": 0.107,
+          "median": 0.1,
+          "minimum": 0.094,
+          "p95": 0.105
+        },
+        "plan": [
+          {
+            "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+            "id": 8,
+            "notUsed": 123,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 500"
+      },
+      "search-results-first-page": {
+        "latencyMs": {
+          "maximum": 0.102,
+          "median": 0.091,
+          "minimum": 0.087,
+          "p95": 0.096
+        },
+        "plan": [
+          {
+            "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+            "id": 8,
+            "notUsed": 123,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 0"
+      },
+      "webhook-logs-deep-page": {
+        "latencyMs": {
+          "maximum": 8.203,
+          "median": 7.178,
+          "minimum": 6.76,
+          "p95": 8.197
+        },
+        "plan": [
+          {
+            "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook (webhook_id=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          },
+          {
+            "detail": "USE TEMP B-TREE FOR ORDER BY",
+            "id": 32,
+            "notUsed": 0,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 1000"
+      },
+      "webhook-logs-first-page": {
+        "latencyMs": {
+          "maximum": 7.839,
+          "median": 6.743,
+          "minimum": 6.428,
+          "p95": 7.679
+        },
+        "plan": [
+          {
+            "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook (webhook_id=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          },
+          {
+            "detail": "USE TEMP B-TREE FOR ORDER BY",
+            "id": 32,
+            "notUsed": 0,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 0"
+      }
+    },
+    "database": "synthetic production-shaped database; existing indexes only",
+    "evidenceMode": "synthetic-cardinality",
+    "measuredIterations": 20,
+    "schemaVersion": 1,
+    "sqliteVersion": "3.53.4",
+    "startedAt": "2026-09-24T14:47:07.255171+00:00",
+    "warmupIterations": 3
+  },
+  "host": {
+    "architecture": "x86_64",
+    "os": "Linux",
+    "python": "3.14.7",
+    "release": "7.1.7-arch1-1",
+    "sqlite": "3.53.4"
+  },
+  "measuredIterations": 20,
+  "medianDeltas": {
+    "queued-transfers-deep-page": {
+      "allCompositeIndexes": {
+        "afterMedianMs": 0.182,
+        "beforeMedianMs": 14.936,
+        "medianDeltaPercent": -98.781
+      },
+      "retainedCompositeIndexes": {
+        "afterMedianMs": 0.18,
+        "beforeMedianMs": 14.936,
+        "medianDeltaPercent": -98.795
+      }
+    },
+    "queued-transfers-first-page": {
+      "allCompositeIndexes": {
+        "afterMedianMs": 0.163,
+        "beforeMedianMs": 1.363,
+        "medianDeltaPercent": -88.041
+      },
+      "retainedCompositeIndexes": {
+        "afterMedianMs": 0.162,
+        "beforeMedianMs": 1.363,
+        "medianDeltaPercent": -88.114
+      }
+    },
+    "search-results-deep-page": {
+      "allCompositeIndexes": {
+        "afterMedianMs": 0.1,
+        "beforeMedianMs": 0.1,
+        "medianDeltaPercent": 0.0
+      },
+      "retainedCompositeIndexes": {
+        "afterMedianMs": 0.1,
+        "beforeMedianMs": 0.1,
+        "medianDeltaPercent": 0.0
+      }
+    },
+    "search-results-first-page": {
+      "allCompositeIndexes": {
+        "afterMedianMs": 0.089,
+        "beforeMedianMs": 0.091,
+        "medianDeltaPercent": -2.198
+      },
+      "retainedCompositeIndexes": {
+        "afterMedianMs": 0.091,
+        "beforeMedianMs": 0.091,
+        "medianDeltaPercent": 0.0
+      }
+    },
+    "webhook-logs-deep-page": {
+      "allCompositeIndexes": {
+        "afterMedianMs": 0.098,
+        "beforeMedianMs": 7.178,
+        "medianDeltaPercent": -98.635
+      },
+      "retainedCompositeIndexes": {
+        "afterMedianMs": 0.098,
+        "beforeMedianMs": 7.178,
+        "medianDeltaPercent": -98.635
+      }
+    },
+    "webhook-logs-first-page": {
+      "allCompositeIndexes": {
+        "afterMedianMs": 0.08,
+        "beforeMedianMs": 6.743,
+        "medianDeltaPercent": -98.814
+      },
+      "retainedCompositeIndexes": {
+        "afterMedianMs": 0.079,
+        "beforeMedianMs": 6.743,
+        "medianDeltaPercent": -98.828
+      }
+    }
+  },
+  "schemaVersion": 1,
+  "warmupIterations": 3,
+  "withAllCompositeIndexes": {
+    "benchmark": "slskr-sqlite",
+    "cases": {
+      "queued-transfers-deep-page": {
+        "latencyMs": {
+          "maximum": 0.186,
+          "median": 0.182,
+          "minimum": 0.17,
+          "p95": 0.186
+        },
+        "plan": [
+          {
+            "detail": "SEARCH transfers USING INDEX idx_transfers_status_started (status=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 1000"
+      },
+      "queued-transfers-first-page": {
+        "latencyMs": {
+          "maximum": 0.181,
+          "median": 0.163,
+          "minimum": 0.152,
+          "p95": 0.17
+        },
+        "plan": [
+          {
+            "detail": "SEARCH transfers USING INDEX idx_transfers_status_started (status=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 0"
+      },
+      "search-results-deep-page": {
+        "latencyMs": {
+          "maximum": 0.107,
+          "median": 0.1,
+          "minimum": 0.093,
+          "p95": 0.104
+        },
+        "plan": [
+          {
+            "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+            "id": 8,
+            "notUsed": 123,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 500"
+      },
+      "search-results-first-page": {
+        "latencyMs": {
+          "maximum": 0.093,
+          "median": 0.089,
+          "minimum": 0.084,
+          "p95": 0.093
+        },
+        "plan": [
+          {
+            "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+            "id": 8,
+            "notUsed": 123,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 0"
+      },
+      "webhook-logs-deep-page": {
+        "latencyMs": {
+          "maximum": 0.102,
+          "median": 0.098,
+          "minimum": 0.092,
+          "p95": 0.101
+        },
+        "plan": [
+          {
+            "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook_timestamp (webhook_id=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 1000"
+      },
+      "webhook-logs-first-page": {
+        "latencyMs": {
+          "maximum": 0.085,
+          "median": 0.08,
+          "minimum": 0.075,
+          "p95": 0.084
+        },
+        "plan": [
+          {
+            "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook_timestamp (webhook_id=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 0"
+      }
+    },
+    "database": "same synthetic rows; all original RF-021 composite indexes added",
+    "evidenceMode": "synthetic-cardinality",
+    "measuredIterations": 20,
+    "schemaVersion": 1,
+    "sqliteVersion": "3.53.4",
+    "startedAt": "2026-09-24T14:47:07.969216+00:00",
+    "warmupIterations": 3
+  },
+  "withRetainedCompositeIndexes": {
+    "benchmark": "slskr-sqlite",
+    "cases": {
+      "queued-transfers-deep-page": {
+        "latencyMs": {
+          "maximum": 0.198,
+          "median": 0.18,
+          "minimum": 0.168,
+          "p95": 0.183
+        },
+        "plan": [
+          {
+            "detail": "SEARCH transfers USING INDEX idx_transfers_status_started (status=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 1000"
+      },
+      "queued-transfers-first-page": {
+        "latencyMs": {
+          "maximum": 0.177,
+          "median": 0.162,
+          "minimum": 0.15,
+          "p95": 0.169
+        },
+        "plan": [
+          {
+            "detail": "SEARCH transfers USING INDEX idx_transfers_status_started (status=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 0"
+      },
+      "search-results-deep-page": {
+        "latencyMs": {
+          "maximum": 0.143,
+          "median": 0.1,
+          "minimum": 0.096,
+          "p95": 0.104
+        },
+        "plan": [
+          {
+            "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+            "id": 8,
+            "notUsed": 123,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 500"
+      },
+      "search-results-first-page": {
+        "latencyMs": {
+          "maximum": 0.095,
+          "median": 0.091,
+          "minimum": 0.085,
+          "p95": 0.094
+        },
+        "plan": [
+          {
+            "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+            "id": 8,
+            "notUsed": 123,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 0"
+      },
+      "webhook-logs-deep-page": {
+        "latencyMs": {
+          "maximum": 0.101,
+          "median": 0.098,
+          "minimum": 0.091,
+          "p95": 0.1
+        },
+        "plan": [
+          {
+            "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook_timestamp (webhook_id=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 1000"
+      },
+      "webhook-logs-first-page": {
+        "latencyMs": {
+          "maximum": 0.083,
+          "median": 0.079,
+          "minimum": 0.074,
+          "p95": 0.083
+        },
+        "plan": [
+          {
+            "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook_timestamp (webhook_id=?)",
+            "id": 8,
+            "notUsed": 145,
+            "parent": 0
+          }
+        ],
+        "rows": {
+          "first": 100,
+          "maximum": 100,
+          "minimum": 100
+        },
+        "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 0"
+      }
+    },
+    "database": "same synthetic rows; transfer and webhook RF-021 indexes retained",
+    "evidenceMode": "synthetic-cardinality",
+    "measuredIterations": 20,
+    "schemaVersion": 1,
+    "sqliteVersion": "3.53.4",
+    "startedAt": "2026-09-24T14:47:07.986994+00:00",
+    "warmupIterations": 3
+  }
+}

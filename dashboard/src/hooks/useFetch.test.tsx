@@ -1,10 +1,19 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useFetch } from './useFetch';
 
 describe('useFetch', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
   });
 
   it('does not restart polling when the options object is recreated', async () => {
@@ -24,6 +33,184 @@ describe('useFetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('schedules the next poll after the current request settles', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    renderHook(() => useFetch<{ status: string }>('/api/health', { interval: 1_000 }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not poll again while a slow request is still active', async () => {
+    vi.useFakeTimers();
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const pendingResponse = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockReturnValue(pendingResponse);
+
+    const { unmount } = renderHook(() =>
+      useFetch<{ status: string }>('/api/health', { interval: 1_000 }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRequest?.(
+        new Response(JSON.stringify({ status: 'ok' }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      await pendingResponse;
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it('cancels a scheduled poll when a manual refresh starts', async () => {
+    vi.useFakeTimers();
+    const response = (value: number) =>
+      new Response(JSON.stringify({ value }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(1))
+      .mockResolvedValueOnce(response(2))
+      .mockResolvedValue(response(3));
+
+    const { result, unmount } = renderHook(() =>
+      useFetch<{ value: number }>('/api/value', { interval: 1_000 }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    unmount();
+  });
+
+  it('pauses polling while hidden and refreshes once when visible again', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const { unmount } = renderHook(() =>
+      useFetch<{ status: string }>('/api/health', { interval: 1_000 }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it('cancels an already scheduled poll when the page becomes hidden', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const { unmount } = renderHook(() =>
+      useFetch<{ status: string }>('/api/health', { interval: 1_000 }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
   it('rejects redirects and accepts an empty successful response', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(null, { status: 204 }),
@@ -41,28 +228,18 @@ describe('useFetch', () => {
     );
   });
 
-  it('does not let an older request clear loading for a newer request', async () => {
+  it('coalesces a manual refresh while a request is active', async () => {
     let resolveFirst: ((response: Response) => void) | undefined;
     const firstResponse = new Promise<Response>((resolve) => {
       resolveFirst = resolve;
     });
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockReturnValueOnce(firstResponse)
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ value: 2 }), {
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockReturnValue(firstResponse);
 
     const { result } = renderHook(() => useFetch<{ value: number }>('/api/value'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
-    await act(async () => {
-      await result.current.refetch();
-    });
-
-    expect(result.current.data).toEqual({ value: 2 });
-    expect(result.current.loading).toBe(false);
+    const refresh = result.current.refetch();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => {
       resolveFirst?.(
         new Response(JSON.stringify({ value: 1 }), {
@@ -70,8 +247,10 @@ describe('useFetch', () => {
         }),
       );
       await firstResponse;
+      await refresh;
     });
-    expect(result.current.data).toEqual({ value: 2 });
+    expect(result.current.data).toEqual({ value: 1 });
+    expect(result.current.loading).toBe(false);
   });
 
   it('retains the last successful data when a refresh fails', async () => {
@@ -109,6 +288,38 @@ describe('useFetch', () => {
     expect(result.current.error).toBeNull();
     expect(onError).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('aborts the active request and stops polling on unmount', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+        });
+      }),
+    );
+
+    const { unmount } = renderHook(() =>
+      useFetch<{ status: string }>('/api/health', { interval: 1_000 }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const signal = fetchMock.mock.calls[0]?.[1]?.signal;
+
+    await act(async () => {
+      unmount();
+      await Promise.resolve();
+    });
+    expect(signal?.aborted).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('clears stale state and stops loading when the URL is disabled', async () => {

@@ -234,7 +234,7 @@ struct PodStateFile {
     pods: Vec<StoredPod>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PodStore {
     pods: BTreeMap<String, StoredPod>,
     state_path: PathBuf,
@@ -769,6 +769,15 @@ impl PodStore {
             pods.remove(pod_id);
         })?;
         Ok(true)
+    }
+
+    pub fn restore_snapshot(&mut self, previous: &Self) -> Result<(), String> {
+        if self.state_path != previous.state_path {
+            return Err("pod snapshot belongs to a different state path".to_owned());
+        }
+        write_state(&self.state_path, &previous.pods)?;
+        self.pods.clone_from(&previous.pods);
+        Ok(())
     }
 
     pub fn join(&mut self, pod_id: &str, peer_id: String) -> Result<Option<bool>, String> {

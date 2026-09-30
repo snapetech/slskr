@@ -1,31 +1,41 @@
 import './System.css';
-import AdminPolicies from './AdminPolicies';
 import { Switch } from '../Shared';
-import AutomationCenter from './AutomationCenter';
-import Bridge from './Bridge';
-import Data from './Data';
-import Events from './Events';
-import ExperienceSettings from './ExperienceSettings';
-import Files from './Files';
-import Info from './Info';
-import Integrations from './Integrations';
-import Jobs from './Jobs';
-import LibraryHealth from './LibraryHealth';
-import Logs from './Logs';
-import Mesh from './Mesh';
-import Metrics from './Metrics';
-import Network from './Network';
-import Options from './Options';
-import QuarantineJury from './QuarantineJury';
-import Security from './Security';
-import Shares from './Shares';
-import SourceProviders from './SourceProviders';
-import SwarmAnalytics from './SwarmAnalytics';
 import React, { lazy, Suspense, useEffect, useRef } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
 
+const lazyPane = (loadPanes, paneName) =>
+  lazy(() => loadPanes().then((panes) => ({ default: panes[paneName] })));
+
+const loadAdvancedPanes = () => import('./PaneGroups/AdvancedPanes');
+const loadAutomationPanes = () => import('./PaneGroups/AutomationPanes');
+const loadDiagnosticPanes = () => import('./PaneGroups/DiagnosticPanes');
+const loadNetworkPanes = () => import('./PaneGroups/NetworkPanes');
+const loadOverviewPanes = () => import('./PaneGroups/OverviewPanes');
+const loadSecurityPanes = () => import('./PaneGroups/SecurityPanes');
+
+const AdminPolicies = lazy(() => import('./AdminPolicies'));
+const AutomationCenter = lazyPane(loadAutomationPanes, 'AutomationCenter');
+const Bridge = lazyPane(loadNetworkPanes, 'Bridge');
+const Data = lazyPane(loadDiagnosticPanes, 'Data');
+const Events = lazyPane(loadAutomationPanes, 'Events');
+const ExperienceSettings = lazyPane(loadAdvancedPanes, 'ExperienceSettings');
+const Files = lazyPane(loadDiagnosticPanes, 'Files');
+const Info = lazyPane(loadOverviewPanes, 'Info');
+const Integrations = lazy(() => import('./Integrations'));
+const Jobs = lazyPane(loadAutomationPanes, 'Jobs');
+const LibraryHealth = lazyPane(loadDiagnosticPanes, 'LibraryHealth');
+const Logs = lazyPane(loadDiagnosticPanes, 'Logs');
 const MediaCore = lazy(() => import('./MediaCore'));
+const Mesh = lazyPane(loadNetworkPanes, 'Mesh');
+const Metrics = lazyPane(loadDiagnosticPanes, 'Metrics');
+const Network = lazyPane(loadOverviewPanes, 'Network');
+const Options = lazyPane(loadAdvancedPanes, 'Options');
+const QuarantineJury = lazyPane(loadSecurityPanes, 'QuarantineJury');
+const Security = lazyPane(loadSecurityPanes, 'Security');
+const Shares = lazyPane(loadOverviewPanes, 'Shares');
+const SourceProviders = lazyPane(loadNetworkPanes, 'SourceProviders');
+const SwarmAnalytics = lazyPane(loadNetworkPanes, 'SwarmAnalytics');
 
 // Six named groups instead of one 22-item flat tab strip. Order here is the
 // order sections appear in; a pane's `section` field below assigns it to one.
@@ -110,7 +120,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
     },
     {
       menuItem: (
-        <Menu.Item key="shares">
+        <Menu.Item data-testid="system-tab-shares" key="shares">
           <Switch
             scanPending={
               (state?.shares?.scanPending ?? false) && (
@@ -456,16 +466,18 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
       : 0;
 
     return (
-      <div className="system" ref={systemRef}>
-        <Segment raised>
-          <Tab
-            activeIndex={activeProfileIndex}
-            onTabChange={(_event, { activeIndex: newIndex }) =>
-              navigate(`/system/${profilePanes[newIndex].route}`)}
-            panes={profilePanes}
-            renderActiveOnly
-          />
-        </Segment>
+      <div className="system" data-testid="system-root" ref={systemRef}>
+        <Suspense fallback={<Segment raised loading />}>
+          <Segment raised>
+            <Tab
+              activeIndex={activeProfileIndex}
+              onTabChange={(_event, { activeIndex: newIndex }) =>
+                navigate(`/system/${profilePanes[newIndex].route}`)}
+              panes={profilePanes}
+              renderActiveOnly
+            />
+          </Segment>
+        </Suspense>
       </div>
     );
   }
@@ -490,7 +502,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
   };
 
   return (
-    <div className="system" ref={systemRef}>
+    <div className="system" data-testid="system-root" ref={systemRef}>
       <Menu
         className="system-section-menu"
         pointing
@@ -507,14 +519,16 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
           </Menu.Item>
         ))}
       </Menu>
-      <Segment raised>
-        <Tab
-          activeIndex={sectionActiveIndex > -1 ? sectionActiveIndex : 0}
-          onTabChange={onSectionTabChange}
-          panes={sectionPanes}
-          renderActiveOnly={Boolean(runtimeProfile)}
-        />
-      </Segment>
+      <Suspense fallback={<Segment raised loading />}>
+        <Segment raised>
+          <Tab
+            activeIndex={sectionActiveIndex > -1 ? sectionActiveIndex : 0}
+            onTabChange={onSectionTabChange}
+            panes={sectionPanes}
+            renderActiveOnly={Boolean(runtimeProfile)}
+          />
+        </Segment>
+      </Suspense>
     </div>
   );
 };

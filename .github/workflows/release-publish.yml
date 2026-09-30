@@ -127,6 +127,8 @@ jobs:
           path: packaging
       - name: Validate hashes
         run: bash packaging/scripts/validate-aur-pkgbuild-hashes.sh packaging/aur/PKGBUILD packaging/aur/PKGBUILD-bin
+      - name: Smoke-check AUR sources
+        run: scripts/check-aur-package-smoke.sh
       - name: Setup AUR SSH
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}

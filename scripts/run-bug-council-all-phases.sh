@@ -10,6 +10,7 @@ scan_out="$out_dir/latest-candidate-counts.md"
 
 printf '==> Fresh candidate inventory\n'
 scripts/run-council-scan.sh | tee "$scan_out"
+scripts/check-council-freshness.sh
 
 printf '\n==> Process gates\n'
 scripts/check-council-active-backlog.sh

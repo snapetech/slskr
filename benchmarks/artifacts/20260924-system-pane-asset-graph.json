@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "slskr-web-system-pane-asset-graph",
+  "evidenceMode": "vite-production-build",
+  "systemEntry": {
+    "previousBytes": 242641,
+    "currentBytes": 9386,
+    "reducedBytes": 233255,
+    "reducedPercent": 96.13
+  },
+  "dynamicPaneGroups": [
+    { "name": "AdvancedPanes", "bytes": 15398 },
+    { "name": "AutomationPanes", "bytes": 35225 },
+    { "name": "DiagnosticPanes", "bytes": 37019 },
+    { "name": "NetworkPanes", "bytes": 54703 },
+    { "name": "OverviewPanes", "bytes": 48672 },
+    { "name": "SecurityPanes", "bytes": 45370 }
+  ],
+  "independentLargePanes": [
+    { "name": "AdminPolicies", "bytes": 38255 },
+    { "name": "Integrations", "bytes": 87072 },
+    { "name": "MediaCore", "bytes": 152037 }
+  ],
+  "aggregateBudget": {
+    "initialJavaScriptKiB": 1084.68,
+    "initialJavaScriptBudgetKiB": 1150,
+    "allJavaScriptGzipKiB": 593.07,
+    "allJavaScriptGzipBudgetKiB": 600
+  }
+}

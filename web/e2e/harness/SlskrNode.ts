@@ -1,18 +1,45 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import { ensureFixtures } from '../fixtures/ensure-fixtures';
+import { tmpdir } from 'node:os';
+import { NodeProcessLogs } from './NodeProcessLogs';
+import { runOwnedCommand, SharedBuildOwner } from './BuildOwner';
+import { ensureFixtures, getRepoRootFromCwd } from '../fixtures/ensure-fixtures';
 
 export type NodeConfig = {
   apiPort?: number;
   appDir?: string;
   flags?: {
     noConnect?: boolean;
+    trustedMeshPeers?: TrustedMeshPeerConfig[];
+    peerPort?: number;
+    reservedPeerPorts?: number[];
+    endpointOverrides?: Record<string, string>;
   };
   nodeName: string;
   shareDir: string | string[]; // Single dir or array for multiple shares
 };
+
+export type TrustedMeshPeerConfig = {
+  peerId: string;
+  username: string;
+  overlayEndpoint: string;
+  certificateSha256: string;
+};
+
+export function nativePeerEnvironment(port: number): NodeJS.ProcessEnv {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('Invalid native peer port');
+  }
+  return {
+    SLSKR_DHT_PORT: String(port),
+    SLSKR_LISTENER_BIND: `127.0.0.1:${port}`,
+    SLSKD_SLSK_LISTEN_PORT: String(port),
+    SLSKR_OVERLAY_BIND: `127.0.0.1:${port}`,
+  };
+}
 
 /**
  * Find a free port on localhost.
@@ -41,9 +68,11 @@ async function waitForTcpListen(
   host: string,
   port: number,
   timeoutMs: number,
+  keepWaiting: () => boolean = () => true,
 ): Promise<void> {
   const start = Date.now();
   for (;;) {
+    if (!keepWaiting()) throw new Error('Node stopped or exited during TCP startup');
     const ok = await new Promise<boolean>((resolve) => {
       const sock = new net.Socket();
       sock.setTimeout(500); // Reduced from 750ms
@@ -80,31 +109,6 @@ function tail(text: string, lines: number = 200): string {
   return allLines.slice(-lines).join('\n');
 }
 
-async function runCommand(
-  command: string,
-  args: string[],
-  cwd: string,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: process.env,
-      stdio: 'inherit',
-    });
-
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(
-          new Error(`${command} ${args.join(' ')} exited with code ${code}`),
-        );
-      }
-    });
-  });
-}
-
 const BUILD_OUTPUT_DIRECTORIES = new Set([
   '.git',
   'build',
@@ -127,7 +131,9 @@ async function latestModificationTime(inputPath: string): Promise<number> {
     return stats.mtimeMs;
   }
 
-  let latest = stats.mtimeMs;
+  // Creating/removing an ignored target directory changes its parent's mtime.
+  // Only actual input files determine whether an existing binary is stale.
+  let latest = 0;
   let entries;
   try {
     entries = await fs.readdir(inputPath, { withFileTypes: true });
@@ -149,7 +155,7 @@ async function latestModificationTime(inputPath: string): Promise<number> {
   return latest;
 }
 
-async function buildOutputIsFresh(
+export async function buildOutputIsFresh(
   outputPath: string,
   inputPaths: string[],
 ): Promise<boolean> {
@@ -172,7 +178,7 @@ async function buildOutputIsFresh(
 
 async function getListenSummary(port: number): Promise<string> {
   return new Promise((resolve) => {
-    execFile('ss', ['-ltnp'], (error, stdout, stderr) => {
+    execFile('ss', ['-ltnp'], { timeout: 2_000, maxBuffer: 262_144 }, (error, stdout, stderr) => {
       if (error) {
         resolve(`ss failed: ${stderr || error.message}`);
         return;
@@ -192,7 +198,7 @@ async function getListenSummary(port: number): Promise<string> {
 
 async function getListenSummaryForPid(pid: number): Promise<string> {
   return new Promise((resolve) => {
-    execFile('ss', ['-ltnp'], (error, stdout, stderr) => {
+    execFile('ss', ['-ltnp'], { timeout: 2_000, maxBuffer: 262_144 }, (error, stdout, stderr) => {
       if (error) {
         resolve(`ss failed: ${stderr || error.message}`);
         return;
@@ -219,19 +225,29 @@ async function getListenSummaryForPid(pid: number): Promise<string> {
  * - Optional flags (no_connect for CI determinism)
  */
 export class SlskrNode {
-  private static webBuildPromise: Promise<void> | null = null;
+  private static webBuildOwner = new SharedBuildOwner();
 
-  private static binaryBuildPromise: Promise<void> | null = null;
+  private static binaryBuildOwner = new SharedBuildOwner();
+
+  private buildCancellation = new AbortController();
+
+  private pendingBuilds = new Set<Promise<void>>();
 
   private process: ChildProcess | null = null;
+
+  private startupPromise?: Promise<void>;
+
+  private startupFailure?: Error;
+
+  private logs?: NodeProcessLogs;
+
+  private pendingDiagnosticWrites = new Set<Promise<void>>();
 
   private apiPort: number = 0;
 
   private soulseekListenPort: number = 0;
 
-  private dhtPort: number = 0;
-
-  private overlayPort: number = 0;
+  private stopRequested = false;
 
   private appDir: string = '';
 
@@ -241,19 +257,15 @@ export class SlskrNode {
     this.config = config;
   }
 
+  static allocateFreePort(): Promise<number> {
+    return findFreePort();
+  }
+
   /**
    * Get the repository root directory.
    */
   private getRepoRoot(): string {
-    // process.cwd() is web/e2e/ when running tests, so go up 2 levels.
-    // Use __dirname if available, or calculate from cwd for robustness.
-    if (typeof __dirname !== 'undefined') {
-      // Running as compiled JS: web/e2e/harness/SlskrNode.js -> repo root
-      return path.join(__dirname, '..', '..', '..');
-    } else {
-      // Running as TS - process.cwd() is web/e2e/
-      return path.resolve(process.cwd(), '..', '..');
-    }
+    return getRepoRootFromCwd();
   }
 
   /**
@@ -280,37 +292,33 @@ export class SlskrNode {
       return debugPath;
     }
 
-    console.log('[E2E] Rust source is newer than available slskr binary; rebuilding release binary.');
+    console.log('[E2E] Rust source is newer than available slskr binary; rebuilding debug binary.');
     await this.ensureBinaryBuild(repoRoot);
 
     try {
-      await fs.access(releasePath);
-      return releasePath;
+      await fs.access(debugPath);
+      return debugPath;
     } catch {
       throw new Error(
-        `slskr binary not found at ${releasePath} after \`cargo build --release --bin slskr\`.`,
+        `slskr binary not found at ${debugPath} after \`cargo build --locked --bin slskr\`.`,
       );
     }
   }
 
-  private async ensureBinaryBuild(repoRoot: string): Promise<void> {
-    if (!SlskrNode.binaryBuildPromise) {
-      SlskrNode.binaryBuildPromise = (async () => {
-        try {
-          await runCommand(
-            'cargo',
-            ['build', '--release', '--bin', 'slskr'],
-            repoRoot,
-          );
-        } catch (error) {
-          // Allow a retry if the first attempt fails.
-          SlskrNode.binaryBuildPromise = null;
-          throw error;
-        }
-      })();
+  private async awaitBuild(owner: SharedBuildOwner, build: (signal: AbortSignal) => Promise<void>): Promise<void> {
+    const pending = owner.run(this.buildCancellation.signal, build);
+    this.pendingBuilds.add(pending);
+    try {
+      await pending;
+    } finally {
+      this.pendingBuilds.delete(pending);
     }
+  }
 
-    await SlskrNode.binaryBuildPromise;
+  private async ensureBinaryBuild(repoRoot: string): Promise<void> {
+    await this.awaitBuild(SlskrNode.binaryBuildOwner, (signal) =>
+      runOwnedCommand('cargo', ['build', '--locked', '--bin', 'slskr'], repoRoot, signal),
+    );
   }
 
   /**
@@ -334,28 +342,16 @@ export class SlskrNode {
     }
 
     console.log('[E2E] Web source is newer than the available bundle; rebuilding web assets.');
-    if (!SlskrNode.webBuildPromise) {
-      SlskrNode.webBuildPromise = (async () => {
-        try {
-          const webRoot = path.join(repoRoot, 'web');
-          const nodeModulesPath = path.join(webRoot, 'node_modules');
-
-          try {
-            await fs.access(nodeModulesPath);
-          } catch {
-            await runCommand('npm', ['ci', '--legacy-peer-deps'], webRoot);
-          }
-
-          await runCommand('npm', ['run', 'build'], webRoot);
-        } catch (error) {
-          // Allow a retry if the first attempt fails.
-          SlskrNode.webBuildPromise = null;
-          throw error;
-        }
-      })();
-    }
-
-    await SlskrNode.webBuildPromise;
+    await this.awaitBuild(SlskrNode.webBuildOwner, async (signal) => {
+      const webRoot = path.join(repoRoot, 'web');
+      const nodeModulesPath = path.join(webRoot, 'node_modules');
+      try {
+        await fs.access(nodeModulesPath);
+      } catch {
+        await runOwnedCommand('npm', ['ci', '--legacy-peer-deps'], webRoot, signal);
+      }
+      await runOwnedCommand('npm', ['run', 'build'], webRoot, signal);
+    });
 
     try {
       await fs.access(webBuildPath);
@@ -372,6 +368,21 @@ export class SlskrNode {
    * Start the slskr node process.
    */
   async start(): Promise<void> {
+    if (this.startupPromise || this.process) throw new Error('Node already starting or running');
+    const pending = this.startInternal();
+    this.startupPromise = pending;
+    try {
+      await pending;
+    } catch (error) {
+      await this.stop().catch((cleanupError) => console.error('Node startup cleanup failed:', cleanupError));
+      throw error;
+    } finally {
+      if (this.startupPromise === pending) this.startupPromise = undefined;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
+    if (this.stopRequested) throw new Error('Cannot start a stopped node');
     const repoRoot = this.getRepoRoot();
     const webBuildPath = await this.ensureWebBuild(repoRoot);
 
@@ -409,20 +420,34 @@ export class SlskrNode {
     }
 
     // Allocate ephemeral port if not provided
+    const reservedPeerPorts = new Set(
+      this.config.flags?.reservedPeerPorts ?? [],
+    );
+    if (this.config.flags?.peerPort) {
+      reservedPeerPorts.add(this.config.flags.peerPort);
+      if (
+        !Number.isInteger(this.config.flags.peerPort) ||
+        this.config.flags.peerPort < 1 ||
+        this.config.flags.peerPort > 65535
+      ) {
+        throw new Error('Invalid native peer port');
+      }
+    }
     if (!this.config.apiPort) {
-      this.apiPort = await findFreePort();
+      do {
+        this.apiPort = await findFreePort();
+      } while (reservedPeerPorts.has(this.apiPort));
     } else {
       this.apiPort = this.config.apiPort;
+      if (reservedPeerPorts.has(this.apiPort)) {
+        throw new Error('API port overlaps a reserved native peer port');
+      }
     }
 
     // Allocate a unique Soulseek listen port per node (multi-instance needs this)
-    this.soulseekListenPort = await findFreePort();
-    // The DHT UDP socket and the TLS mesh overlay TCP listener both default
-    // to fixed well-known ports (50300/50305) regardless of the Soulseek
-    // listen port — give each test node its own, or it collides with any
-    // other slskr process already running on the host.
-    this.dhtPort = await findFreePort();
-    this.overlayPort = await findFreePort();
+    this.soulseekListenPort =
+      this.config.flags?.peerPort ?? (await findFreePort());
+    // Native peer TCP, DHT, and both QUIC protocols share this numeric port.
 
     // Create isolated app directory
     if (!this.config.appDir) {
@@ -436,7 +461,7 @@ export class SlskrNode {
         );
         await fs.mkdir(this.appDir, { recursive: true });
       } else {
-        this.appDir = await fs.mkdtemp(path.join('/tmp', 'slskr-test-'));
+        this.appDir = await fs.mkdtemp(path.join(tmpdir(), 'slskr-test-'));
       }
     } else {
       this.appDir = this.config.appDir;
@@ -483,6 +508,22 @@ export class SlskrNode {
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      ...nativePeerEnvironment(this.soulseekListenPort),
+      SLSKR_ADVANCED_NETWORKING_JSON: JSON.stringify({
+        mesh: {
+          enabled: true,
+          enableOverlay: true,
+          enableDht: false,
+          enable_soulseek_capability_handshake: true,
+          enable_soulseek_rendezvous: true,
+          probe_soulseek_rendezvous_capabilities: true,
+        },
+        feature: {
+          mesh: true,
+          pods: true,
+          virtualSoulfind: true,
+        },
+      }),
       SLSKD_APP_DIR: this.appDir,
       SLSKD_CONTENT_PATH: contentPath,
       SLSKD_DOWNLOADS_DIR: downloadsDir,
@@ -491,18 +532,15 @@ export class SlskrNode {
       // network; this HTTP endpoint is a same-process stand-in for that
       // push, so it stays off outside e2e runs.
       SLSKDN_E2E_SHARE_ANNOUNCE: '1',
-      SLSKR_DHT_PORT: String(this.dhtPort),
       SLSKD_HTTP_ADDRESS: '127.0.0.1',
       SLSKD_HTTP_PORT: String(this.apiPort),
       SLSKD_INCOMPLETE_DIR: incompleteDir,
       SLSKD_INSTANCE_NAME: this.config.nodeName,
       SLSKD_NO_HTTPS: 'true',
       SLSKD_PASSWORD: nodeCreds.password,
-      SLSKD_SLSK_LISTEN_PORT: String(this.soulseekListenPort),
       SLSKD_SLSK_PASSWORD: nodeCreds.password,
       SLSKD_SLSK_USERNAME: nodeCreds.username,
       SLSKD_USERNAME: nodeCreds.username,
-      SLSKR_OVERLAY_BIND: `127.0.0.1:${this.overlayPort}`,
       // A recipient viewing a share owned by another node fetches its
       // manifest/stream/backfill directly from that node's own API — a
       // genuinely cross-origin request between two node ports. Each test
@@ -518,20 +556,37 @@ export class SlskrNode {
     if (noConnect) {
       env.SLSKD_NO_CONNECT = 'true';
     }
+    if (this.config.flags?.trustedMeshPeers?.length) {
+      env.SLSKR_TRUSTED_MESH_PEERS = JSON.stringify(
+        this.config.flags.trustedMeshPeers,
+      );
+    }
+    if (this.config.flags?.endpointOverrides) {
+      env.SLSKR_TEST_USER_ENDPOINT_OVERRIDES = Object.entries(
+        this.config.flags.endpointOverrides,
+      )
+        .map(([username, endpoint]) => `${username}=${endpoint}`)
+        .join(';');
+    }
 
     // Write stdout/stderr to files for debugging
     const artifactsDir = path.join(this.appDir, 'artifacts');
     await fs.mkdir(artifactsDir, { recursive: true });
     const stdoutPath = path.join(artifactsDir, 'stdout.log');
     const stderrPath = path.join(artifactsDir, 'stderr.log');
-    const stdoutFd = await fs.open(stdoutPath, 'w');
-    const stderrFd = await fs.open(stderrPath, 'w');
+    this.logs = await NodeProcessLogs.open(stdoutPath, stderrPath);
+
+    if (this.stopRequested) {
+      await this.logs.close();
+      throw new Error('Node startup was stopped before process launch');
+    }
 
     this.process = spawn(binaryPath, ['serve'], {
       cwd: repoRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    this.logs.connect(this.process);
 
     // Capture output for debugging (always log on error)
     let stdout = '';
@@ -548,19 +603,17 @@ export class SlskrNode {
 
     logWithTimestamp(`[start] Launch mode: prebuilt ${binaryPath}`);
 
-    this.process.stdout?.on('data', async (data) => {
+    this.process.stdout?.on('data', (data) => {
       const text = data.toString();
-      stdout += text;
-      await stdoutFd.write(data);
+      stdout = (stdout + text).slice(-1_048_576);
       if (process.env.DEBUG) {
         logWithTimestamp(text.trim());
       }
     });
 
-    this.process.stderr?.on('data', async (data) => {
+    this.process.stderr?.on('data', (data) => {
       const text = data.toString();
-      await stderrFd.write(data);
-      stderr += text;
+      stderr = (stderr + text).slice(-1_048_576);
       if (process.env.DEBUG) {
         logWithTimestamp(`STDERR: ${text.trim()}`);
       }
@@ -568,7 +621,7 @@ export class SlskrNode {
 
     // Handle process errors
     this.process.on('error', (error) => {
-      throw new Error(`Failed to start slskr process: ${error.message}`);
+      this.startupFailure = new Error(`Failed to start slskr process: ${error.message}`);
     });
 
     // Check if process exits early
@@ -584,11 +637,13 @@ export class SlskrNode {
         // Write full logs to artifacts for debugging
         if (this.appDir) {
           const exitLogPath = path.join(this.appDir, 'artifacts', 'exit.log');
-          fs.writeFile(
+          const diagnostic = fs.writeFile(
             exitLogPath,
             `Exit code: ${code}\nSignal: ${signal || 'none'}\nUptime: ${elapsed}ms\nTimestamp: ${timestamp}\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}\n`,
             'utf8',
           ).catch(() => {});
+          this.pendingDiagnosticWrites.add(diagnostic);
+          void diagnostic.then(() => this.pendingDiagnosticWrites.delete(diagnostic));
         }
       } else if (code === 0 && signal) {
         console.log(
@@ -601,7 +656,6 @@ export class SlskrNode {
     if (!process.env.DEBUG) {
       this.process.stderr?.on('data', (data) => {
         const text = data.toString();
-        stderr += text;
         // Log errors even without DEBUG
         if (
           text.toLowerCase().includes('error') ||
@@ -618,12 +672,15 @@ export class SlskrNode {
     const tcpStartTime = Date.now();
     logWithTimestamp(`[start] Waiting for TCP port ${this.apiPort} to listen`);
     try {
-      await waitForTcpListen('127.0.0.1', this.apiPort, 60_000);
+      await waitForTcpListen('127.0.0.1', this.apiPort, 60_000, () =>
+        !this.stopRequested && !this.startupFailure && this.process?.exitCode === null && this.process?.signalCode === null);
       const tcpElapsed = Date.now() - tcpStartTime;
       logWithTimestamp(
         `[start] TCP port ${this.apiPort} listening after ${tcpElapsed}ms`,
       );
     } catch {
+      if (this.startupFailure) throw this.startupFailure;
+      if (this.stopRequested) throw new Error('Node stopped during TCP startup');
       // TCP never opened - true startup/bind problem
       const stdoutTail = tail(stdout, 200);
       const stderrTail = tail(stderr, 200);
@@ -632,8 +689,6 @@ export class SlskrNode {
         this.process?.pid !== undefined
           ? await getListenSummaryForPid(this.process.pid)
           : 'No process pid available';
-      await stdoutFd.close();
-      await stderrFd.close();
       throw new Error(
         `TCP port ${this.apiPort} never started listening.\n` +
           `This indicates a true startup/bind problem.\n\n` +
@@ -655,6 +710,7 @@ export class SlskrNode {
     logWithTimestamp(`[start] Starting health check (timeout: ${timeout}ms)`);
 
     while (Date.now() - healthStartTime < timeout) {
+      if (this.stopRequested || this.startupFailure) throw this.startupFailure ?? new Error('Node stopped during health startup');
       // Check if process died
       if (this.process.exitCode !== null) {
         if (this.process.exitCode !== 0) {
@@ -729,8 +785,6 @@ export class SlskrNode {
     }
 
     // If we timeout, include tail of captured output
-    await stdoutFd.close();
-    await stderrFd.close();
     const stdoutTail = tail(stdout, 200);
     const stderrTail = tail(stderr, 200);
     const errorMessage =
@@ -766,6 +820,22 @@ export class SlskrNode {
       baseUrl: this.apiUrl,
       password: nodeCreds.password,
       username: nodeCreds.username,
+    };
+  }
+
+  async trustedMeshPeerConfig(): Promise<TrustedMeshPeerConfig> {
+    if (!this.appDir || this.soulseekListenPort < 1) {
+      throw new Error('Node must be started before exporting mesh trust');
+    }
+    const certificate = await fs.readFile(
+      path.join(this.appDir, 'overlay-certificate.der'),
+    );
+    const username = this.nodeCfg.username;
+    return {
+      peerId: username,
+      username,
+      overlayEndpoint: `127.0.0.1:${this.soulseekListenPort}`,
+      certificateSha256: createHash('sha256').update(certificate).digest('hex'),
     };
   }
 
@@ -920,23 +990,31 @@ export class SlskrNode {
    * Stop the node process and clean up.
    */
   async stop(): Promise<void> {
-    if (this.process) {
-      this.process.kill('SIGTERM');
+    this.stopRequested = true;
+    this.buildCancellation.abort(new Error('Node stopped during build'));
+    await Promise.allSettled([...this.pendingBuilds]);
+    const child = this.process;
+    if (child && child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
       await new Promise<void>((resolve) => {
-        if (this.process) {
-          this.process.on('exit', () => resolve());
-          // Force kill after 5s
-          setTimeout(() => {
-            if (this.process) {
-              this.process.kill('SIGKILL');
-              resolve();
-            }
-          }, 5_000);
-        } else {
+        const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
+        child.once('close', () => {
+          clearTimeout(timer);
           resolve();
-        }
+        });
+        child.kill('SIGTERM');
       });
-      this.process = null;
+    }
+    if (this.startupPromise) await Promise.allSettled([this.startupPromise]);
+    if (this.process === child) this.process = null;
+    await Promise.allSettled([...this.pendingDiagnosticWrites]);
+    const logs = this.logs;
+    let logFailure: unknown;
+    try {
+      await logs?.close();
+    } catch (error) {
+      logFailure = error;
+    } finally {
+      if (this.logs === logs) this.logs = undefined;
     }
 
     // Cleanup app directory unless KEEP_ARTIFACTS is set
@@ -947,5 +1025,6 @@ export class SlskrNode {
         // Ignore cleanup errors
       }
     }
+    if (logFailure !== undefined) throw logFailure;
   }
 }

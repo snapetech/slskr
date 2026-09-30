@@ -22,8 +22,6 @@ duplicate_roots="$(
 allowed_roots="$(
   printf '%s\n' \
     base64 \
-    cpufeatures \
-    crypto-common \
     getrandom \
     hashbrown \
     memchr \
@@ -47,7 +45,7 @@ if [[ -n "$missing" ]]; then
   printf 'rust dependency hygiene note: duplicate roots resolved; update %s and BUG-021:\n%s\n' "$policy" "$missing"
 fi
 
-for root in base64 cpufeatures crypto-common getrandom hashbrown memchr rand rand_core regex-automata syn webpki-roots; do
+for root in base64 getrandom hashbrown memchr rand rand_core regex-automata syn webpki-roots; do
   if ! rg -n -F "| \`$root\` |" "$policy" >/dev/null; then
     printf 'rust dependency hygiene failed: %s missing from %s\n' "$root" "$policy" >&2
     status=1

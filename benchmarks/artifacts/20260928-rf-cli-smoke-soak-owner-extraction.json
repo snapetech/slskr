@@ -1,0 +1,708 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "78f3080a95fcfc49a43df5ce17f28a2e40e5345a",
+  "source": "crates/slskr/src/cli_smoke_soak.rs",
+  "originalBytes": 114636,
+  "originalLines": 2914,
+  "originalSha256": "c3a85c986ca2f851961ca6e836a6ea2e8cb7e9459aa46be400557be691cba943",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 70,
+  "parentScopedDeclarations": [
+    "PeerUserInfoResponder",
+    "await_fixture_server_task",
+    "bad_obfuscation_type_smoke",
+    "browse_payload_preview",
+    "closed_listener_smoke",
+    "connect_plain_file_transfer",
+    "connect_plain_peer_messages",
+    "distributed_tree_smoke",
+    "fixture_peer_smoke",
+    "hex_lower",
+    "incoming_connection_name",
+    "live_soak",
+    "local_peer_smoke",
+    "login_probe_session",
+    "malformed_peer_response_smoke",
+    "peer_address_ip_detail",
+    "peer_message_name",
+    "peer_probe_messages",
+    "peer_regular_port",
+    "redact_peer_text",
+    "redact_username",
+    "required_env_any",
+    "resolve_peer_address",
+    "respond_to_user_info_request",
+    "room_create_smoke",
+    "sanitize_inline_detail",
+    "scrub_socket_addr",
+    "server_reconnect_smoke",
+    "server_relogin_smoke",
+    "transfer_reject_smoke",
+    "transfer_resume_smoke",
+    "validated_obfuscated_port",
+    "wait_for_advertised_port_metadata",
+    "wait_for_cant_connect_response",
+    "wait_for_peer_address_response",
+    "wait_for_private_message",
+    "wait_for_room_join",
+    "wait_for_room_message"
+  ],
+  "registrySha256": "a80f78f84f8bbcb348d5abf85854dfff0286e82f219feff3dd16ec64654b77ae",
+  "registryLines": 74,
+  "owners": {
+    "crates/slskr/src/cli_smoke_soak_owners/fixture_transfers.rs": {
+      "lines": 267,
+      "sha256": "8226482cf34ee8a778c74a7984b1a2be3d1257a16d37587a0da85ebaad6268fb"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/live_peer_runtime.rs": {
+      "lines": 307,
+      "sha256": "d289acdcbbc4ec318cb444acadc573b73f0892f997dd927e2e4e6028e43613cc"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/live_server_runtime.rs": {
+      "lines": 339,
+      "sha256": "f41f996696d58a330e5ea263f7483ba47469729c0e27df314be95eccb0e7f1c7"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/live_soak_configuration.rs": {
+      "lines": 75,
+      "sha256": "853d0e59d8c965c66866510cf8dc760e2b9f40775183f8641c98ddd5424d4973"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/live_soak_entry.rs": {
+      "lines": 154,
+      "sha256": "bafbd80c919e9be329f87ce04f980fe0c41df89e9f3adc34db9731d657343f56"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/log_redaction.rs": {
+      "lines": 106,
+      "sha256": "fa61aefa9ffbb6e01c38baee84903dd4f1b4c2eb5fbd72a82e48caceb19e531a"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/peer_connection_helpers.rs": {
+      "lines": 94,
+      "sha256": "a1521ad00ac461872019e911c02e1117ec8881f6123d0c163a939e5e9a200428"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/peer_probe_models.rs": {
+      "lines": 43,
+      "sha256": "97358193f3cf7ce6d859673fba9d74652d3e76094a52e2c7342aeba1ebd4be4c"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/peer_probe_operations.rs": {
+      "lines": 306,
+      "sha256": "aa5ce0b837612005be4638da85bcea42c90e13dc20e9883be276422bf80c1203"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/peer_smoke_scenarios.rs": {
+      "lines": 189,
+      "sha256": "3aa6c215751a84a7b63be197405e280ee4040280fe3777dddaa72529a8917f17"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/protocol_names.rs": {
+      "lines": 157,
+      "sha256": "9031fc3128212e4f04b84726ca326c568c08f6b85e37de79c3cae461afd87d75"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/server_probe_helpers.rs": {
+      "lines": 357,
+      "sha256": "22d35091647721877c6240246a8da4a3e4bfd229adb8f679607f13b34127981e"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/server_smoke_scenarios.rs": {
+      "lines": 299,
+      "sha256": "9e55ee577baee938b65e4e0255ac58b7938b90866e56041c0ea4051e16affb19"
+    },
+    "crates/slskr/src/cli_smoke_soak_owners/transfer_smoke_scenarios.rs": {
+      "lines": 250,
+      "sha256": "e2a35a06928c28950f1acc0b580c02853dc19a5764825f1795384206665cfef7"
+    }
+  },
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 13,
+      "originalSha256": "df1fb510b21459d3fb842c16a1910a058db28e02e19475bbcccf08b6ca3a0600",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "local_peer_smoke",
+      "owner": "peer_smoke_scenarios",
+      "originalBytes": 2388,
+      "originalSha256": "dc2e778d7a1c6621726f0e13e2e0c155a837ef4c539d0808cc5dc0bf31c299b2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "fixture_peer_smoke",
+      "owner": "peer_smoke_scenarios",
+      "originalBytes": 1621,
+      "originalSha256": "b1af39f965b42e0d16f5c390348db02cc7c2a937b3fc2e851b1343f6b3c15fc1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "distributed_tree_smoke",
+      "owner": "server_smoke_scenarios",
+      "originalBytes": 6638,
+      "originalSha256": "3b311bbae298e8a8e26b26e0c71bfa01796331705aff9e3f5722df2a3abdef89",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "room_create_smoke",
+      "owner": "server_smoke_scenarios",
+      "originalBytes": 2420,
+      "originalSha256": "f8cdc17928eff1192f054e5e3d9455d1dae9e3fae6a013520ff08f8e1b3485f6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "server_relogin_smoke",
+      "owner": "server_smoke_scenarios",
+      "originalBytes": 1717,
+      "originalSha256": "d14fbb6489ee281e395b004a4cf484e416a1467e1d71c7c9db7b8b8ad650c0c4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "server_reconnect_smoke",
+      "owner": "server_smoke_scenarios",
+      "originalBytes": 1433,
+      "originalSha256": "b99c776df09788a0f26c789bb0695aca61cd3274a1cdb292e30f83633cd60279",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "closed_listener_smoke",
+      "owner": "peer_smoke_scenarios",
+      "originalBytes": 808,
+      "originalSha256": "aaef8b860a21bfa2aa4c14a3189c4c17bb800cb8cf01adff3532710e0c8e6423",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "bad_obfuscation_type_smoke",
+      "owner": "peer_smoke_scenarios",
+      "originalBytes": 529,
+      "originalSha256": "47afa846aa8927c88f23c09e6a597e8f3383c9003a733b1ec27c486a364d2b14",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "malformed_peer_response_smoke",
+      "owner": "peer_smoke_scenarios",
+      "originalBytes": 2231,
+      "originalSha256": "34d0c15f10488fec5deefc1557acd98cebd4a0d4e2c27082b284800b4e820dda",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_resume_smoke",
+      "owner": "transfer_smoke_scenarios",
+      "originalBytes": 5705,
+      "originalSha256": "69507de3ca91706136499da07e57308d4e42b727f7fe5b013c9ff022d683e0fc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_reject_smoke",
+      "owner": "transfer_smoke_scenarios",
+      "originalBytes": 3512,
+      "originalSha256": "8ab82cb0726781160898440aac10b2e907fd29167f4a43a0babee31bfdf56edc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "await_fixture_server_task",
+      "owner": "fixture_transfers",
+      "originalBytes": 237,
+      "originalSha256": "60364bccf4782e672bf55eeaec14b83c94e6c53f47bea0aaa46485edbd1dbbd2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_fixture_browse_smoke",
+      "owner": "fixture_transfers",
+      "originalBytes": 2646,
+      "originalSha256": "54e934f8dcea3c7472aac474c0b3c255dcbabc4f248063dd5ae670e2563e1844",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_fixture_download_smoke",
+      "owner": "fixture_transfers",
+      "originalBytes": 5370,
+      "originalSha256": "3da4f018d7a21a264098da961f75046379151b7e1397e267089418396110d003",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "build_fixture_shared_file_list_payload",
+      "owner": "fixture_transfers",
+      "originalBytes": 1121,
+      "originalSha256": "3ca9e827dd447e8443fc30be9ff018210093ad10c183d73142cdc3be6ba410b5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "encode_fixture_file_entry",
+      "owner": "fixture_transfers",
+      "originalBytes": 788,
+      "originalSha256": "a6f3b8ed615eaeef5486cd53953f0706f043a729fa633db55c0f4e64cd698f84",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "live_soak",
+      "owner": "live_soak_entry",
+      "originalBytes": 5593,
+      "originalSha256": "f4e9b9bc15b6c273aaa1dac78aab739dda20c53181f8a7e30504218c95cdbbad",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "PeerSmokeCredentials",
+      "owner": "peer_probe_models",
+      "originalBytes": 153,
+      "originalSha256": "eef1d6572c2af8209e2afba712d39829a023b42de956f298697025e07985e0f9",
+      "relocations": 5
+    },
+    {
+      "kind": "impl",
+      "name": "PeerSmokeCredentials",
+      "owner": "peer_probe_models",
+      "originalBytes": 450,
+      "originalSha256": "f4c7c190a9e29e812d342ca9310946f0387906e0d10dfa1603fab5eaaa8da2b1",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "PeerSmokeConfig",
+      "owner": "peer_probe_models",
+      "originalBytes": 231,
+      "originalSha256": "f512f281a32df3747edc19ec5244ef828e3d7663c5699b6817dfed9fbece5eb8",
+      "relocations": 6
+    },
+    {
+      "kind": "impl",
+      "name": "PeerSmokeConfig",
+      "owner": "peer_probe_models",
+      "originalBytes": 614,
+      "originalSha256": "2220cdd57b3c799b847b10879657d7d6122023d38434834a7c8784a559c0204b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_direct_peer_message_smoke",
+      "owner": "peer_probe_operations",
+      "originalBytes": 2556,
+      "originalSha256": "7c4fc678be854eb3c5a8ce24268b1f63a10ddd2bb74b95030b4237e29c7c988b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_obfuscated_peer_message_smoke",
+      "owner": "peer_probe_operations",
+      "originalBytes": 2623,
+      "originalSha256": "d6290e9a97ad0f48f0782aa392b23ce1b4a7d193c9e1cbb50b1709c708e9c0cc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_direct_file_transfer_smoke",
+      "owner": "peer_probe_operations",
+      "originalBytes": 2393,
+      "originalSha256": "eb9a0f2bc101899a1ab0e3036d1ae5b4e890115d6e786653b5611fbf7ca46f72",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_indirect_peer_message_smoke",
+      "owner": "peer_probe_operations",
+      "originalBytes": 4012,
+      "originalSha256": "a7fbb27a2d0b168a7479cf36ce451b98f5b29d0165dcbd316bae8e760aa29b53",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_connect_to_peer_response",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1543,
+      "originalSha256": "c595e37ffc89604b5a7e907996d73eead2f2b819bb475c631ee2730b83245a15",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_cant_connect_response",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1375,
+      "originalSha256": "ae11c7223ca02077222b287db7935fbe7e2763c5212f74e1ad041d1290742664",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_peer_address",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1548,
+      "originalSha256": "ad3f4562f4a480dca6bb7792bf27fbefceb403200688d346394f394021504e50",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_advertised_port_metadata",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1934,
+      "originalSha256": "db16e0a679e51b2ff3c15f8ad685efad451a6b939b3f964ef4bb5765428acb35",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "login_probe_session",
+      "owner": "server_probe_helpers",
+      "originalBytes": 550,
+      "originalSha256": "d0e8f767f1b2b17ab3f400483442e919ec6d68fe406c97a19d1c13665181665f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_private_message",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1390,
+      "originalSha256": "6d6482b0f1ac3c8d93c2a435d4367ee2d379f845f01a943bc41b56f27921bf6d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_room_message",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1614,
+      "originalSha256": "27645024a3067426ba8c0e1b23bef124aa5bdd64e8f104baef8659393e544318",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_room_join",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1556,
+      "originalSha256": "5aa43990f6d42c109b8f2fec2f40b9db9768279dca53c0e3a7ab297a6eaf25e4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "peer_regular_port",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 403,
+      "originalSha256": "12b433d01b670932bb914b6889e67cac546cc4670c120ff35c307cc03b53d836",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validated_obfuscated_port",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 403,
+      "originalSha256": "9f250df2e6f3741aee853fce79f16d59362793e469fe12931827648da0524b16",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "connect_plain_peer_messages",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 619,
+      "originalSha256": "7a350204e64b610c3c1f7741e14385c381e387bbbf7945c6ec973da9595c1d18",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "connect_plain_file_transfer",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 648,
+      "originalSha256": "9f0369f0fc8bb97812b29901d4d6a06b63f5a56ceec2f31ab4a388522be77531",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "browse_payload_preview",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 189,
+      "originalSha256": "e144d16c7d178c7a8863719f24e9b9989cca42585c1a54f953437f964859c6c5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "sanitize_inline_detail",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 354,
+      "originalSha256": "c73fa865f21c69b0207bd10b21a15084fdf8bdb0d50b7c15924e0b5c01846b80",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "hex_lower",
+      "owner": "peer_connection_helpers",
+      "originalBytes": 317,
+      "originalSha256": "0a697e4414bf6e0b0ecc4f7e4474e3b07321d0e5fc31a779c3e5ec23e0952edc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wait_for_peer_address_response",
+      "owner": "server_probe_helpers",
+      "originalBytes": 1259,
+      "originalSha256": "2f82b4719ecd7fa80c7dd1aff3d1c2aace72870e3d2d40a8319dc964ea1f2267",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "required_env_any",
+      "owner": "live_soak_configuration",
+      "originalBytes": 258,
+      "originalSha256": "701cbd509b340e19174401450caae970dc4d98437e7de4d602775df5a0d19733",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "LiveSoakConfig",
+      "owner": "live_soak_configuration",
+      "originalBytes": 605,
+      "originalSha256": "45cc32b65307ee37cdf679465c94e1e70aa2c2f385d89bcf741a9a1a0c879c48",
+      "relocations": 20
+    },
+    {
+      "kind": "impl",
+      "name": "LiveSoakConfig",
+      "owner": "live_soak_configuration",
+      "originalBytes": 2248,
+      "originalSha256": "9f23875a721562ac94b581b0e9d5e4e00ecad77f09ea6bc06aa97734763a5b6c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_server_soak",
+      "owner": "live_server_runtime",
+      "originalBytes": 2475,
+      "originalSha256": "84b82991edcd722900c7911f95facb9c31770787d3f4baa69d390abef932dbb4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_live_soak_server_watchdog",
+      "owner": "live_server_runtime",
+      "originalBytes": 715,
+      "originalSha256": "bd64ac38cf2f81968bd841943477b7d756a301a76c78b1c0b365a8dc45ef1c8d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "dispatch_live_soak_search",
+      "owner": "live_server_runtime",
+      "originalBytes": 579,
+      "originalSha256": "9529135dce7223e98a4dd6705219204078e6c21dc50607322ecf11c5dc93f878",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_server_message",
+      "owner": "live_server_runtime",
+      "originalBytes": 5321,
+      "originalSha256": "28462997d5513e08417dd8d051bb4da79352e9807b0bdad5c2614e3e6b34c4a3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_live_soak_connect_to_peer_response",
+      "owner": "live_server_runtime",
+      "originalBytes": 4235,
+      "originalSha256": "57138282ff1f8b06332062087896752b3c6d29e499c221490c78a6c779f4bee4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_listener",
+      "owner": "live_peer_runtime",
+      "originalBytes": 1603,
+      "originalSha256": "25e794f6fb248abce49ad24d58421ada1668cf3a0ea380a9ca0324ad41e8e9a2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_obfuscated_listener",
+      "owner": "live_peer_runtime",
+      "originalBytes": 1440,
+      "originalSha256": "bd8efa3f69bd7c3f400880fc71384eedefe18783bf11157c18be1cddaea46552",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_plain_soak_incoming",
+      "owner": "live_peer_runtime",
+      "originalBytes": 4079,
+      "originalSha256": "8da486ffdcaaa11f4f078c3d159a7e3743312c90b4786ab427c9912b3522c3a7",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_obfuscated_soak_incoming",
+      "owner": "live_peer_runtime",
+      "originalBytes": 1950,
+      "originalSha256": "8f1b027500d07174b39ee47c68b28584783f95885cb906bf5571b40298184cff",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "respond_to_user_info_request",
+      "owner": "live_peer_runtime",
+      "originalBytes": 699,
+      "originalSha256": "32a2ab4ca1127959a45201de522f023c769273888258b243cc2dc937f5c6fd12",
+      "relocations": 1
+    },
+    {
+      "kind": "trait",
+      "name": "PeerUserInfoResponder",
+      "owner": "live_peer_runtime",
+      "originalBytes": 206,
+      "originalSha256": "c9e6a293378067447346d3f6c12c70b6887bcd254ce6571367deb88e59dd4af1",
+      "relocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "PeerMessageConnection",
+      "owner": "live_peer_runtime",
+      "originalBytes": 633,
+      "originalSha256": "2bcbd2165d70cf30c371dd20f7d7e6b2a8a19e1d361e7444ccdbc6644c55b82d",
+      "relocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "ObfuscatedPeerMessageConnection",
+      "owner": "live_peer_runtime",
+      "originalBytes": 665,
+      "originalSha256": "4791d6785ccc6240cb201e0c1e6bfa7efa1b346a0c85d84133a2d29193da23a9",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "peer_probe_messages",
+      "owner": "live_peer_runtime",
+      "originalBytes": 465,
+      "originalSha256": "12ce272e2b9436381ebe478f10f6c026be4e85532ca62a82d911448948197612",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "incoming_connection_name",
+      "owner": "protocol_names",
+      "originalBytes": 596,
+      "originalSha256": "910ad4d657acd2f292f9615dc4ced59450acccd3eb94eefc8783460e6c97add9",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "server_message_name",
+      "owner": "protocol_names",
+      "originalBytes": 7619,
+      "originalSha256": "c0838ad8df498cd8f69d2508145d2477928611ab7c85e5c28043bf28998db288",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "peer_message_name",
+      "owner": "protocol_names",
+      "originalBytes": 1891,
+      "originalSha256": "d14bd7d700288e05cbe3e1c45f8e9199207c48c890f490f438a22e21ea31b00d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "redact_query",
+      "owner": "log_redaction",
+      "originalBytes": 166,
+      "originalSha256": "d4d92b8e76d0c8a486fecd839176b27ff84bf24281dd6f47f7247248956d229b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "redact_path",
+      "owner": "log_redaction",
+      "originalBytes": 162,
+      "originalSha256": "352e26bdade21f486af96574ecb3609e632cf0052c1d44e5071d96644de4af17",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "redact_peer_text",
+      "owner": "log_redaction",
+      "originalBytes": 181,
+      "originalSha256": "9489388e0ea937d6d5d950fd9d4ebba447cb714571e2515fab3d5a0edb56a1cc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "peer_close_reason",
+      "owner": "log_redaction",
+      "originalBytes": 309,
+      "originalSha256": "0ceb0dcfdf921999db5157553e6e83f219c3b8280d28186f4c64953d2537b75f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "unix_seconds",
+      "owner": "log_redaction",
+      "originalBytes": 154,
+      "originalSha256": "e4b9d99463f02ed75e72591a2fcb460be09bda87c600b9594520dbe4a64a90bf",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "LiveSoakIndirectCloseLog",
+      "owner": "log_redaction",
+      "originalBytes": 160,
+      "originalSha256": "de02bdc87f4ca2fd476f00071224f3eab868f09336ca69658931dd2f2bb08ff3",
+      "relocations": 6
+    },
+    {
+      "kind": "fn",
+      "name": "log_live_soak_indirect_close",
+      "owner": "log_redaction",
+      "originalBytes": 1072,
+      "originalSha256": "c51d9f2b6f80bb9a6488cb7e3a088ec6d8470a857868d449538a9703d3ecdc19",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "scrub_socket_addr",
+      "owner": "log_redaction",
+      "originalBytes": 184,
+      "originalSha256": "e0d4bf5945e5df1206316b83970e09a530c76fef797174ffea12303145d19bed",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "redact_username",
+      "owner": "log_redaction",
+      "originalBytes": 189,
+      "originalSha256": "ee226b27a7cb127c8f45a4704c4e6a980651f69dbc6ed54b06ac4a46017f3f1e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "peer_address_ip_detail",
+      "owner": "log_redaction",
+      "originalBytes": 272,
+      "originalSha256": "56989fffea8fa34101a7bd44ca765d44b0ad98214cc95050c7ef91299540861e",
+      "relocations": 1
+    }
+  ],
+  "parentScopedBindingsMatchOriginal": true,
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "12f8466c9652bf8715a8b58b7733ceb3c9b8f23b0376812c0390fefca5f03b1f"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "4237325ae6d99adc07c17880b06384e8add564e89333ba1b1755b9c771534de0"
+    },
+    "features": {
+      "passed": true,
+      "sha256": "d51cb17ccf23582086d24aa43ff77625f7cf3c351496cface6110228e343bbb1"
+    }
+  },
+  "compatibilityImports": [
+    "PeerUserInfoResponder"
+  ],
+  "compatibilityImportReason": "Narrow unused-import allowances retain original parent-scoped aliases; implementation bodies have no new allowances."
+}

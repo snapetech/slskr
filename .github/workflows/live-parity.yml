@@ -60,7 +60,7 @@ jobs:
           path: |
             target/ux-audit/**
             target/slskr-web/**
-            target/slskd-api-smoke/**
+            target/slskd-api-smoke/compatibility-summary.txt
           if-no-files-found: ignore
 
   credentialed-live-interop:
@@ -76,6 +76,8 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
         run: dirname "$(rustup which cargo)" >> "$GITHUB_PATH"
+      - name: Build daemon for live interoperability
+        run: cargo build --locked -p slskr
       - name: Prepare live credentials
         id: live-creds
         shell: bash
@@ -101,5 +103,5 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
         with:
           name: credentialed-live-interop-${{ github.run_id }}
-          path: target/live-interop/**
+          path: target/live-interop/*.tsv
           if-no-files-found: error

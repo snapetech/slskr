@@ -76,6 +76,12 @@ if [[ -z "$version" ]]; then
 fi
 safe_version="$(printf '%s' "$version" | tr '/ :' '---')"
 
+source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct HEAD)}"
+if ! [[ "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be a non-negative Unix timestamp" >&2
+  exit 2
+fi
+
 if [[ -z "$target" ]]; then
   target="$(rustc -Vv | awk '/^host:/ { print $2 }')"
 fi
@@ -102,7 +108,7 @@ if [[ \
   exit 1
 fi
 
-cargo_args=(build --release -p slskr)
+cargo_args=(build --locked --release -p slskr)
 if [[ -n "$target" ]]; then
   cargo_args+=(--target "$target")
 fi
@@ -144,21 +150,67 @@ EOF
 mkdir -p "$dist_dir"
 if [[ "$target" == *windows* ]]; then
   archive="$dist_dir/$root_name.zip"
-  ARCHIVE="$archive" ROOT_NAME="$root_name" DIST_DIR="$dist_dir" python - <<'PY'
+  ARCHIVE="$archive" ROOT_NAME="$root_name" DIST_DIR="$dist_dir" SOURCE_DATE_EPOCH="$source_date_epoch" python3 - <<'PY'
+import datetime
 import os
 import pathlib
 import zipfile
 
 archive = pathlib.Path(os.environ["ARCHIVE"])
 root = pathlib.Path(os.environ["DIST_DIR"]) / os.environ["ROOT_NAME"]
+epoch = max(int(os.environ["SOURCE_DATE_EPOCH"]), 315532800)
+timestamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).timetuple()[:6]
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    for path in root.rglob("*"):
-        if path.is_file():
-            zf.write(path, path.relative_to(root.parent).as_posix())
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.relative_to(root.parent).as_posix()
+        info = zipfile.ZipInfo(name, timestamp)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.create_system = 3
+        info.external_attr = 0o100644 << 16
+        zf.writestr(info, path.read_bytes())
 PY
 else
   archive="$dist_dir/$root_name.tar.gz"
-  tar -C "$dist_dir" -czf "$archive" "$root_name"
+  ARCHIVE="$archive" ROOT_NAME="$root_name" DIST_DIR="$dist_dir" \
+    BINARY_NAME="$binary_name" SOURCE_DATE_EPOCH="$source_date_epoch" python3 - <<'PY'
+import gzip
+import os
+import pathlib
+import stat
+import tarfile
+
+archive = pathlib.Path(os.environ["ARCHIVE"])
+root = pathlib.Path(os.environ["DIST_DIR"]) / os.environ["ROOT_NAME"]
+binary = root / os.environ["BINARY_NAME"]
+epoch = int(os.environ["SOURCE_DATE_EPOCH"])
+with archive.open("wb") as output:
+    with gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0, compresslevel=9) as gz:
+        with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tf:
+            for path in [root, *sorted(root.rglob("*"))]:
+                metadata = path.lstat()
+                info = tarfile.TarInfo(path.relative_to(root.parent).as_posix())
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = epoch
+                if stat.S_ISDIR(metadata.st_mode):
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o755
+                    tf.addfile(info)
+                elif stat.S_ISLNK(metadata.st_mode):
+                    info.type = tarfile.SYMTYPE
+                    info.mode = 0o777
+                    info.linkname = os.readlink(path)
+                    tf.addfile(info)
+                elif stat.S_ISREG(metadata.st_mode):
+                    info.mode = 0o755 if path == binary else 0o644
+                    info.size = metadata.st_size
+                    with path.open("rb") as content:
+                        tf.addfile(info, content)
+                else:
+                    raise RuntimeError(f"unsupported release archive entry: {path}")
+PY
 fi
 
 write_sha256_file "$archive" > "$archive.sha256"

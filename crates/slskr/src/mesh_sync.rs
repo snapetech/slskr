@@ -257,6 +257,11 @@ async fn merge_delta(
     }
 
     let incoming_count = incoming.len();
+    let persistence_turn = if incoming.is_empty() {
+        None
+    } else {
+        Some(super::hash_db_persistence_turn().await)
+    };
     let (merge_result, previous_entries, previous_latest_seq, mutated_entries, mutated_latest_seq) =
         if incoming.is_empty() {
             (Ok((0, 0)), Vec::new(), 0, Vec::new(), 0)
@@ -284,7 +289,14 @@ async fn merge_delta(
     };
     skipped = skipped.saturating_add(skipped_by_store as u64);
     if merged > 0 {
-        if let Err(error) = super::persist_current_hash_db_snapshot(state).await {
+        if let Err(error) = super::persist_current_hash_db_snapshot(
+            state,
+            persistence_turn
+                .as_ref()
+                .expect("non-empty HashDb merge holds a persistence turn"),
+        )
+        .await
+        {
             super::rollback_hash_db_entries_if_unchanged(
                 state,
                 previous_entries,
@@ -298,6 +310,7 @@ async fn merge_delta(
             merged = 0;
         }
     }
+    drop(persistence_turn);
     let latest = state.content_discovery.read().await.latest_seq();
     {
         let mut mesh = state.mesh.write().await;

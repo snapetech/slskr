@@ -6,20 +6,170 @@ cd "$repo_root"
 
 source_files=(
   crates/slskr/src/lib.rs
+  crates/slskr/src/app_state.rs
+  crates/slskr/src/activitypub_controller.rs
+  crates/slskr/src/session_runtime.rs
+  crates/slskr/src/session_runtime_owners/*.rs
+  crates/slskr/src/security_controller.rs
+  crates/slskr/src/quarantine_controller.rs
+  crates/slskr/src/misc_controller_mutations.rs
+  crates/slskr/src/native_compat_controller.rs
+  crates/slskr/src/feature_mutation_controller.rs
+  crates/slskr/src/controller_reload.rs
+  crates/slskr/src/controller_cli.rs
+  crates/slskr/src/musicbrainz_controller.rs
+  crates/slskr/src/virtual_soulfind_v2_controller.rs
+  crates/slskr/src/daemon_serve.rs
+  crates/slskr/src/external_visualizer_processes.rs
+  crates/slskr/src/core_dump_process.rs
+  crates/slskr/src/local_stream_file.rs
+  crates/slskr/src/script_process_group.rs
+  crates/slskr/src/share_stream_limits.rs
+  crates/slskr/src/soulfind_bridge_runtime.rs
+  crates/slskr/src/legacy_route_dispatch.rs
+  crates/slskr/src/legacy_route_dispatch_group_00.rs
+  crates/slskr/src/legacy_route_dispatch_group_01.rs
+  crates/slskr/src/legacy_route_dispatch_group_02.rs
+  crates/slskr/src/legacy_route_dispatch_group_03.rs
+  crates/slskr/src/legacy_route_dispatch_group_04.rs
+  crates/slskr/src/legacy_route_dispatch_group_05.rs
+  crates/slskr/src/legacy_route_dispatch_group_06.rs
+  crates/slskr/src/legacy_route_dispatch_group_07.rs
+  crates/slskr/src/legacy_route_dispatch_group_08.rs
+  crates/slskr/src/legacy_route_dispatch_group_09.rs
+  crates/slskr/src/legacy_route_dispatch_group_10.rs
   crates/slskr/src/controller_tests.rs
+  crates/slskr/src/controller_tests/*.rs
+  crates/slskr/src/destination_state.rs
+  crates/slskr/src/database_maintenance.rs
   crates/slskr/src/event_store.rs
   crates/slskr/src/utils.rs
+  crates/slskr/src/web_static.rs
+  crates/slskr/src/podcore_controller.rs
+  crates/slskr/src/mediacore_controller.rs
+  crates/slskr/src/extended_controller.rs
+  crates/slskr/src/file_transfer_runtime.rs
+  crates/slskr/src/file_transfer_runtime_owners/*.rs
+  crates/slskr/src/peer_transport.rs
+  crates/slskr/src/peer_message_runtime.rs
+  crates/slskr/src/http_connection.rs
+  crates/slskr/src/transfer_controller.rs
+  crates/slskr/src/transfer_batch_controller.rs
   crates/slskr/src/mesh_sync.rs
+  crates/slskr/src/mesh_dht_runtime.rs
+  crates/slskr/src/mesh_gateway_controller.rs
+  crates/slskr/src/ranking_controller.rs
+  crates/slskr/src/mesh_state.rs
   crates/slskr/src/bloom_filter.rs
   crates/slskr/src/multisource.rs
   crates/slskr/src/content_discovery.rs
   crates/slskr/src/realm_subject_index.rs
   crates/slskr/src/route_dispatch_group_0.rs
+  crates/slskr/src/route_dispatch_group_2.rs
+  crates/slskr/src/route_dispatch_group_2_session_search.rs
+  crates/slskr/src/route_dispatch_group_2_downloads.rs
+  crates/slskr/src/route_dispatch_group_2_transfer_status.rs
+  crates/slskr/src/route_dispatch_group_2_transfer_files.rs
+  crates/slskr/src/route_dispatch_group_2_search_rooms.rs
+  crates/slskr/src/route_dispatch_group_4.rs
+  crates/slskr/src/route_dispatch_group_4_collections.rs
+  crates/slskr/src/route_dispatch_group_4_wishlist.rs
+  crates/slskr/src/route_dispatch_group_4_contacts_sharegroups.rs
+  crates/slskr/src/route_dispatch_group_4_notes_interests_grants.rs
+  crates/slskr/src/route_dispatch_group_5.rs
+  crates/slskr/src/route_dispatch_group_5_library_profile.rs
+  crates/slskr/src/route_dispatch_group_5_conversations_jobs.rs
+  crates/slskr/src/route_dispatch_group_5_configuration_bridge.rs
+  crates/slskr/src/route_dispatch_group_5_mutations.rs
+  crates/slskr/src/route_dispatch_group_6.rs
+  crates/slskr/src/route_dispatch_group_6_admin_discovery.rs
+  crates/slskr/src/route_dispatch_group_6_telemetry.rs
+  crates/slskr/src/route_dispatch_group_6_media_jobs.rs
+  crates/slskr/src/route_dispatch_group_6_security_shares.rs
+  crates/slskr/src/route_dispatch_group_6_integrations.rs
+  crates/slskr/src/route_dispatch_group_6_musicbrainz.rs
+  crates/slskr/src/route_dispatch_group_7.rs
+  crates/slskr/src/route_dispatch_group_7_media_profile_import.rs
+  crates/slskr/src/route_dispatch_group_7_stream_services.rs
+  crates/slskr/src/route_dispatch_group_7_podcore.rs
+  crates/slskr/src/route_dispatch_group_7_network_admin.rs
+  crates/slskr/src/route_request_entry.rs
   crates/slskr/src/focused_controller_tests.rs
+  crates/slskr/src/focused_controller_tests/*.rs
+  crates/slskr/src/contact_state.rs
+  crates/slskr/src/collection_store.rs
+  crates/slskr/src/controller_feature_state.rs
+  crates/slskr/src/controller_options_state.rs
+  crates/slskr/src/controller_options_projection.rs
+  crates/slskr/src/controller_debug_view.rs
+  crates/slskr/src/controller_yaml.rs
+  crates/slskr/src/controller_release_check.rs
+  crates/slskr/src/controller_capabilities.rs
+  crates/slskr/src/controller_storage_preflight.rs
+  crates/slskr/src/controller_storage.rs
+  crates/slskr/src/incoming_share_store.rs
+  crates/slskr/src/hash_backfill_state.rs
+  crates/slskr/src/hash_backfill_controller.rs
+  crates/slskr/src/hash_backfill_runtime.rs
+  crates/slskr/src/integration_runtime_state.rs
+  crates/slskr/src/integration_target.rs
+  crates/slskr/src/lidarr_api.rs
+  crates/slskr/src/lidarr_import.rs
+  crates/slskr/src/lidarr_wishlist_sync.rs
+  crates/slskr/src/versioned_get_contract.rs
+  crates/slskr/src/versioned_relay_controller.rs
+  crates/slskr/src/source_feed_ingest.rs
+  crates/slskr/src/source_feed_preview_controller.rs
+  crates/slskr/src/listening_party_stream_state.rs
+  crates/slskr/src/library_store.rs
+  crates/slskr/src/local_file_hash.rs
+  crates/slskr/src/managed_tasks.rs
+  crates/slskr/src/lifecycle_controller.rs
+  crates/slskr/src/rate_limit.rs
+  crates/slskr/src/oauth_state.rs
+  crates/slskr/src/preview_stream_state.rs
+  crates/slskr/src/preview_stream_controller.rs
+  crates/slskr/src/relay_state.rs
+  crates/slskr/src/runtime_compat_state.rs
+  crates/slskr/src/security_state.rs
+  crates/slskr/src/share_grant_store.rs
+  crates/slskr/src/share_index_state.rs
+  crates/slskr/src/share_index_runtime.rs
+  crates/slskr/src/share_scanner.rs
+  crates/slskr/src/source_discovery_state.rs
+  crates/slskr/src/source_discovery_runtime.rs
+  crates/slskr/src/songid_runtime.rs
+  crates/slskr/src/vpn_runtime.rs
+  crates/slskr/src/transfer_state_io.rs
+  crates/slskr/src/transfer_durability.rs
+  crates/slskr/src/transfer_queue.rs
+  crates/slskr/src/transfer_recovery.rs
+  crates/slskr/src/transfer_recovery_runtime.rs
+  crates/slskr/src/transfer_entry.rs
+  crates/slskr/src/session_state.rs
+  crates/slskr/src/listener_state.rs
+  crates/slskr/src/listener_runtime.rs
+  crates/slskr/src/distributed_state.rs
+  crates/slskr/src/distributed_runtime.rs
+  crates/slskr/src/storage_directory_state.rs
+  crates/slskr/src/wishlist_store.rs
+  crates/slskr/src/wishlist_auto_download.rs
+  crates/slskr/src/wishlist_csv_import.rs
+  crates/slskr/src/browse_runtime.rs
+  crates/slskr/src/browse_store.rs
+  crates/slskr/src/browse_wire.rs
+  crates/slskr/src/request_input.rs
+  crates/slskr/src/search_store.rs
+  crates/slskr/src/search_runtime.rs
+  crates/slskr/src/message_store.rs
+  crates/slskr/src/room_store.rs
+  crates/slskr/src/user_store.rs
+  crates/slskr/src/user_note_store.rs
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
-config_source="crates/slskr/src/config.rs"
+config_sources=(crates/slskr/src/config.rs crates/slskr/src/config_parts/*.rs)
+config_tests_sources=(crates/slskr/src/config_tests.rs crates/slskr/src/config_tests/*.rs)
 client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
 client_peer_cache_source="crates/slskr-client/src/peer_cache.rs"
@@ -49,7 +199,8 @@ for anchor in \
   'share_scan_bounds_pending_directory_descriptors' \
   'MAX_SHARE_SCAN_TASKS' \
   'share_rebuild_routes_reject_concurrent_scans' \
-  'spawn_blocking(move || build_share_index(&config))' \
+  'build_share_index_with_cancellation(&config, cancellation)' \
+  'SHARE_SCAN_CANCELLED_ERROR' \
   'share_rebuild_errors_redact_internal_details' \
   'share_snapshot_errors_redact_internal_details' \
   'transfer_storage_errors_redact_internal_details' \
@@ -59,6 +210,14 @@ for anchor in \
   'browse_errors_redact_internal_details' \
   'browse_failure_events_redact_internal_details' \
   'external_visualizer_launch_errors_redact_command_details' \
+  'external visualizer admission is closed' \
+  'visualizer_children.shutdown().await' \
+  'caps_children_and_joins_them_before_rejecting_late_launch' \
+  'completed_and_failed_children_release_capacity' \
+  'cancelled_stream_task_releases_its_lease' \
+  'unconfigured_streams_count_when_an_explicit_limit_is_added' \
+  'maxConcurrentStreams must be null or an integer from 1 through 64' \
+  'explicit_share_stream_limits_migrate_persist_reset_and_rollback' \
   'options_config_location_is_the_confined_compatibility_file' \
   'toml_config_sanitizes_secrets_and_storage_paths' \
   'lidarr_projections_redact_endpoint_and_errors' \
@@ -172,6 +331,10 @@ for anchor in \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \
   'MAX_OAUTH_STATES' \
+  'OAuthStateStore' \
+  'spotify_oauth_state_persists_rehydrates_and_consumes' \
+  'spotify_oauth_state_is_not_consumed_when_persistence_delete_fails' \
+  'oauth_state_consumption_is_ordered_and_keeps_reads_available' \
   'MAX_PREVIEW_STREAM_TICKETS' \
   'MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_PEERS' \
   'is_private_message_auto_response_candidate' \
@@ -196,7 +359,27 @@ for anchor in \
   'notes_and_interests_bound_growth_and_ids' \
   'MAX_NOW_PLAYING_RECORDS' \
   'MAX_SECURITY_BANS' \
+  'jwt-revocations.json' \
+  'JWT revocation state exceeds its record or identifier limits' \
+  'RevokedJwtStore' \
+  'LoginAttemptStore' \
+  'revoked_jwt_store_persists_and_reloads_across_restart' \
+  'revoked_jwt_store_prunes_expired_entries_on_reload' \
+  'versioned_session_bounds_failed_login_attempts' \
   'now_playing_and_security_state_bound_remote_keys' \
+  'MAX_SOURCE_FEED_IMPORT_HISTORY' \
+  'MAX_SOURCE_FEED_HISTORY_SUGGESTIONS' \
+  'MAX_SOURCE_FEED_HISTORY_SKIPPED_ROWS' \
+  'MAX_SOURCE_FEED_PREVIEW_LENGTH' \
+  'SourceFeedImportHistoryStore' \
+  'LidarrSyncRuntimeState' \
+  'SpotifyConnectionStore' \
+  'ProtectedSpotifyConnection' \
+  'spotify_authorization_exchanges_profiles_persists_and_disconnects' \
+  'spotify_connection_status_and_disconnect' \
+  'spotify_oauth_state_persists_rehydrates_and_consumes' \
+  'controller_api_differential_lidarr_and_source_feed_contracts' \
+  'controller_api_differential_source_feed_open_cases' \
   'MAX_SHARE_GRANTS' \
   'share_grants_bound_and_deduplicate_collection_users' \
   'MAX_LIBRARY_ITEMS' \
@@ -207,6 +390,8 @@ for anchor in \
   'searches_bound_active_records_and_avoid_identity_collisions' \
   'sync_invalid_messages' \
   'sync_violation_state_enforces_message_and_entry_limits_separately' \
+  'create_auto_retry_plan' \
+  'create_rescue_plan' \
   'transfer_ids_and_tokens_wrap_without_collisions' \
   'finite transfer history must leave an available u64 id' \
   'bounded_store_ids_wrap_without_collisions' \
@@ -232,9 +417,24 @@ for anchor in \
   'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
   'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \
+  'MAX_HTTP_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
-  'state.incoming_connections'; do
+  'state.incoming_connections' \
+  'spawn_bounded_http_connection_task' \
+  'spawn_bounded_http_task(&unix_connections' \
+  'spawn_bounded_http_task(&tls_connections' \
+  'http_listener_connection_tasks_share_capacity_and_join_with_managed_shutdown' \
+  'runtime_compatibility_mutation_releases_store_guards_during_sqlite_io' \
+  'runtime_compatibility_transient_latches_stay_process_local' \
+  'lidarr_manual_import_releases_store_guards_during_sqlite_io' \
+  'share_grant_create_releases_store_readers_during_sqlite_io' \
+  'collection_delete_releases_store_guards_during_sqlite_io' \
+  'route_dispatch::share_grant_store_matches(&grants, &mutated)' \
+  'route_dispatch::share_grant_store_matches(&grants, &mutated_grants)' \
+  'route_dispatch::rollback_library_runtime_if_unchanged(' \
+  'upsert_library_item_and_runtime_compat_state' \
+  'Never let an unrelated durable compatibility write turn them'; do
   if ! rg -n --fixed-strings -- "$anchor" "${source_files[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing %s\n' "$anchor" >&2
     status=1
@@ -355,11 +555,18 @@ done
 
 for anchor in \
   'file.take(MAX_CONFIG_FILE_BYTES + 1)' \
-  'HTTP API token must not be empty or whitespace-only' \
+  'HTTP API token must not be empty or whitespace-only'; do
+  if ! rg -n --fixed-strings -- "$anchor" "${config_sources[@]}" >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
   'api_token_rejects_blank_env_and_file_values' \
   'config_file_reader_rejects_symlinks' \
   'config_file_reader_rejects_oversized_files'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$config_source" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "${config_tests_sources[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
     status=1
   fi
@@ -368,5 +575,140 @@ done
 if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
+
+# Gateway children belong to local cancellation owners and the daemon join set.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/private_gateway_owners/gateway_models.rs \
+  crates/slskr/src/private_gateway_owners/gateway_services.rs \
+  crates/slskr/src/private_gateway_owners/gateway_transport.rs \
+  crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs \
+  crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs \
+  crates/slskr/src/private_gateway_owners/quic_proxy.rs; then
+  printf 'runtime boundary hardening failed: detached gateway task\n' >&2
+  exit 1
+fi
+
+# CLI live-soak workers remain bounded and owned by their enclosing scopes.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/cli_smoke_soak_owners/live_peer_runtime.rs \
+  crates/slskr/src/cli_smoke_soak_owners/live_server_runtime.rs \
+  crates/slskr/src/cli_smoke_soak_owners/live_soak_entry.rs; then
+  printf 'runtime boundary hardening failed: detached live-soak task\n' >&2
+  exit 1
+fi
+
+# Short-lived CLI fixture and accept tasks have cancellation owners too.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/cli_smoke_soak_owners/fixture_transfers.rs \
+  crates/slskr/src/cli_smoke_soak_owners/peer_probe_operations.rs \
+  crates/slskr/src/cli_smoke_soak_owners/peer_smoke_scenarios.rs \
+  crates/slskr/src/cli_smoke_soak_owners/server_smoke_scenarios.rs \
+  crates/slskr/src/cli_smoke_soak_owners/transfer_smoke_scenarios.rs; then
+  printf 'runtime boundary hardening failed: detached CLI probe task\n' >&2
+  exit 1
+fi
+
+# Administrative jobs share daemon shutdown ownership; forwarding has one
+# explicitly owned listener task and a bounded child join set.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/route_dispatch.rs \
+  crates/slskr/src/route_dispatch_group_1_events.rs \
+  crates/slskr/src/route_dispatch_group_3_admin_controls.rs \
+  crates/slskr/src/transfer_completion.rs \
+  crates/slskr/src/virtual_soulfind_v2_controller.rs \
+  crates/slskr/src/webhooks.rs \
+  crates/slskr/src/scripts.rs; then
+  printf 'runtime boundary hardening failed: detached administrative worker\n' >&2
+  exit 1
+fi
+python3 - <<'PYFORWARD'
+from pathlib import Path
+source = Path('crates/slskr/src/port_forwarding.rs').read_text()
+if source.count('tokio::spawn(') != 1 or 'Some(ListenerTask(task))' not in source:
+    raise SystemExit('runtime boundary hardening failed: forwarding listener ownership changed')
+for anchor in ('connections.spawn(', 'connections.shutdown().await', 'impl Drop for ListenerTask', 'impl Drop for ActiveConnection'):
+    if anchor not in source:
+        raise SystemExit(f'runtime boundary hardening failed: missing forwarding owner {anchor}')
+PYFORWARD
+
+# WebSocket readers stay inside their connection future, including cancellation.
+python3 - <<'PYWS'
+from pathlib import Path
+for name in ('events_ws.rs', 'signalr_ws.rs', 'relay_ws.rs'):
+    path = Path('crates/slskr/src') / name
+    production = path.read_text().split('#[cfg(test)]', 1)[0]
+    if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
+        raise SystemExit(f'runtime boundary hardening failed: detached WebSocket reader in {path}')
+    if 'tokio::pin!(reader_task,' not in production:
+        raise SystemExit(f'runtime boundary hardening failed: missing scoped reader in {path}')
+PYWS
+
+python3 - <<'PYFTP'
+from pathlib import Path
+source = Path('crates/slskr/src/ftp_upload_queue.rs').read_text()
+for anchor in ('MAX_ADMITTED_UPLOADS: usize = 64', 'MAX_ACTIVE_UPLOADS: usize = 4',
+               'tasks.try_spawn(', 'impl Drop for FtpUploadQueue'):
+    if anchor not in source:
+        raise SystemExit(f'runtime boundary hardening failed: missing FTP admission {anchor}')
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('self.ftp_uploads.close()') > state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: FTP admission must close before joining workers')
+PYFTP
+
+python3 - <<'PYRELAY'
+from pathlib import Path
+cleanup = Path('crates/slskr/src/relay_connection_cleanup.rs').read_text()
+for anchor in ('MAX_PENDING_CLEANUPS: usize = 256', 'reserve_owned()',
+               'permit.send(', 'impl Drop for ConnectionLease', 'Arc::downgrade(state)',
+               'managed_background_tasks.try_spawn('):
+    if anchor not in cleanup:
+        raise SystemExit(f'runtime boundary hardening failed: missing relay cleanup owner {anchor}')
+if 'tokio::spawn(' in cleanup or 'tokio::task::spawn(' in cleanup:
+    raise SystemExit('runtime boundary hardening failed: detached relay cleanup worker')
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('self.relay_cleanup.close()') > state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: relay cleanup admission must close before shutdown')
+if 'protocol.shutdown_connections()' not in state:
+    raise SystemExit('runtime boundary hardening failed: relay registrations must clear after shutdown')
+PYRELAY
+
+python3 - <<'PYWEBHOOK'
+from pathlib import Path
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('fail_unconfirmed_webhook_logs(') < state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: webhook outcomes must reconcile after joining workers')
+startup = Path('crates/slskr/src/daemon_serve.rs').read_text()
+if 'fail_unconfirmed_webhook_logs(' not in startup:
+    raise SystemExit('runtime boundary hardening failed: missing interrupted webhook recovery')
+schema = Path('crates/slskr/src/persistence.rs').read_text()
+if 'idx_webhook_logs_queued' not in schema:
+    raise SystemExit('runtime boundary hardening failed: missing queued webhook reconciliation index')
+PYWEBHOOK
+
+# Delayed lifecycle commands share joined daemon ownership.
+python3 - <<'PYLIFECYCLE'
+from pathlib import Path
+root = Path('crates/slskr/src/lib.rs').read_text()
+owner = Path('crates/slskr/src/lifecycle_controller.rs').read_text()
+if 'fn schedule_lifecycle_command(' in root or 'tokio::spawn(' in root:
+    raise SystemExit('runtime boundary hardening failed: detached lifecycle command in crate root')
+if 'state.managed_background_tasks.try_spawn(' not in owner or 'tokio::spawn(' in owner:
+    raise SystemExit('runtime boundary hardening failed: unowned lifecycle command')
+if 'Duration::from_millis(100)' not in owner:
+    raise SystemExit('runtime boundary hardening failed: missing lifecycle response-flush delay')
+PYLIFECYCLE
+
+# One-shot QUIC operations finish cleanup in their caller's scope.
+python3 - <<'PYCODE'
+from pathlib import Path
+for name in ('quic_control.rs', 'quic_data.rs', 'shared_udp.rs', 'shared_quic_server.rs'):
+    path = Path('crates/slskr-client/src') / name
+    production = path.read_text().split('#[cfg(test)]', 1)[0]
+    if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
+        raise SystemExit(f'runtime boundary hardening failed: detached QUIC worker in {path}')
+route = Path('crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs').read_text()
+if 'first_alpn(' in route:
+    raise SystemExit('runtime boundary hardening failed: native QUIC must negotiate ALPN after reassembly')
+PYCODE
 
 printf 'runtime boundary hardening check passed\n'

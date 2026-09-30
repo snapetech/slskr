@@ -34,6 +34,8 @@ describe('LoginForm', () => {
 
     const link = screen.getByRole('link', { name: 'https://localhost:5031' });
     expect(link).toHaveAttribute('href', 'https://localhost:5031');
+    expect(link).toHaveClass('login-https-hint-link');
+    expect(link.closest('.login-https-hint')).toBeInTheDocument();
     expect(screen.getByText('HTTPS Option')).toBeInTheDocument();
   });
 });

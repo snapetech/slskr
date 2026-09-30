@@ -1,0 +1,1371 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "70dbb21b6f203e6e34ddc8cc24cd4136ef3a22db",
+  "source": "crates/slskr/src/config.rs",
+  "originalBytes": 172044,
+  "originalLines": 4703,
+  "originalSha256": "c5bff1da63b5b1d1de570ea7ce2400210a4e5911b9565cbc056f90e388e90619",
+  "exactSourceReconstruction": true,
+  "reversedVisibilityRelocationsMatchOriginal": true,
+  "preservedFunctionAndMethodDeclarations": 100,
+  "registryLines": 290,
+  "registrySha256": "f7c7510b04318f0908853f6766933e4d9af636aca387afda3cffba300e1a416a",
+  "owners": {
+    "crates/slskr/src/config_parts/environment_layers.rs": {
+      "lines": 277,
+      "sha256": "31f6d49a5cd334fe1b0f3bbe8ab86e9f3b68a32e5f077a19ff693e7922f8b41e"
+    },
+    "crates/slskr/src/config_parts/federation_membership.rs": {
+      "lines": 216,
+      "sha256": "093dcc07b80cf7e8ba6e82bd467fce1e5ef1df4fff7a535394215f5cba0b2435"
+    },
+    "crates/slskr/src/config_parts/file_loading.rs": {
+      "lines": 208,
+      "sha256": "95db8cc3ce2f3fd8f559e8dc2c0ad190f9a6ec6bd2820fc841370397fa6c8faf"
+    },
+    "crates/slskr/src/config_parts/media_services.rs": {
+      "lines": 76,
+      "sha256": "69b214aba9b5e5eadefcbbb8cc89a4bd7446ccc4be4a26345c5ea75951ed67d4"
+    },
+    "crates/slskr/src/config_parts/network_security.rs": {
+      "lines": 401,
+      "sha256": "1835d49eab1a733903eb64d46348744e24d4fb038b73a54ff6b550657a42d17a"
+    },
+    "crates/slskr/src/config_parts/peer_transport.rs": {
+      "lines": 819,
+      "sha256": "e2d6c0c5f76c6149f733e0241a0d6f29e89f0b7522ca1b4f8f28b68b5927be11"
+    },
+    "crates/slskr/src/config_parts/projection.rs": {
+      "lines": 56,
+      "sha256": "a3c495dcf0a56d40447d96ca5adf1178fcea95d38f26b58a8c99da460bfabcce"
+    },
+    "crates/slskr/src/config_parts/startup.rs": {
+      "lines": 891,
+      "sha256": "3b0081c1c4b68d0f7a9047abed3a61f2aba25d66ea613c8d57db25171a07f22d"
+    },
+    "crates/slskr/src/config_parts/transfer_policy.rs": {
+      "lines": 838,
+      "sha256": "428ee611934b0a3de2c30c977fddbced8b87b2e120cf7c19921d854ce0e941c6"
+    },
+    "crates/slskr/src/config_parts/web_security.rs": {
+      "lines": 725,
+      "sha256": "c9132fbc8888f5c1df459c2dae94a499549c610f71609534486882165d3f6cef"
+    }
+  },
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 141,
+      "originalSha256": "9b803611e0f7f6beded5f0e6311cb59000d1aac799044b4173d1d1078930de4b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 35,
+      "originalSha256": "5767b689f5ea061579bf3d5aff0778653523602ab22d455e0a36861406b60252",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 51,
+      "originalSha256": "e11d1683c3735c48bbbd5d9f8ec6937ba337f31d2404e14df7af34ac3fb31238",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 73,
+      "originalSha256": "927b98d3a327bf8a75b677648c09448a83a07fb30b54c8d1c2bb939ffcceaae3",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 78,
+      "originalSha256": "527586b93af3009ed6714b180f1f422e338c0910b89e56dd29f692b7076cfd13",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 45,
+      "originalSha256": "0f5890519e60d0d70806fbec8dd3c5cb985b8309ffd3cac45cbc2c4553b01a57",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 33,
+      "originalSha256": "3444c59dbfee4bbc442db5db5bb1536c23595a80ae85c8aa14e518b535b2e886",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 20,
+      "originalSha256": "1ee8dc55048a30d4b3a3102fcc43613d3b16602bf9d462b156b0a42b3f33c74e",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_CONFIG_FILE_BYTES",
+      "owner": "registry",
+      "originalBytes": 49,
+      "originalSha256": "73a5add4b56cb78efae5f2704477396bd5553efccffb93bafc192d7959ba68d0",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES",
+      "owner": "registry",
+      "originalBytes": 65,
+      "originalSha256": "3799d69447931836841b334fa3ca967e290c5139b10e88aedfbda3a6aff59119",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_COMPLETED_PATH_TEMPLATE_BYTES",
+      "owner": "registry",
+      "originalBytes": 59,
+      "originalSha256": "bcfc52e790a27a38fa2efdb06b2ec3f852c72ba31ff951a07e44012bbcca7cfb",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_TRUSTED_MESH_PEERS",
+      "owner": "registry",
+      "originalBytes": 43,
+      "originalSha256": "827de7c4a68077cab327e700910bb1793d2bcaf38178a76a708e7b6b8ad20733",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_MESH_IDENTITY_BYTES",
+      "owner": "registry",
+      "originalBytes": 44,
+      "originalSha256": "ad3d179d05b230b26e41fec05c8d8744786772776483aeccedc2939e1ebe49b6",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_MESH_RANGE_ENDPOINT_BYTES",
+      "owner": "registry",
+      "originalBytes": 55,
+      "originalSha256": "d7a6154d932a0085e20dd1bf73a57026e70311e54bb1b557430dc6d867bbd0a2",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "CONTROLLER_DEFAULT_SERVER_ADDRESS",
+      "owner": "registry",
+      "originalBytes": 72,
+      "originalSha256": "0ab67c800beeda77e07332f9b0f0cac5ba9edc145946bff4e865d736e9c79ae3",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "CONTROLLER_DEFAULT_LISTEN_PORT",
+      "owner": "registry",
+      "originalBytes": 52,
+      "originalSha256": "5265ac7db5dc9dd400212265ee855ddb0d5fcf759496034290146b9e2754bb3b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "random_controller_jwt_key",
+      "owner": "web_security",
+      "originalBytes": 300,
+      "originalSha256": "65945879bf5b18b2c5b6d7cfcaca78dce2171c7bb416bd20750c667adce24feb",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "AppConfig",
+      "owner": "registry",
+      "originalBytes": 5534,
+      "originalSha256": "68e741a5cf2a18b756b56d29bb0fac5c42f75a871c14dcb85ceb1bce0a67cea2",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 46,
+      "originalSha256": "a36ed9cebab727fbc4472fc2a682a911229221a67bcbc98b5f816285c851bfb5",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 21,
+      "originalSha256": "46b11a064b056060b6f3064f5ca50ffadc770b42ccb722cff72f050466fff3a9",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "AppConfig",
+      "owner": "startup",
+      "originalBytes": 37867,
+      "originalSha256": "3e14a50948e83914323d4310d920d2857e11a8f61530492090a83b48c94b99d3",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "parse_compat_ip_address",
+      "owner": "peer_transport",
+      "originalBytes": 1411,
+      "originalSha256": "428f8a2d44d43515a42fa129642d0be670d19306e4bd30393da5e9a6c0d16a43",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "TrustedMeshPeer",
+      "owner": "peer_transport",
+      "originalBytes": 238,
+      "originalSha256": "94e7125a925ade749c00d954150a0ff9cdbfee7b52675c84e1e8eba9c3fd261e",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "TrustedMeshPeer",
+      "owner": "peer_transport",
+      "originalBytes": 846,
+      "originalSha256": "928e7836c0bcbc698001ae3fed00fa1e2a65f709e2c6e395cd2cd08f6c5a0626",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "enum",
+      "name": "SoulseekObfuscationMode",
+      "owner": "peer_transport",
+      "originalBytes": 114,
+      "originalSha256": "1e7bf1db5f1c91ca5b3c1064169438aa2f6f8f9ed5c078cf26fe30b14586f083",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "enum",
+      "name": "ControllerProfile",
+      "owner": "registry",
+      "originalBytes": 101,
+      "originalSha256": "e9b98b94e51a78154521d774f1bdca331b96bc75f5e443291888697e4d22e176",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "ControllerProfile",
+      "owner": "registry",
+      "originalBytes": 980,
+      "originalSha256": "c12304dcdac3cce440970e234bdd07bfcf7c82e325f4b8aa6a9c54b4c94fa1fc",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "validate_controller_storage_directory",
+      "owner": "file_loading",
+      "originalBytes": 1198,
+      "originalSha256": "41eb3c569ef3ce6d3183241f864a1bd03d4b2611f84a388cde01f778d178c9ae",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "enum",
+      "name": "PodSignatureMode",
+      "owner": "federation_membership",
+      "originalBytes": 119,
+      "originalSha256": "530f8a86c85c2389c697b7ba88bd5c46807b5f9effb8d24f75be1c3b15638df1",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "AdvancedNetworkingSettings",
+      "owner": "network_security",
+      "originalBytes": 537,
+      "originalSha256": "718588d1009ef3194189846045966ed2aa6f39230389aa2817565cb17150d5ee",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "DhtSettings",
+      "owner": "network_security",
+      "originalBytes": 564,
+      "originalSha256": "bf768cbf7ba1d59f412861732120df9bbbb3408c0b1e3200cdb3434b5beac87e",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "DhtSettings",
+      "owner": "network_security",
+      "originalBytes": 223,
+      "originalSha256": "73e4c11c203883af7b4460624541f1b6dda4b7ae222a7683507b30b80b7583bd",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "MeshRuntimeSettings",
+      "owner": "network_security",
+      "originalBytes": 504,
+      "originalSha256": "3838e2969c22cd0bc2e04a164893b85e1ed7979939fdc25147f7f7bbe36b0cfc",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "MeshRuntimeSettings",
+      "owner": "network_security",
+      "originalBytes": 539,
+      "originalSha256": "47974c89ec659b6f841649fda8b7e081f65b6cef43edd9e1db896e4c0c1c66f5",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "MeshGatewaySettings",
+      "owner": "network_security",
+      "originalBytes": 550,
+      "originalSha256": "9dc2a8b9e275ce5576bccd130a28c2530e6c8bec10658fb0a0c0c9b7c0f3c239",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "MeshGatewaySettings",
+      "owner": "network_security",
+      "originalBytes": 5903,
+      "originalSha256": "cdccc7d31dfc28f6b045877c23447d12aae28a3e5986dbdf7450d906ed84b26e",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "SignalSystemSettings",
+      "owner": "network_security",
+      "originalBytes": 280,
+      "originalSha256": "803c539d6665355d30344e4c42922e08857ad91e587cbb46643b0ed61e02ff8c",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SignalChannelSettings",
+      "owner": "network_security",
+      "originalBytes": 171,
+      "originalSha256": "c25ce38c4d564defc0c2bd0c455d56c6ab81b82d0ad11ca1782ae7ad8ca5b97a",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "MeshSyncSecuritySettings",
+      "owner": "network_security",
+      "originalBytes": 606,
+      "originalSha256": "901fac87991b1dbd391c966e3f50eb83e03a08aace248305db0c773263dc1a30",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "OverlaySettings",
+      "owner": "network_security",
+      "originalBytes": 328,
+      "originalSha256": "636dcd7fbd74e4d994dcecc4eb98093f7e7f10a7a75622490fb14db64732aca5",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "OverlayDataSettings",
+      "owner": "network_security",
+      "originalBytes": 516,
+      "originalSha256": "e061ace0addf586b4477f8c3f90493e20b29122f3bc4d9cfc62e4331a394935e",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "RelaySettings",
+      "owner": "network_security",
+      "originalBytes": 220,
+      "originalSha256": "297173fccf23bafebc5ff18393fecd7b0cbbb1ef4e6ef73efb8187089cf5a551",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "RelayControllerSettings",
+      "owner": "network_security",
+      "originalBytes": 255,
+      "originalSha256": "e6404185638e754bbc2f2df8b1936055dd23309d2df6c592208e7ecb556cdf3a",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "RelayAgentSettings",
+      "owner": "network_security",
+      "originalBytes": 158,
+      "originalSha256": "bcdb43de9986b4d6c6f4aa3e8a486e5eb376d9d3b3f6357b72fa66c27ce45748",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SecuritySettings",
+      "owner": "network_security",
+      "originalBytes": 402,
+      "originalSha256": "7afb55198c360428813bac8afe18321d3855ab38b98ebd2e4a0fe66664e257ff",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "NetworkGuardSettings",
+      "owner": "network_security",
+      "originalBytes": 255,
+      "originalSha256": "0d8426bc5278a059559dd5caf5892ee4dfb6dff49d303bd87305103313458436",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "PathGuardSettings",
+      "owner": "network_security",
+      "originalBytes": 166,
+      "originalSha256": "cf56589dd23b40136078a4507479b3aa15d58795d2cc45fdce8885a5cd51189b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "ContentSafetySettings",
+      "owner": "network_security",
+      "originalBytes": 250,
+      "originalSha256": "c89a7a49eca614567ec7234d8792517f3ebe7237576198956e4787c981c5fb5d",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "PeerReputationSettings",
+      "owner": "network_security",
+      "originalBytes": 172,
+      "originalSha256": "44f7f3f50f6c63f5d065ca3ddb733f8d3831c52ecbda1cc576cb4492b1e0e023",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "ViolationTrackerSettings",
+      "owner": "network_security",
+      "originalBytes": 188,
+      "originalSha256": "97d3d261f9a63cd5d15d329293281e4db87fd8b56aa38cc6502523a437768ee4",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "AdversarialSettings",
+      "owner": "network_security",
+      "originalBytes": 242,
+      "originalSha256": "a7a641e34b1ed7a47c74ea434f095b9fc2136f971ebed5d22dc26fc600c01c3d",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "MediaAdvancedServiceSettings",
+      "owner": "media_services",
+      "originalBytes": 301,
+      "originalSha256": "311328d0cba85943724694bf4fd149b12701b0b280bb0322aa1ecf673cd3caf8",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "FeatureGateSettings",
+      "owner": "media_services",
+      "originalBytes": 642,
+      "originalSha256": "7671c8e896b0ff35e02d578832de49ecbc0f8c227259d2f2ec8b77fcd43e0c24",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SocialFederationSettings",
+      "owner": "federation_membership",
+      "originalBytes": 363,
+      "originalSha256": "4b72f348776a6765daba532f5bd48faa6131d293f7a11534e555a2cb814f0b07",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "SocialFederationSettings",
+      "owner": "federation_membership",
+      "originalBytes": 3081,
+      "originalSha256": "bea42809a7113637636d33ae890903d07ed837644e64c693f060636d51a9cb70",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "FederationPublishingSettings",
+      "owner": "federation_membership",
+      "originalBytes": 347,
+      "originalSha256": "4727b59369fa3e4a04706719b390a619dd420b803a4a2c9099ca815d3e38dba3",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "FederationPublishingSettings",
+      "owner": "federation_membership",
+      "originalBytes": 2796,
+      "originalSha256": "be50bacc665a56c59e7fb58cd5b5f7df2a09006b4c005df8c2278d66458d63b9",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "SolidSettings",
+      "owner": "media_services",
+      "originalBytes": 318,
+      "originalSha256": "148838e74485444874920cbe387c222abf0a9c097a4d6e7145afb47e0280a1bb",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindSettings",
+      "owner": "media_services",
+      "originalBytes": 193,
+      "originalSha256": "103ae488fac9efdc8a97d65ec870c174b40dab7d3d7de830380c8bbc8c2976be",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindBridgeSettings",
+      "owner": "media_services",
+      "originalBytes": 324,
+      "originalSha256": "99185cd5036a74524b7475506c87a5c57895a0f8aceb499068fa3c5efa41ef10",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "VirtualSoulfindBridgeSettings",
+      "owner": "media_services",
+      "originalBytes": 117,
+      "originalSha256": "84f25d8a65e8e8300f4f479eeec842c9d81e248cbc7739f4a81786e36b38c796",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindDisasterModeSettings",
+      "owner": "media_services",
+      "originalBytes": 313,
+      "originalSha256": "a405cfc0b75db9eb4069540f731019e5488a20964f15fa900c2717cf4066b43b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "PodSignatureMode",
+      "owner": "federation_membership",
+      "originalBytes": 554,
+      "originalSha256": "a39faf98165b6fc629eacb3f13b9dff38153cdaffe8ddf144cf21976364c2533",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "SoulseekObfuscationMode",
+      "owner": "peer_transport",
+      "originalBytes": 670,
+      "originalSha256": "cab1c9ff4ca91e590879cac4178efd61d43fcf952e0a2326345ac43157c57c2d",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validate_api_token",
+      "owner": "web_security",
+      "originalBytes": 708,
+      "originalSha256": "527ba044614257395476825203f19173064651f6dd1fea2664df27c30ca0495f",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validated_runtime_interval",
+      "owner": "environment_layers",
+      "originalBytes": 392,
+      "originalSha256": "d03f7f2c1be1ecf40816ebb9115e92dab8f776eb0c232a2efa9fc9458f28c6f1",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "TransferAutoRetrySettings",
+      "owner": "transfer_policy",
+      "originalBytes": 459,
+      "originalSha256": "3f5fcf716bf3948f6abca19c56a8ab5b7b699f2c3ab3ce4fdee8ffa620559c7d",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "TransferAutoRetrySettings",
+      "owner": "transfer_policy",
+      "originalBytes": 5383,
+      "originalSha256": "6832db400b71189d509f7281c43022b8d5bd15119cad3b83dffae4af4fde3204",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "TransferRescueSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 406,
+      "originalSha256": "d9833e0b7310fbab42912793d2c36227c2e9c249a69708d5d57a10261ffa3c02",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "TransferRescueSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 4578,
+      "originalSha256": "c8ad86e7384326a4b6ea8f9fa8ce56bcc28a1ce43a59697b9a22f094f7b4413b",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "ManagedBlacklistRange",
+      "owner": "transfer_policy",
+      "originalBytes": 114,
+      "originalSha256": "0cccef0fb1b5f52af420db396261a63159b646c0b8200c750d6caedbcceb39e0",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "impl",
+      "name": "ManagedBlacklistRange",
+      "owner": "transfer_policy",
+      "originalBytes": 203,
+      "originalSha256": "2d07b9e83be90ade814166eeb28a40a92b400c4f32d68765267246abd77090ee",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "ManagedBlacklistSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 311,
+      "originalSha256": "228c68a25172d49dd945d917b8e336fe943b0e7384ef97fffa3c016258dd5932",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "ManagedBlacklistSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 3237,
+      "originalSha256": "05fb7270d869a688d8d25d6f2c2414a83a2188de3ff2b0698cd191493f39516d",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "enum",
+      "name": "ManagedBlacklistFormat",
+      "owner": "transfer_policy",
+      "originalBytes": 106,
+      "originalSha256": "ae161684a64d0efeee116ffebe9a1806aa79b621f338b7ded276d1227e0e73be",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validate_managed_blacklist_file_format",
+      "owner": "transfer_policy",
+      "originalBytes": 335,
+      "originalSha256": "d499ca272a1297b30d7ea6bc5017774013b83b81b6878a2dc7d43da0077df146",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "load_managed_blacklist_file",
+      "owner": "transfer_policy",
+      "originalBytes": 1101,
+      "originalSha256": "eb4b0d9f2a727cf79f32757afc9f0c22d5c5ceb1ee681b2cbe9ab6d5b99ae239",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "detect_managed_blacklist_format",
+      "owner": "transfer_policy",
+      "originalBytes": 978,
+      "originalSha256": "adc18de73ed20ae1ec130f7776c643713271153ee88d38a8af196f8e8e03eaee",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "managed_blacklist_line_range",
+      "owner": "transfer_policy",
+      "originalBytes": 1183,
+      "originalSha256": "95091d18ad02fc741ab38acf2fd35e93610dfb87a1a84bee76ffa66945d35680",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "trim_ipv4_leading_zeroes",
+      "owner": "transfer_policy",
+      "originalBytes": 467,
+      "originalSha256": "669c40422856f628af0d67d390880a5a384379b8b444a0aee6447be99ada924e",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "parse_ipv4_range",
+      "owner": "transfer_policy",
+      "originalBytes": 1366,
+      "originalSha256": "2eeca3d46054e3bd31be1eb391a25ff02650852dbaee4237cfec43ad4cd8a3df",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "bounded_config_value",
+      "owner": "environment_layers",
+      "originalBytes": 270,
+      "originalSha256": "8ead5619985d585fe71d19e91957c8821e59f725c3f29338aebe002955340bb0",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "enum",
+      "name": "CredentialStoreMode",
+      "owner": "file_loading",
+      "originalBytes": 116,
+      "originalSha256": "d4ab7da4dad0ad0f5509fe8de788bd747d7913b00e1a6090dfdbe133817c8601",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "CredentialStoreMode",
+      "owner": "file_loading",
+      "originalBytes": 910,
+      "originalSha256": "f1a0930987249154a50b13da0e20a98a42e15f2a7f5202d38ad55a20253e4206",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "TrustedProxyCidr",
+      "owner": "web_security",
+      "originalBytes": 109,
+      "originalSha256": "afb20b7ae2f3214a89ee98eed38d48590a826d7d20d8416420820395b761d307",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "impl",
+      "name": "TrustedProxyCidr",
+      "owner": "web_security",
+      "originalBytes": 1557,
+      "originalSha256": "d0388dd74391bf90a7da82ede8990a4bb2f731199979ab34335c37c1fc6e332b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 54,
+      "originalSha256": "e40948175bb2da0897c8154d98a9c1796ab626b58a09acf35d87c1ccaed29c95",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 25,
+      "originalSha256": "001d54de8cce778ef39b03e1572918ad8bae347ea357559940577d1c225dcf02",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "PrivateMessageAutoResponseSettings",
+      "owner": "peer_transport",
+      "originalBytes": 154,
+      "originalSha256": "95ea5e00ede56527cb815df7e28f4d77c7f383e98950ced440f897aeca72b3e5",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "PrivateMessageAutoResponseSettings",
+      "owner": "peer_transport",
+      "originalBytes": 1900,
+      "originalSha256": "782ccce6f807f6d0bdce3fda7386260b242a079857ba23d1f6369362f8abcb98",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "ShareSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 463,
+      "originalSha256": "42f9f8d62ccb2c015097de2e1e2abe953bc634d51ed483f8f7418900fab820df",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "ShareDirectory",
+      "owner": "transfer_policy",
+      "originalBytes": 170,
+      "originalSha256": "66856cae17065b39753d67931dda64350ed03d8e56c27ef3bbae49f02748d787",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "ShareDirectory",
+      "owner": "transfer_policy",
+      "originalBytes": 2671,
+      "originalSha256": "520c49e7d0f8cf74fedd52a3179f3d4affcfa032777bc17d0395584199e2ef69",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "ShareSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 4857,
+      "originalSha256": "542975bd06d2bda03258fea9d60bed31056da6cb9b7450dec112b6f500a61f2c",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "default_state_dir",
+      "owner": "file_loading",
+      "originalBytes": 325,
+      "originalSha256": "dbfe4634a4a633cc25666917914c6922f208728f4e1b9e87f166ee5cbf0dc5d3",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "default_config_file",
+      "owner": "file_loading",
+      "originalBytes": 331,
+      "originalSha256": "d97da7eee8a2d18b5cc1a84143de705bcdf1321833e7b617f375f1f528198051",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_file_config",
+      "owner": "file_loading",
+      "originalBytes": 462,
+      "originalSha256": "5771aa31b7ea8ee09869f9c7fbcabb9b94000e1272928dd2febec91aa568ce5a",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "read_file_config",
+      "owner": "file_loading",
+      "originalBytes": 1621,
+      "originalSha256": "48727928cef9ed1c3eb38257990edf7730fe3cb4763b52106fef0cfb9f39ba3d",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "warn_insecure_config_permissions",
+      "owner": "file_loading",
+      "originalBytes": 512,
+      "originalSha256": "31e92e58dc825a63cfb24d3ed6b630a0cab20fde566768c9fafe01da2a71204e",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "warn_insecure_config_permissions",
+      "owner": "file_loading",
+      "originalBytes": 147,
+      "originalSha256": "5e1679d6c3593f92a1695191f5d30eeceb8f2ffc464ab240d2f235e3c87ed8db",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "config_contains_sensitive_values",
+      "owner": "file_loading",
+      "originalBytes": 1196,
+      "originalSha256": "0ad9a20f42d8374cac625cd589fe4f89a65c0071aefde0b76a7ad628fad50927",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 158,
+      "originalSha256": "ce05adafa16d4b81438883704109dc12f534f3f0e6b8c5106a3db1ea06c9abbb",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "ProcessEnv",
+      "owner": "registry",
+      "originalBytes": 24,
+      "originalSha256": "7343b3948eb46e122cb8eab5a194e8df01bf430bf48212fbdd6e78b917ac4aba",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "ProcessEnv",
+      "owner": "registry",
+      "originalBytes": 119,
+      "originalSha256": "48a62065b4dca7dad655b9260676a450cfa128dc0beac1f02d9755141293a6a2",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 38,
+      "originalSha256": "e9328d41c1daf11a2337746d67e1dc5e8b3d56fc7c42021d1d31720d0f574ce4",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 13,
+      "originalSha256": "1dc238b58e82ebd119d613555455eb5cdf122d9cbae8d4d1dd32a8bf08b6ff69",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "optional_env_any",
+      "owner": "environment_layers",
+      "originalBytes": 132,
+      "originalSha256": "5a0cfe4c71934c6c29f21500932615bfebbf26e448bf47f0b40d9416a5019318",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "profile_env_names",
+      "owner": "environment_layers",
+      "originalBytes": 352,
+      "originalSha256": "994ac6a418a919ac01bf47e411b948224c0b49da9a9cdca551a10c8a7b9f7f2a",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "controller_string_array_layer",
+      "owner": "environment_layers",
+      "originalBytes": 320,
+      "originalSha256": "6c46483835e5741988d20823c680644c3692c7f1787c8c49f6b0bb78d6145ee1",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "string_array_any_layer",
+      "owner": "environment_layers",
+      "originalBytes": 398,
+      "originalSha256": "06ccb9500f6388175fb7ca20c824a865f13cca13158990c76037423e6fbef572",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "normalized_controller_values",
+      "owner": "environment_layers",
+      "originalBytes": 332,
+      "originalSha256": "724d92d8b66382a3341e7974d06b5989829486a8c1428210d46a3ed6d25487db",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "trusted_proxy_cidrs_from_layers",
+      "owner": "web_security",
+      "originalBytes": 513,
+      "originalSha256": "e1f0faf4a51d8a49002bef579aefcba7f2da95fec9dd0d05fc9451a8c7e54900",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "controller_passthrough_cidrs",
+      "owner": "web_security",
+      "originalBytes": 583,
+      "originalSha256": "5a94c14cb7884fad80175278339e60367a61dd62161db1b35bfee066c4bf0076",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "trusted_mesh_peers_from_layers",
+      "owner": "peer_transport",
+      "originalBytes": 2299,
+      "originalSha256": "eb0048d1abf686516a59c0dc03b15d277e8dbc5d8982fe0e029a36f635831129",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "bounded_mesh_identity",
+      "owner": "peer_transport",
+      "originalBytes": 572,
+      "originalSha256": "be9035840fa3f799fcbee98d5c7078e9695af9df36fec32f4a14b7d245684254",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "decode_mesh_certificate_pin",
+      "owner": "peer_transport",
+      "originalBytes": 679,
+      "originalSha256": "291774de2febfc0fb793a068dd73c3e7e04fbc2b8832b8af635b00b68df1444c",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validate_mesh_range_endpoint",
+      "owner": "peer_transport",
+      "originalBytes": 2048,
+      "originalSha256": "93db5f72843c3550f60f0bf158731a2928acf3321a137097728b5e07b6a3f92a",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "parse_user_endpoint_overrides",
+      "owner": "peer_transport",
+      "originalBytes": 1018,
+      "originalSha256": "f941f9696b8b323f5ba5cf6148df96defed8d40f246da5faa53ade60589114be",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "env_parse_layer",
+      "owner": "environment_layers",
+      "originalBytes": 411,
+      "originalSha256": "d55320430d4d250725ff585ad49aefe5ee4fae3bda1d5bef928c8881c11e59dd",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "env_parse_any_layer",
+      "owner": "environment_layers",
+      "originalBytes": 496,
+      "originalSha256": "56f006fced82d0088727ad0f85f43bb018e03644fdd66c88d26c4c745b714dd6",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "env_parse_any_option",
+      "owner": "environment_layers",
+      "originalBytes": 445,
+      "originalSha256": "d69846623d9bfaf7b3ae08782a8534c6d73af7a8ed469ad10976df969caf3781",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "split_server_address",
+      "owner": "peer_transport",
+      "originalBytes": 1070,
+      "originalSha256": "37bcd417bb6727b94776d32d15fe8bf031066df5e652d9cc7ec3027981aba620",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "format_host_port",
+      "owner": "peer_transport",
+      "originalBytes": 226,
+      "originalSha256": "5227bd22367780398483c4ab5f0ab58a36d3f6cda277dd70256354fbf70e4da2",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekIdentity",
+      "owner": "peer_transport",
+      "originalBytes": 236,
+      "originalSha256": "5c406c06becfee9d4d4c3504869e7595119acac3115b1ea5ae8daa31b25eed60",
+      "visibilityRelocations": 8
+    },
+    {
+      "kind": "struct",
+      "name": "ControllerWebAuthSettings",
+      "owner": "web_security",
+      "originalBytes": 443,
+      "originalSha256": "e01b54e6a8c6ebb4c212bd237c4783a7819dadb31b32e8c92ae07df1ae969a16",
+      "visibilityRelocations": 11
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_controller_web_auth",
+      "owner": "web_security",
+      "originalBytes": 4777,
+      "originalSha256": "2b8d70ce0ef5e084dfe9f1fb32a1efd1cc5035ef6510c9be6515d482ce2bc57b",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "MiscControllerFlags",
+      "owner": "environment_layers",
+      "originalBytes": 425,
+      "originalSha256": "80c14ccb20a75dd27829f8945b9f013089bb2b950224a903b1e879e683b2aee8",
+      "visibilityRelocations": 12
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_misc_controller_flags",
+      "owner": "environment_layers",
+      "originalBytes": 2573,
+      "originalSha256": "3adbf85c2c9e36e1e67b2c0b6db94a262c8a2ebbd7fa29a4c89063eecbf4577b",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_controller_api_keys",
+      "owner": "web_security",
+      "originalBytes": 2324,
+      "originalSha256": "02e713d4eec1a62483398c67530ceb171e87d23ca59467ed106a131b6981cf84",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "PeerProfileSettings",
+      "owner": "peer_transport",
+      "originalBytes": 322,
+      "originalSha256": "f4e4d9c5e6a26ebd96ab44774619b15194ff5b94ea2f9b555714775a52b0a279",
+      "visibilityRelocations": 7
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_peer_profile",
+      "owner": "peer_transport",
+      "originalBytes": 2937,
+      "originalSha256": "2f3e5046b1a683d5daa1b0ba371695367bfa219ae8d2b56e7980d63310e8fd94",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "ListenerAndObfuscationResolution",
+      "owner": "peer_transport",
+      "originalBytes": 520,
+      "originalSha256": "387b447f0cb2ec22d6840ea274d8b2c0e09ef2d09ac54df84b875474095237dd",
+      "visibilityRelocations": 14
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_listener_and_obfuscation",
+      "owner": "peer_transport",
+      "originalBytes": 9964,
+      "originalSha256": "d3c4f8ff46772a08397d1c1e676cddc5dbc5c7aace398b06eccee927233fd21f",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "ControllerWebResolution",
+      "owner": "web_security",
+      "originalBytes": 184,
+      "originalSha256": "28f4c8b7b34651beea2db2b82c2bf74600117085d1c578bf04c648e99ad07992",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_controller_web",
+      "owner": "web_security",
+      "originalBytes": 7469,
+      "originalSha256": "1fa35d9a09cbb8f79b8f06186b740f967308c447a73269f4347643ca88eaacb4",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "ApiAndWebHardeningSettings",
+      "owner": "web_security",
+      "originalBytes": 816,
+      "originalSha256": "5669fb5111df0a622ca56b7e0b503976edeae728cee4586273b3143c7e3ecad6",
+      "visibilityRelocations": 18
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_api_and_web_hardening",
+      "owner": "web_security",
+      "originalBytes": 7659,
+      "originalSha256": "7e6c970015f304519d6c754d9ac8d4fd3e972dff4f407f68b8fb2b5dbc03ae37",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_soulseek_identity",
+      "owner": "peer_transport",
+      "originalBytes": 2646,
+      "originalSha256": "7dc7d8efdfc7dcefae5b26133daeb4f9f84aae3558b7660a9535cf5be4937381",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "env_parse_option_layer",
+      "owner": "environment_layers",
+      "originalBytes": 414,
+      "originalSha256": "e3bf1b75843003477635bc9a9efcbdc521f6f71d68ea281d25bdd96ab1a6d35f",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "env_bool_layer",
+      "owner": "environment_layers",
+      "originalBytes": 418,
+      "originalSha256": "68853d0146a198baee319e411bb25a68bd5c56425a53a275733e196e63bccaa1",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "env_bool_any_layer",
+      "owner": "environment_layers",
+      "originalBytes": 510,
+      "originalSha256": "f1bb03ea5a280bed1cd28e3c0eafd249db1892cc5c330fe51a6d5aa7c6eaba94",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_auth_disabled",
+      "owner": "web_security",
+      "originalBytes": 178,
+      "originalSha256": "6070efb3e20935afc07ca0e7329deecaa98b325d22b7b2449c77b9399b338ddf",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "redact_username",
+      "owner": "projection",
+      "originalBytes": 264,
+      "originalSha256": "1e1e647205b5a08acc7bab969d83b92045d6492776b609ceb320d99c34d7f7f6",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_option",
+      "owner": "projection",
+      "originalBytes": 171,
+      "originalSha256": "a31f59949e2094d8b4b6a5fe848ce90dae634b8df40f32677be9bc0b3127f8b0",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_bool_option",
+      "owner": "projection",
+      "originalBytes": 156,
+      "originalSha256": "0f4a2f90f8e8de34ab82414f08ac56da6a966b98d77be0ae893134a10a6979e5",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_escape",
+      "owner": "projection",
+      "originalBytes": 630,
+      "originalSha256": "00680ede1f096e12fe77ef3e3013d63968ff4945f438047060059356459f7e78",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_u32_option",
+      "owner": "projection",
+      "originalBytes": 154,
+      "originalSha256": "3c8a8f88acce7315441f076fc8b667b3891f60e97f472e06476d7d02c5e2642b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_u64_option",
+      "owner": "projection",
+      "originalBytes": 154,
+      "originalSha256": "e231ffa81ec85fd49c7f81ebcd7fa7cb0e22a5bf5a06bd2167344899872537b4",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_usize_option",
+      "owner": "projection",
+      "originalBytes": 158,
+      "originalSha256": "c570751ad15b46e09f3f9cf17f438536c43bbd917b6146fdeb26e54de0faf1ce",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "parse_share_entries",
+      "owner": "transfer_policy",
+      "originalBytes": 227,
+      "originalSha256": "c1c9dfea60e7eebb53e965da828cf937637b0d70fb55ea820fe033a38b1303af",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "parse_share_entry",
+      "owner": "transfer_policy",
+      "originalBytes": 694,
+      "originalSha256": "68035e3d69884e6b1978c959b3a1a33f4587bb03985d6e4c781a59fe98da7735",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "parse_share_directories",
+      "owner": "transfer_policy",
+      "originalBytes": 240,
+      "originalSha256": "71c49939dfe6f11e8bc5e4ccd9ab09be0962f230678f67f39ee41a9da913f63b",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "extension_for",
+      "owner": "transfer_policy",
+      "originalBytes": 166,
+      "originalSha256": "7e33374d05a9d755f2aba3ec76c14fdcd137b94db2d1cc89a741a780a4fe2cca",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 53,
+      "originalSha256": "3eccd2fdd186f305d7ad34cfeeebc503149c366ecd3c203d61b0bc85124bcd87",
+      "visibilityRelocations": 0
+    }
+  ],
+  "preservedPublicDeclarationNames": [
+    "AppConfig",
+    "parse_compat_ip_address",
+    "TrustedMeshPeer",
+    "SoulseekObfuscationMode",
+    "ControllerProfile",
+    "PodSignatureMode",
+    "AdvancedNetworkingSettings",
+    "DhtSettings",
+    "MeshRuntimeSettings",
+    "MeshGatewaySettings",
+    "SignalSystemSettings",
+    "SignalChannelSettings",
+    "MeshSyncSecuritySettings",
+    "OverlaySettings",
+    "OverlayDataSettings",
+    "RelaySettings",
+    "RelayControllerSettings",
+    "RelayAgentSettings",
+    "SecuritySettings",
+    "NetworkGuardSettings",
+    "PathGuardSettings",
+    "ContentSafetySettings",
+    "PeerReputationSettings",
+    "ViolationTrackerSettings",
+    "AdversarialSettings",
+    "MediaAdvancedServiceSettings",
+    "FeatureGateSettings",
+    "SocialFederationSettings",
+    "FederationPublishingSettings",
+    "SolidSettings",
+    "VirtualSoulfindSettings",
+    "VirtualSoulfindBridgeSettings",
+    "VirtualSoulfindDisasterModeSettings",
+    "TransferAutoRetrySettings",
+    "TransferRescueSettings",
+    "ManagedBlacklistRange",
+    "ManagedBlacklistSettings",
+    "validate_managed_blacklist_file_format",
+    "CredentialStoreMode",
+    "TrustedProxyCidr",
+    "PrivateMessageAutoResponseSettings",
+    "ShareSettings",
+    "ShareDirectory",
+    "default_state_dir",
+    "load_file_config",
+    "ProcessEnv",
+    "optional_env_any",
+    "redact_username",
+    "json_option",
+    "json_bool_option",
+    "json_escape",
+    "json_u32_option",
+    "json_u64_option",
+    "json_usize_option",
+    "parse_share_entries",
+    "parse_share_entry",
+    "parse_share_directories"
+  ],
+  "publicNamespaceBindingsMatchOriginal": true,
+  "gates": [
+    {
+      "command": "cargo test -p slskr --lib config::tests",
+      "result": "passed",
+      "logSha256": "91adc32773cb26acffd677bab001504c449140df981f10f7063064d218090802"
+    },
+    {
+      "command": "cargo test -p slskr --lib",
+      "result": "passed",
+      "logSha256": "bce1ab9952224776f33831766d33cc1a9a21a87a5c9586a506edcd6a5e391429"
+    },
+    {
+      "command": "cargo clippy -p slskr --all-targets -- -D warnings",
+      "result": "passed",
+      "logSha256": "89123dafcf6eadf3c2e59e47952257a8dcc887b56410d6313e305b969d3467c8"
+    },
+    {
+      "command": "cargo check -p slskr --all-targets --features full-controller-tests,legacy-route-dispatch",
+      "result": "passed",
+      "logSha256": "339c5e3f4c1eb3823af2e2e074f8fe1e6f9b26c8570eff7703569d1835e3a70d"
+    }
+  ]
+}

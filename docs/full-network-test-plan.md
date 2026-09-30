@@ -1,5 +1,10 @@
 # slskr — Full Network Test & Certification Plan
 
+Evidence classification: this document contains the live-test design and
+dated historical results. Its result tables are not a current release
+certification; use `scripts/run-release-gate.sh` plus the maintained live
+interop workflows and retained artifacts for current release evidence.
+
 ## 1. Executive Summary
 
 slskr already has a mature live-interop harness: VPN-isolated Proton WireGuard namespaces, NAT-PMP port mapping, credential pools, soak runners, and a probe matrix covering plain/obfuscated/indirect/distributed/file-transfer paths. What's missing is (a) formalized test phases and pass criteria, (b) expanded coverage for upload, large files, distributed tree, room lifecycle, and third-party clients, (c) structured/observable logging to diagnose failures at scale, and (d) a certification artifact that proves release readiness.
@@ -9,7 +14,7 @@ slskr already has a mature live-interop harness: VPN-isolated Proton WireGuard n
 ### 2.1 What works today
 | Component | Coverage | Evidence |
 |-----------|----------|----------|
-| Protocol unit tests | All 102 server codes, ~18 peer codes, ~6 distributed codes, 2 init codes, obfuscation type 1 | `cargo test --workspace` |
+| Protocol unit tests | All 103 server codes, ~18 peer codes, ~6 distributed codes, 2 init codes, obfuscation type 1 | `cargo test --workspace` |
 | Live login | 4–8 accounts via `.env` / generated accounts / credential pool | `run-live-interop-matrix.sh` |
 | VPN harness | 8 Proton WireGuard configs in isolated netns with veth routing, per-account IP isolation | `run-in-proton-wg-netns.sh` |
 | Certification runner | 7 phases (A-H), 39 tests, per-account VPN routing, JSON/text output, auto-detect VPN configs | `run-certification.sh` |
@@ -445,7 +450,7 @@ scripts/run-certification.sh --phases B,G,H --log-format json
 scripts/run-certification.sh --dry-run
 ```
 
-### Latest Results (2026-07-16)
+### Historical Results (2026-07-16)
 
 Full certification run with per-account VPN isolation (39 tests):
 

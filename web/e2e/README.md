@@ -55,9 +55,8 @@ These are graceful skips that allow tests to pass when features are intentionall
 ### Local Development
 
 ```bash
-# Start nodes manually or let harness start them
-cd src/web
-npm run test:e2e
+# Start nodes manually or let the harness start them
+npm --prefix web run test:e2e
 ```
 
 ### CI Environment
@@ -65,7 +64,7 @@ npm run test:e2e
 Tests run with `SLSKR_TEST_NO_CONNECT=true` to disable Soulseek connections for deterministic testing.
 
 ```bash
-npm run test:e2e:ci
+npm --prefix web run test:e2e:ci
 ```
 
 ## Test Harness
@@ -86,18 +85,22 @@ E2E tests require real fixture files to be present before running. The harness w
 Fixtures must be in `test-data/slskr-test-fixtures/` with a valid `meta/manifest.json`:
 
 - `book/treasure_island_pg120.txt` (text file)
-- Additional audio/video files (see `test-data/slskr-test-fixtures/meta/fetch_media.sh`)
+- `movie/sintel_poster.jpg` (image file)
+- `music/open_goldberg/cover.jpg` (image file)
+- `tv/ClearBits.txt`, `tv/Description.txt`, `tv/license.txt` (metadata)
+- `tv/pioneer_one_thumb.jpg` (image file)
 
 ### Generating Manifest
 
-After downloading fixtures, generate the manifest:
+If a tracked fixture is intentionally replaced, regenerate the manifest from
+the repository root and review the resulting hashes:
 
 ```bash
-cd test-data/slskr-test-fixtures/meta
-node generate-manifest.js
+node test-data/slskr-test-fixtures/meta/generate-manifest.js
 ```
 
-This creates `manifest.json` with sha256 checksums for validation.
+The checked-in manifest covers only deterministic static files. Audio/video
+media is optional and is not required for the non-streaming E2E suite.
 
 ### Node Configuration
 
@@ -111,7 +114,15 @@ Tests use 3 nodes:
 The harness validates fixtures on startup:
 - Checks fixtures root directory exists
 - Validates manifest.json exists and is valid
-- Verifies all required files exist
-- Optional checksum validation (set `SLSKR_VALIDATE_FIXTURE_CHECKSUMS=1`)
+- Verifies every manifest file exists with the expected byte count
+- Verifies every manifest file has the expected SHA-256 digest
 
 If validation fails, tests abort immediately with clear error messages.
+
+### Build command ownership
+
+The native harness shares only builds that are currently running. Each Cargo or
+npm command has a ten-minute deadline. Stopping the last node waiting for a build
+cancels the owned command tree and waits for its child to close. Stopping one node
+leaves a build running when another node still needs it. Native TCP, DHT, and
+control/data QUIC use one numeric peer port per node.

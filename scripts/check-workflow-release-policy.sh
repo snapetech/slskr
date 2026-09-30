@@ -77,17 +77,63 @@ for expected in \
   'SLSKR_SLSKD_API_SMOKE_DIR: target/slskd-api-smoke' \
   'SLSKR_SLSKD_API_SMOKE_TOKEN:' \
   'target/ux-audit/**' \
-  'target/slskd-api-smoke/**' \
+  'target/slskd-api-smoke/compatibility-summary.txt' \
   'Credentialed public live interop' \
   'SLSKR_LIVE_INTEROP_ENV: ${{ secrets.SLSKR_LIVE_INTEROP_ENV }}' \
+  'cargo build --locked -p slskr' \
   'scripts/run-live-interop-matrix.sh' \
-  'target/live-interop/**' \
+  'target/live-interop/*.tsv' \
   'credentialed-live-interop.tsv'; do
   if ! rg -n -F -- "$expected" .github/workflows/live-parity.yml >/dev/null; then
     printf 'workflow release policy check failed: live parity workflow token missing: %s\n' "$expected" >&2
     status=1
   fi
 done
+
+for expected in \
+  '--all-udp-transports --cycles 3' \
+  '--artifact target/reproducibility/shared-all-transports-shutdown.json' \
+  '            target/reproducibility/shared-all-transports-shutdown.json'; do
+  if ! rg -n -F -- "$expected" .github/workflows/ci.yml >/dev/null; then
+    printf 'workflow release policy check failed: shared transport proof missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for expected in \
+  'schedule:' \
+  "cron: '43 8 * * *'" \
+  'timeout-minutes: 25' \
+  'python3 scripts/run-react-nightly-audit.py' \
+  '--property=MemoryMax=4G --property=MemorySwapMax=0' \
+  '--property=TasksMax=512 --property=RuntimeMaxSec=15min' \
+  'target/react-nightly-audit/**' \
+  'if-no-files-found: error' \
+  'retention-days: 30'; do
+  if ! rg -n -F -- "$expected" .github/workflows/react-nightly-audit.yml >/dev/null; then
+    printf 'workflow release policy check failed: React nightly contract missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for expected in \
+  'publish:' \
+  'type: boolean' \
+  'default: true' \
+  'if: inputs.publish' \
+  'timeout-minutes: 20' \
+  'release-assets/chocolatey-validation.json' \
+  'retention-days: 30'; do
+  if ! rg -n -F -- "$expected" .github/workflows/publish-chocolatey.yml >/dev/null; then
+    printf 'workflow release policy check failed: Chocolatey validation contract missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+if rg -n -F 'path: target/live-interop/**' .github/workflows/live-parity.yml; then
+  printf 'workflow release policy check failed: live parity artifacts must exclude the credential file\n' >&2
+  status=1
+fi
 
 if rg -n 'go install "github.com/rhysd/actionlint/cmd/actionlint@latest"|go install github.com/rhysd/actionlint/cmd/actionlint@latest' .github/workflows; then
   printf 'workflow release policy check failed: actionlint install must stay pinned\n' >&2
@@ -100,6 +146,21 @@ for workflow in .github/workflows/ci.yml .github/workflows/release.yml; do
     status=1
   fi
 done
+
+if ! rg -n -F 'run: actionlint' .github/workflows/ci.yml >/dev/null; then
+  printf 'workflow release policy check failed: installed actionlint must run in CI\n' >&2
+  status=1
+fi
+for workflow in .github/workflows/ci.yml .github/workflows/windows-smoke.yml; do
+  if ! rg -n -F 'run: ./scripts/select-windows-perl.ps1' "$workflow" >/dev/null; then
+    printf 'workflow release policy check failed: shared Windows Perl selection missing: %s\n' "$workflow" >&2
+    status=1
+  fi
+done
+if ! rg -n -F 'Locale::Maketext::Simple' scripts/select-windows-perl.ps1 >/dev/null; then
+  printf 'workflow release policy check failed: full Perl module validation missing\n' >&2
+  status=1
+fi
 
 if ! rg -n -F "release-v*" .github/workflows/release.yml >/dev/null; then
   printf 'workflow release policy check failed: release-v tag trigger was not found\n' >&2
@@ -240,6 +301,18 @@ if ! rg -n -F 'release-v<semver>' docs/release.md >/dev/null; then
   printf 'workflow release policy check failed: release docs must document release-v<semver>\n' >&2
   status=1
 fi
+
+for expected in \
+  'ref: ${{ inputs.tag }}' \
+  'SHA256SUMS.txt' \
+  'Get-FileHash' \
+  'https://github.com/$env:GITHUB_REPOSITORY/releases/download/' \
+  'Expand-Archive'; do
+  if ! rg -n -F -- "$expected" .github/workflows/publish-chocolatey.yml >/dev/null; then
+    printf 'workflow release policy check failed: Chocolatey release contract token missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
 
 if ! rg -n -F '`macos-15-intel`' docs/release.md >/dev/null; then
   printf 'workflow release policy check failed: release docs must document the current macOS Intel runner\n' >&2

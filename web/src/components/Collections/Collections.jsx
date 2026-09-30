@@ -4,16 +4,16 @@ import { readOptionalApiResponse } from '../../lib/optionalApi';
 import PlayCollectionItemButton from '../Player/PlayCollectionItemButton';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
+import CreateCollectionModal from './CreateCollectionModal';
+import CollectionShareModal from './CollectionShareModal';
+import CollectionAddItemModal from './CollectionAddItemModal';
 import React, { Component } from 'react';
 import {
   Button,
   Container,
-  Dropdown,
-  Form,
   Header,
   Icon,
   Message,
-  Modal,
   Popup,
   Segment,
   Table,
@@ -854,248 +854,70 @@ export default class Collections extends Component {
             </Segment>
           )}
 
-          {/* Create Collection Modal */}
-          <Modal
-            onClose={() =>
-              this.setState({
+          <CreateCollectionModal
+            actions={{
+              onClose: () => this.setState({
                 createModalOpen: false,
                 newCollectionDescription: '',
                 newCollectionTitle: '',
                 newCollectionType: 'Playlist',
-              })
-            }
-            open={createModalOpen}
-          >
-            <Modal.Header>Create Collection</Modal.Header>
-            <Modal.Content>
-              <Form>
-                <Form.Field>
-                  <label htmlFor="collection-type">Type</label>
-                  <Dropdown
-                    data-testid="collections-type-select"
-                    id="collection-type"
-                    onChange={(event, { value }) =>
-                      this.setState({ newCollectionType: value })
-                    }
-                    options={typeOptions}
-                    selection
-                    value={newCollectionType}
-                  />
-                </Form.Field>
-                <Form.Input
-                  data-testid="collections-title-input"
-                  label="Title"
-                  onChange={(event) =>
-                    this.setState({ newCollectionTitle: event.target.value })
-                  }
-                  placeholder="Enter collection title"
-                  value={newCollectionTitle}
-                />
-                <Form.TextArea
-                  label="Description"
-                  onChange={(event) =>
-                    this.setState({
-                      newCollectionDescription: event.target.value,
-                    })
-                  }
-                  placeholder="Optional description"
-                  value={newCollectionDescription}
-                />
-              </Form>
-            </Modal.Content>
-            <Modal.Actions>
-              <Button
-                onClick={() =>
-                  this.setState({
-                    createModalOpen: false,
-                    newCollectionDescription: '',
-                    newCollectionTitle: '',
-                    newCollectionType: 'Playlist',
-                  })
-                }
-              >
-                Cancel
-              </Button>
-              <Button
-                data-testid="collections-create-submit"
-                disabled={!newCollectionTitle.trim() || creatingCollection}
-                loading={creatingCollection}
-                onClick={this.handleCreateCollection}
-                primary
-              >
-                Create
-              </Button>
-            </Modal.Actions>
-          </Modal>
-
-          {/* Share Collection Modal */}
-          <Modal
-            onClose={() => this.setState({ shareModalOpen: false })}
-            open={shareModalOpen}
-          >
-            <Modal.Header>Share Collection</Modal.Header>
-            <Modal.Content>
-              {shareGroupsLoading ? (
-                <LoaderSegment />
-              ) : shareGroups.length === 0 ? (
-                <Message warning>No share groups available.</Message>
-              ) : (
-                <Form>
-                  <Form.Field>
-                    <label htmlFor="share-group">Share Group</label>
-                    <Dropdown
-                      data-testid="share-audience-picker"
-                      id="share-group"
-                      onChange={(event, { value }) =>
-                        this.setState({ shareAudienceId: value })
-                      }
-                      options={shareGroups.map((group) => ({
-                        key: group.id,
-                        text: group.name,
-                        value: group.id,
-                      }))}
-                      selection
-                      value={shareAudienceId}
-                    />
-                  </Form.Field>
-                  <Form.Field>
-                    <label htmlFor="share-allow-stream">Allow streaming</label>
-                    <input
-                      checked={shareAllowStream}
-                      data-testid="share-policy-stream"
-                      id="share-allow-stream"
-                      onChange={(event) =>
-                        this.setState({
-                          shareAllowStream: event.target.checked,
-                        })
-                      }
-                      type="checkbox"
-                    />
-                  </Form.Field>
-                  <Form.Field>
-                    <label htmlFor="share-allow-download">Allow download</label>
-                    <input
-                      checked={shareAllowDownload}
-                      data-testid="share-policy-download"
-                      id="share-allow-download"
-                      onChange={(event) =>
-                        this.setState({
-                          shareAllowDownload: event.target.checked,
-                        })
-                      }
-                      type="checkbox"
-                    />
-                  </Form.Field>
-                </Form>
-              )}
-            </Modal.Content>
-            <Modal.Actions>
-              <Button
-                disabled={creatingShare}
-                onClick={() => this.setState({ shareModalOpen: false })}
-              >
-                Cancel
-              </Button>
-              <Button
-                data-testid="share-create-submit"
-                disabled={!shareAudienceId || creatingShare}
-                loading={creatingShare}
-                onClick={this.handleCreateShare}
-                primary
-              >
-                Share
-              </Button>
-            </Modal.Actions>
-          </Modal>
-
-          {/* Add Item Modal */}
-          <Modal
-            onClose={() =>
-              this.setState({
+              }),
+              onCreate: this.handleCreateCollection,
+              onDescriptionChange: (event) => this.setState({ newCollectionDescription: event.target.value }),
+              onTitleChange: (event) => this.setState({ newCollectionTitle: event.target.value }),
+              onTypeChange: (_event, { value }) => this.setState({ newCollectionType: value }),
+            }}
+            state={{
+              creatingCollection,
+              createModalOpen,
+              newCollectionDescription,
+              newCollectionTitle,
+              newCollectionType,
+            }}
+            typeOptions={typeOptions}
+          />
+          <CollectionShareModal
+            actions={{
+              onAllowDownloadChange: (event) => this.setState({ shareAllowDownload: event.target.checked }),
+              onAllowStreamChange: (event) => this.setState({ shareAllowStream: event.target.checked }),
+              onAudienceChange: (_event, { value }) => this.setState({ shareAudienceId: value }),
+              onClose: () => this.setState({ shareModalOpen: false }),
+              onCreateShare: this.handleCreateShare,
+            }}
+            state={{
+              creatingShare,
+              shareAllowDownload,
+              shareAllowStream,
+              shareAudienceId,
+              shareGroups,
+              shareGroupsLoading,
+              shareModalOpen,
+            }}
+          />
+          <CollectionAddItemModal
+            actions={{
+              onAddItem: this.handleAddItem,
+              onClose: () => this.setState({
                 addItemModalOpen: false,
                 itemSearchQuery: '',
                 itemSearchResults: [],
-              })
-            }
-            open={addItemModalOpen}
-          >
-            <Modal.Header>Add Item to {selectedCollection?.title}</Modal.Header>
-            <Modal.Content>
-              <Form>
-                <Form.Field>
-                  <label htmlFor="collection-item-search">
-                    Search for item
-                  </label>
-                  <Form.Input
-                    data-testid="collection-item-search-input"
-                    id="collection-item-search"
-                    label="Search for item"
-                    loading={itemSearchLoading}
-                    onChange={(event) => {
-                      const query = event.target.value;
-                      this.setState({ itemSearchQuery: query });
-                      this.handleSearchItems(query);
-                    }}
-                    placeholder="Search by filename (e.g., sintel, aria, treasure)..."
-                    value={itemSearchQuery}
-                  />
-                </Form.Field>
-                {itemSearchResults.length > 0 && (
-                  <Form.Field>
-                    <label htmlFor="collection-item-results">
-                      Search Results
-                    </label>
-                    <Dropdown
-                      data-testid="collection-item-results"
-                      fluid
-                      id="collection-item-results"
-                      onChange={(event, { value }) => {
-                        this.setState({ itemSearchQuery: value });
-                      }}
-                      options={itemSearchResults.map((item, index) => ({
-                        key: item.contentId || index,
-                        text: `${item.fileName || item.path} (${item.mediaKind || 'File'})`,
-                        value: item.contentId,
-                      }))}
-                      placeholder="Select an item from search results"
-                      search
-                      selection
-                    />
-                  </Form.Field>
-                )}
-                {itemSearchQuery &&
-                  itemSearchResults.length === 0 &&
-                  !itemSearchLoading && (
-                    <Message info>
-                      No results found. You can still add the search query as a
-                      content ID.
-                    </Message>
-                  )}
-              </Form>
-            </Modal.Content>
-            <Modal.Actions>
-              <Button
-                onClick={() =>
-                  this.setState({
-                    addItemModalOpen: false,
-                    itemSearchQuery: '',
-                    itemSearchResults: [],
-                  })
-                }
-              >
-                Cancel
-              </Button>
-              <Button
-                data-testid="collection-add-item-submit"
-                disabled={!itemSearchQuery.trim() || addingItem}
-                loading={addingItem}
-                onClick={this.handleAddItem}
-                primary
-              >
-                Add Item
-              </Button>
-            </Modal.Actions>
-          </Modal>
+              }),
+              onSearchInputChange: (event) => {
+                const query = event.target.value;
+                this.setState({ itemSearchQuery: query });
+                this.handleSearchItems(query);
+              },
+              onSearchResultChange: (_event, { value }) => this.setState({ itemSearchQuery: value }),
+            }}
+            state={{
+              addItemModalOpen,
+              addingItem,
+              itemSearchLoading,
+              itemSearchQuery,
+              itemSearchResults,
+              selectedCollection,
+            }}
+          />
         </Container>
       </div>
     );

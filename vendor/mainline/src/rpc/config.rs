@@ -48,6 +48,11 @@ pub struct Config {
     /// embedding application route outbound traffic through a shared public
     /// UDP socket while retaining the actor's private receive endpoint.
     pub outbound_socket: Option<Arc<UdpSocket>>,
+    /// Bounded datagrams supplied by a shared-port demultiplexer.
+    ///
+    /// Each packet retains the original remote address. When present, the
+    /// actor reuses `outbound_socket` and does not bind or read another port.
+    pub incoming_packets: Option<flume::Receiver<(Vec<u8>, SocketAddrV4)>>,
 }
 
 impl Default for Config {
@@ -61,6 +66,7 @@ impl Default for Config {
             public_ip: None,
             bind_address: None,
             outbound_socket: None,
+            incoming_packets: None,
         }
     }
 }

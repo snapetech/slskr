@@ -36,7 +36,7 @@ This matrix proves `slskr` behavior against itself and adjacent/community client
 | Private chat | Direct private message send/receive/ack works | `probe private-message` in VPN-backed live matrix | Passed with fresh account pair |
 | Rooms | Join/leave/list/message flows work | `probe room-message` in VPN-backed live matrix | Passed with fresh account |
 | User controls | Watch/unwatch, stats, browse, ban/ignore semantics align | Unit/API coverage plus browse/stat live probes | Ban/ignore mutation remains an API policy surface, not a blocking Soulseek interop gap |
-| Web/API/UI/player | Web UI drives search, transfers, chat, rooms, settings, player surfaces | Web tests/build plus Playwright live-surface spec | Browser/player E2E passes against adjacent `slskr` daemon-hosted bundle |
+| Web/API/UI/player | Web UI drives search, transfers, chat, rooms, settings, player surfaces | Web tests/build plus maintained Playwright specs: [`smoke-auth`](../web/e2e/smoke-auth.spec.ts), [`core-pages`](../web/e2e/core-pages.spec.ts), [`library`](../web/e2e/library.spec.ts), [`search`](../web/e2e/search.spec.ts), [`multippeer-sharing`](../web/e2e/multippeer-sharing.spec.ts), [`streaming`](../web/e2e/streaming.spec.ts), and [`policy`](../web/e2e/policy.spec.ts) | Browser/player E2E passes against adjacent `slskr` daemon-hosted bundle |
 | Durability | Searches/transfers/messages/rooms survive restart where supported | Unit/API coverage | Cross-client restart matrix passes for daemon metadata, browse, search, and queued payload transfer after restart |
 | Failure modes | Bad auth, occupied user, offline peer, closed ports, bad obfuscation, and negative indirect fail safely | `negative-indirect`, unit coverage | Cross-client negative probes remain to add |
 
@@ -46,6 +46,7 @@ Primary runners:
 
 - `scripts/run-live-interop-matrix.sh`: `slskr` account login and local peer smoke.
 - `scripts/run-live-interop-matrix.sh`: now also runs private-message and room-message probes after login/local-peer checks.
+- The credential file must include the configured base account range plus every selected probe index. The default base range is accounts 1–6, so non-VPN mode needs accounts 1–6; VPN mode needs accounts 1–8. Missing probe accounts are rejected before public-host DNS lookup.
 - `scripts/run-cross-client-validation.sh`: adjacent checkout validation, runtime/library unit validation, daemon peer probes, daemon browse probes, and daemon fixture-download probes.
 - `.github/workflows/live-parity.yml`: scheduled/manual CI proof for the Rust web UI headless parity audit plus hermetic local `slskd_api` automation-client smoke, with screenshots, web assets, and daemon logs uploaded as artifacts. It also runs the credentialed public live matrix when the `SLSKR_LIVE_INTEROP_ENV` secret is configured, or uploads a skipped TSV when live credentials are intentionally absent.
 - `scripts/fetch-open-commons-fixtures.sh`: downloads hash-pinned public-domain/CC0 media fixtures into ignored local storage for realistic share/search/transfer payloads.
@@ -116,7 +117,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | `slskr` live peer smoke | Passed | 2026-05-04 VPN-backed live matrix: direct peer-message, obfuscated peer-message, file-transfer init, and indirect peer-message passed with fresh accounts |
 | `slskr` private-message live proof | Passed | 2026-05-04 VPN-backed live matrix: sender and receiver fresh accounts completed private-message probe |
 | `slskr` room-message live proof | Passed | 2026-05-04 VPN-backed live matrix: fresh account joined `slskr-live-interop` and completed room-message probe |
-| browser/player E2E against daemon state | Passed | 2026-05-04 Playwright `e2e/live-surfaces.spec.ts`: this repo's web bundle was hosted by adjacent `slskr`; search, downloads, uploads, messages, rooms, browse, system, and player shell controls loaded without runtime errors |
+| browser/player E2E against daemon state | Passed | 2026-05-04 historical Playwright result; the old `live-surfaces.spec.ts` source path is not retained. Current coverage is the seven maintained specs in the capability row above. The [2026-09-14 live-parity artifact](https://github.com/snapetech/slskr/actions/runs/34865016805/artifacts/10356417233) is dated evidence, and the [live-parity workflow](../.github/workflows/live-parity.yml) uploads `live-parity-<run_id>` artifacts for new runs. |
 | `slskr -> slskr` daemon plain peer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: `slskr` logged in through p7, probe p5 resolved advertised `55100`, and plain `UserInfoRequest` passed through the daemon namespace host override |
 | `slskr -> slskr` daemon browse | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: browse preview included `slskr\open-commons\commons-click-track.ogg` |
 | `slskr -> slskr` live search soak | Passed over VPN-isolated probe namespace | 2026-05-04 focused run: server event stream completed; incidental indirect peer reset is now informational |

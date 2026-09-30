@@ -20,13 +20,14 @@ import {
 import { toDisplayError } from '../../lib/errors';
 import { formatBytes, getDirectoryName, getFileName } from '../../lib/util';
 import DiscoveryGraphModal from './DiscoveryGraphModal';
+import DownloadActionPreviewModal from './DownloadActionPreviewModal';
 import FileList from '../Shared/FileList';
 import UserCard from '../Shared/UserCard';
 import UserNoteModal from '../Users/UserNoteModal';
 import React, { Component } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { Button, Card, Icon, Label, List, Modal, Popup } from 'semantic-ui-react';
+import { Button, Card, Icon, Label, Popup } from 'semantic-ui-react';
 
 const buildTree = (response) => {
   const files = [
@@ -482,69 +483,13 @@ class Response extends Component {
   };
 
   renderActionPreview = (preview, selectedSize) => (
-    <Modal
-      closeIcon
+    <DownloadActionPreviewModal
       onClose={() => this.setState({ previewOpen: false })}
+      onCopy={() => this.copyPreview(preview)}
       open={this.state.previewOpen}
-      size="small"
-    >
-      <Modal.Header>Download action preview</Modal.Header>
-      <Modal.Content>
-        <List relaxed>
-          <List.Item>
-            <List.Header>Source</List.Header>
-            <List.Description>{preview.username || 'unknown'}</List.Description>
-          </List.Item>
-          <List.Item>
-            <List.Header>Providers</List.Header>
-            <List.Description>{preview.providerLabels.join(', ')}</List.Description>
-          </List.Item>
-          <List.Item>
-            <List.Header>Selected files</List.Header>
-            <List.Description>
-              {preview.fileCount} file{preview.fileCount === 1 ? '' : 's'}, {selectedSize}
-            </List.Description>
-          </List.Item>
-          {preview.candidateScore !== null && (
-            <List.Item>
-              <List.Header>Candidate score</List.Header>
-              <List.Description>{preview.candidateScore}/100</List.Description>
-            </List.Item>
-          )}
-        </List>
-        {preview.warnings.length > 0 && (
-          <div className="search-action-preview-warnings">
-            {preview.warnings.map((warning) => (
-              <Label
-                color="orange"
-                key={warning}
-                size="small"
-              >
-                {warning}
-              </Label>
-            ))}
-          </div>
-        )}
-        <pre className="search-action-preview-text">
-          {formatSearchActionPreview(preview)}
-        </pre>
-      </Modal.Content>
-      <Modal.Actions>
-        <Popup
-          content="Copy this planned action summary so you can review or export it before downloading."
-          position="top center"
-          trigger={
-            <Button
-              icon="copy"
-              onClick={() => this.copyPreview(preview)}
-            />
-          }
-        />
-        <Button onClick={() => this.setState({ previewOpen: false })}>
-          Close
-        </Button>
-      </Modal.Actions>
-    </Modal>
+      preview={preview}
+      selectedSize={selectedSize}
+    />
   );
 
   renderDownloadAction = (

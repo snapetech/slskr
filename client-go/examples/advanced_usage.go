@@ -23,7 +23,7 @@ func searchWithContext(ctx context.Context, client *slskr.Client, query string) 
 	return client.CreateSearch(ctx, query)
 }
 
-func concurrentSearches(ctx context.Context, client *slskr.Client, queries []string) {
+func concurrentSearches(ctx context.Context, client *slskr.Client, queries []string) []string {
 	var wg sync.WaitGroup
 	results := make(chan map[string]interface{}, len(queries))
 
@@ -46,11 +46,16 @@ func concurrentSearches(ctx context.Context, client *slskr.Client, queries []str
 	}()
 
 	count := 0
+	searchIDs := make([]string, 0, len(queries))
 	for result := range results {
 		count++
+		if searchID, ok := result["id"].(string); ok && searchID != "" {
+			searchIDs = append(searchIDs, searchID)
+		}
 		fmt.Printf("Search created: %v\n", result["id"])
 	}
 	fmt.Printf("Completed %d/%d searches\n", count, len(queries))
+	return searchIDs
 }
 
 func listAllResults(ctx context.Context, client *slskr.Client, searchID string) {
@@ -59,22 +64,23 @@ func listAllResults(ctx context.Context, client *slskr.Client, searchID string) 
 	total := 0
 
 	for {
-		result, err := client.ListSearches(ctx, limit, offset)
+		result, err := client.GetSearchDetails(ctx, searchID, limit, offset)
 		if err != nil {
 			fmt.Printf("Error fetching results: %v\n", err)
 			break
 		}
 
-		if len(result) == 0 {
+		page, ok := result["results"].([]interface{})
+		if !ok || len(page) == 0 {
 			break
 		}
 
-		total += len(result)
-		offset += len(result)
+		total += len(page)
+		offset += len(page)
 
-		fmt.Printf("Fetched %d results (total: %d)...\n", len(result), total)
+		fmt.Printf("Fetched %d results (total: %d)...\n", len(page), total)
 
-		if len(result) < limit {
+		if len(page) < limit {
 			break
 		}
 	}
@@ -140,12 +146,12 @@ func main() {
 
 	ctx := context.Background()
 
-	fmt.Println("=== Advanced Usage Examples ===\n")
+	fmt.Println("=== Advanced Usage Examples ===")
 
 	// Example 1: Concurrent searches
 	fmt.Println("1. Concurrent Searches")
 	queries := []string{"beethoven", "mozart", "bach", "brahms"}
-	concurrentSearches(ctx, client, queries)
+	searchIDs := concurrentSearches(ctx, client, queries)
 
 	// Example 2: Batch operations
 	fmt.Println("\n2. Batch Operations")
@@ -156,7 +162,9 @@ func main() {
 
 	// Example 4: List all with pagination
 	fmt.Println("\n4. Pagination Example")
-	listAllResults(ctx, client, "")
+	if len(searchIDs) > 0 {
+		listAllResults(ctx, client, searchIDs[0])
+	}
 
 	// Example 5: Room operations
 	fmt.Println("\n5. Room Operations")

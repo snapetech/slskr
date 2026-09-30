@@ -224,7 +224,7 @@ func transferOperations(ctx context.Context, client *slskr.Client) int {
 			break
 		}
 		if filename, ok := t["filename"].(string); ok {
-			if progress, ok := t["progress"].(float64); ok {
+			if progress, ok := t["progress_percent"].(float64); ok {
 				fmt.Printf("  - %s: %.0f%%\n", filename, progress)
 			}
 		}
@@ -287,7 +287,7 @@ func websocketMonitoring(ctx context.Context, client *slskr.Client, duration tim
 	}
 	defer ws.Disconnect(ctx)
 
-	ws.Subscribe("messages", "search_updates", "transfer_updates")
+	ws.Subscribe("message.received", "search.result", "transfer.started")
 	fmt.Printf("Subscribed to topics: %v\n", ws.GetSubscribedTopics())
 
 	time.Sleep(duration)

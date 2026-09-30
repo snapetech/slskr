@@ -38,12 +38,14 @@ const probeConcurrency = Number.isInteger(requestedConcurrency) && requestedConc
   : 8;
 
 function controllerFiles() {
+  // Stable file order preserves last-declaration precedence for duplicate routes.
   return execFileSync('rg', ['--files', controllerRoot, '-g', '*Controller.cs'], {
     encoding: 'utf8',
   })
     .trim()
     .split('\n')
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort();
 }
 
 function normalizeRoute(route, controllerName) {

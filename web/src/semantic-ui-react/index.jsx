@@ -337,12 +337,30 @@ export const Icon = React.forwardRef((props, ref) => {
     name,
     ...rest
   } = props;
+  const interactive = Component === 'i' && typeof rest.onClick === 'function';
+  const componentProps = cleanProps(rest);
+  if (interactive) {
+    componentProps.role = componentProps.role || 'button';
+    componentProps.tabIndex = componentProps.tabIndex ?? 0;
+  }
+  const handleKeyDown = (event) => {
+    if (rest.onKeyDown) rest.onKeyDown(event);
+    if (
+      interactive &&
+      !event.defaultPrevented &&
+      (event.key === 'Enter' || event.key === ' ')
+    ) {
+      event.preventDefault();
+      rest.onClick(event);
+    }
+  };
 
   return (
     <Component
-      {...cleanProps(rest)}
-      aria-hidden={props['aria-label'] ? undefined : true}
+      {...componentProps}
+      aria-hidden={props['aria-label'] || interactive ? undefined : true}
       className={cx(name, commonClasses(props), 'icon', className)}
+      onKeyDown={handleKeyDown}
       ref={ref}
     >
       {childrenOrContent(children, content)}
@@ -574,8 +592,24 @@ Menu.Item = React.forwardRef((props, ref) => {
   } = props;
   const menuProps = cleanProps(rest);
   if (href) menuProps.href = href;
-  if (onClick && Component === 'div') menuProps.role = menuProps.role || 'button';
+  const interactiveDiv = onClick && Component === 'div';
+  if (interactiveDiv) {
+    menuProps.role = menuProps.role || 'button';
+    menuProps.tabIndex = menuProps.tabIndex ?? 0;
+  }
   if (name) menuProps.name = name;
+
+  const handleKeyDown = (event) => {
+    if (rest.onKeyDown) rest.onKeyDown(event);
+    if (
+      interactiveDiv &&
+      !event.defaultPrevented &&
+      (event.key === 'Enter' || event.key === ' ')
+    ) {
+      event.preventDefault();
+      if (!disabled) onClick(event);
+    }
+  };
 
   return (
     <Component
@@ -583,6 +617,7 @@ Menu.Item = React.forwardRef((props, ref) => {
       aria-disabled={disabled || undefined}
       className={cx('item', commonClasses(props), className)}
       onClick={disabled ? undefined : onClick}
+      onKeyDown={handleKeyDown}
       ref={ref}
     >
       {icon ? <Icon name={icon} /> : null}

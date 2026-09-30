@@ -42,6 +42,25 @@ const routes = [
   ['/system', 'System', 'system'],
 ];
 
+const apiRequestCountBudgets = new Map([
+  ['/searches', 14],
+  ['/discovery-graph', 13],
+  ['/playlist-intake', 19],
+  ['/wishlist', 11], // Includes the search action and its follow-up list refresh.
+  ['/downloads', 14],
+  ['/uploads', 14],
+  ['/messages', 13],
+  ['/users', 16],
+  ['/contacts', 15],
+  ['/solid', 20],
+  ['/collections', 21], // Successful GET actions display their response without reloading route data.
+  ['/sharegroups', 20],
+  ['/shared', 20],
+  ['/browse', 8],
+  ['/system', 39],
+]);
+const MIN_REPEATED_API_REQUEST_INTERVAL_MS = 200;
+
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.html', 'text/html; charset=utf-8'],
@@ -187,6 +206,12 @@ const browser = await chromium.launch({
 });
 const audit = {
   apiResponses: [],
+  apiRequestBudget: {
+    enabled: !liveBackendUrl && auditScenario === 'success' && settleMs === 500,
+    maximumByRoute: Object.fromEntries(apiRequestCountBudgets),
+    minimumRepeatedEndpointIntervalMs: MIN_REPEATED_API_REQUEST_INTERVAL_MS,
+    settleMs,
+  },
   evidenceMode: liveBackendUrl ? 'live' : 'mock',
   errors: [],
   generatedAt: new Date().toISOString(),
@@ -203,6 +228,8 @@ try {
     ]) {
       const page = await browser.newPage({ viewport });
       const pageErrors = [];
+      const apiRequests = [];
+      const pageStartedAt = performance.now();
       page.on('pageerror', (error) => pageErrors.push(error.message));
       page.on('console', (message) => {
         if (message.type() === 'error' && !message.text().includes('Failed to load resource')) {
@@ -210,9 +237,14 @@ try {
         }
       });
       await page.route('**/api/**', async (route) => {
+        const request = route.request();
+        const requestedUrl = new URL(request.url());
+        apiRequests.push({
+          method: request.method(),
+          path: requestedUrl.pathname,
+          requestedAt: performance.now(),
+        });
         if (!liveBackendUrl) {
-          const request = route.request();
-          const requestedUrl = new URL(request.url());
           const key = `${request.method()} ${requestedUrl.pathname}`;
           if (auditScenario === 'authorization-reconnect-and-restart') {
             const attempt = (scenarioAttempts.get(key) || 0) + 1;
@@ -224,8 +256,6 @@ try {
           return route.fulfill(json(mockBody(requestedUrl.pathname)));
         }
 
-        const request = route.request();
-        const requestedUrl = new URL(request.url());
         const targetUrl = `${liveBackendUrl}${requestedUrl.pathname}${requestedUrl.search}`;
         const headers = Object.fromEntries(
           Object.entries(request.headers()).filter(
@@ -318,8 +348,36 @@ try {
           playerHeight: playerBox?.height || 0,
         };
       });
+      const requestsByEndpoint = new Map();
+      for (const request of apiRequests) {
+        const key = `${request.method} ${request.path}`;
+        const endpointRequests = requestsByEndpoint.get(key) || [];
+        endpointRequests.push(request.requestedAt);
+        requestsByEndpoint.set(key, endpointRequests);
+      }
+      const apiRequestMetrics = [...requestsByEndpoint.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([endpoint, requestedAt]) => {
+          const intervals = requestedAt
+            .slice(1)
+            .map((timestamp, index) => timestamp - requestedAt[index]);
+          return {
+            endpoint,
+            count: requestedAt.length,
+            minimumIntervalMs: intervals.length
+              ? Number(Math.min(...intervals).toFixed(1))
+              : null,
+          };
+        });
+      const initialApiRequestCount = apiRequests.filter(
+        (request) => request.requestedAt - pageStartedAt <= 500,
+      ).length;
 
       const routeResult = {
+        initialApiRequestCount,
+        apiRequestCount: apiRequests.length,
+        apiRequestCountBudget: apiRequestCountBudgets.get(path) ?? null,
+        apiRequestMetrics,
         developerOpen,
         heading,
         inspectorCount,
@@ -336,6 +394,25 @@ try {
         viewport: viewport.name,
       };
       audit.routes.push(routeResult);
+
+      if (audit.apiRequestBudget.enabled) {
+        const apiRequestCountBudget = apiRequestCountBudgets.get(path);
+        if (routeResult.apiRequestCount > apiRequestCountBudget) {
+          audit.errors.push(
+            `${path} ${viewport.name}: API request count ${routeResult.apiRequestCount} exceeds the ${apiRequestCountBudget}-request route budget`,
+          );
+        }
+        for (const metric of apiRequestMetrics) {
+          if (
+            metric.minimumIntervalMs !== null &&
+            metric.minimumIntervalMs < MIN_REPEATED_API_REQUEST_INTERVAL_MS
+          ) {
+            audit.errors.push(
+              `${path} ${viewport.name}: ${metric.endpoint} repeated after ${metric.minimumIntervalMs} ms, below the ${MIN_REPEATED_API_REQUEST_INTERVAL_MS} ms cadence budget`,
+            );
+          }
+        }
+      }
 
       if (heading !== title) audit.errors.push(`${path} ${viewport.name}: expected heading ${title}, got ${heading}`);
       if (developerOpen) audit.errors.push(`${path} ${viewport.name}: Developer drawer is open by default`);

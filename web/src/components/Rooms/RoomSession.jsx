@@ -2,6 +2,12 @@ import * as rooms from '../../lib/rooms';
 import { createRoomsHubConnection } from '../../lib/hubFactory';
 import { createPollingController } from '../../lib/usePolling';
 import { toDisplayError } from '../../lib/errors';
+import {
+  historyCursor,
+  isAbortError,
+  mergeMessageHistory,
+  messageKey,
+} from '../../lib/messageHistory';
 import React, { Component, createRef } from 'react';
 import UserCard from '../Shared/UserCard';
 import {
@@ -38,6 +44,8 @@ const normalizeRoom = (messages, users) => ({
     .filter((user) => user.username !== 'Unknown peer'),
 });
 
+const MAX_ROOM_MESSAGES = 1_000;
+
 const initialState = {
   contextMenu: {
     message: null,
@@ -64,6 +72,10 @@ class RoomSession extends Component {
     this.messageRef = undefined;
     this.roomsHub = undefined;
     this.pollController = null;
+    this.roomAbortController = null;
+    this.roomInFlight = null;
+    this.roomRequestName = null;
+    this.roomCursor = null;
     this.isMountedFlag = false;
     this.requestIds = {
       fetch: 0,
@@ -85,6 +97,8 @@ class RoomSession extends Component {
     this.isMountedFlag = false;
     this.requestIds.fetch += 1;
     this.requestIds.send += 1;
+    this.roomCursor = null;
+    this.abortRoomRequest();
     this.stopPolling();
     document.removeEventListener('click', this.handleCloseContextMenu);
   }
@@ -93,6 +107,8 @@ class RoomSession extends Component {
     if (previousProps.roomName !== this.props.roomName) {
       this.requestIds.fetch += 1;
       this.requestIds.send += 1;
+      this.roomCursor = null;
+      this.abortRoomRequest();
       this.setState(initialState, () => {
         if (!this.isMountedFlag) return;
         if (this.props.active !== false) {
@@ -150,51 +166,92 @@ class RoomSession extends Component {
     }
   };
 
-  fetchRoom = async () => {
+  abortRoomRequest = () => {
+    this.roomAbortController?.abort();
+    this.roomAbortController = null;
+  };
+
+  fetchRoom = () => {
     const { roomName } = this.props;
+    if (!this.isMountedFlag || !roomName || roomName.length === 0) {
+      return Promise.resolve();
+    }
+
+    if (this.roomInFlight && this.roomRequestName === roomName) {
+      return this.roomInFlight;
+    }
+
+    this.abortRoomRequest();
     const requestId = ++this.requestIds.fetch;
     const requestedRoomName = roomName;
+    const since = this.roomCursor !== null ? this.roomCursor : null;
+    const controller = new AbortController();
+    this.roomAbortController = controller;
+    this.roomRequestName = requestedRoomName;
+    let request;
 
-    if (!this.isMountedFlag || !roomName || roomName.length === 0) return;
+    request = (async () => {
+      this.setState({ error: null, loading: true });
 
-    this.setState({ error: null, loading: true });
-
-    try {
-      const messages = await rooms.getMessages({ roomName });
-      if (
-        !this.isMountedFlag ||
+      try {
+        const [messages, users] = await Promise.all([
+          rooms.getMessages({
+            ...(since === null ? {} : { since }),
+            roomName,
+            signal: controller.signal,
+          }),
+          rooms.getUsers({ roomName, signal: controller.signal }),
+        ]);
+        if (
+          !this.isMountedFlag ||
         requestId !== this.requestIds.fetch ||
         this.props.roomName !== requestedRoomName
-      ) {
-        return;
-      }
-      const users = await rooms.getUsers({ roomName });
-      if (
-        !this.isMountedFlag ||
-        requestId !== this.requestIds.fetch ||
-        this.props.roomName !== requestedRoomName
-      ) {
-        return;
-      }
+        ) {
+          return;
+        }
+        const normalizedMessages = asRecords(messages).map(normalizeRoomMessage);
+        const roomMessages = mergeMessageHistory(
+          since === null ? [] : this.state.room.messages,
+          normalizedMessages,
+          MAX_ROOM_MESSAGES,
+        );
+        const incomingCursor = historyCursor(normalizedMessages);
+        this.roomCursor =
+          incomingCursor === null
+            ? since
+            : Math.max(since ?? incomingCursor, incomingCursor);
 
-      this.setState({
-        error: null,
-        loading: false,
-        room: normalizeRoom(messages, users),
-      });
-    } catch (error) {
-      console.error('Failed to fetch room data:', error);
-      if (
-        this.isMountedFlag &&
-        requestId === this.requestIds.fetch &&
-        this.props.roomName === requestedRoomName
-      ) {
         this.setState({
-          error: toDisplayError(error, 'Failed to load room'),
+          error: null,
           loading: false,
+          room: normalizeRoom(roomMessages, users),
         });
+      } catch (error) {
+        if (isAbortError(error, controller.signal)) return;
+        console.error('Failed to fetch room data:', error);
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.fetch &&
+          this.props.roomName === requestedRoomName
+        ) {
+          this.setState({
+            error: toDisplayError(error, 'Failed to load room'),
+            loading: false,
+          });
+        }
+      } finally {
+        if (this.roomInFlight === request) {
+          this.roomInFlight = null;
+          this.roomRequestName = null;
+          if (this.roomAbortController === controller) {
+            this.roomAbortController = null;
+          }
+        }
       }
-    }
+    })();
+
+    this.roomInFlight = request;
+    return request;
   };
 
   validInput = () =>
@@ -414,7 +471,7 @@ class RoomSession extends Component {
                         <List>
                           {room.messages.map((message) => (
                             <div
-                              key={`${message.timestamp}+${message.message}`}
+                              key={messageKey(message)}
                               onContextMenu={(clickEvent) =>
                                 this.handleContextMenu(clickEvent, message)
                               }

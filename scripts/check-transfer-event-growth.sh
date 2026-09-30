@@ -19,7 +19,8 @@ for expected in \
 do
   if ! rg -n -F "$expected" \
     crates/slskr/src/lib.rs \
-    crates/slskr/src/controller_tests.rs >/dev/null; then
+    crates/slskr/src/transfer_state_io.rs \
+    crates/slskr/src/controller_tests >/dev/null; then
     printf 'transfer event growth check failed: expected rotation token missing: %s\n' "$expected" >&2
     status=1
   fi

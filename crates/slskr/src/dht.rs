@@ -30,6 +30,8 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Rendezvous {
     client: AsyncDht,
     dht_backend: Option<SocketAddr>,
+    #[cfg(slskr_mainline_outbound_socket)]
+    shared_udp_ingress: Option<mainline::SharedUdpIngress>,
     shared_udp_socket: Option<Arc<UdpSocket>>,
     shared_public_port: Option<u16>,
     overlay_port: AtomicU16,
@@ -61,14 +63,20 @@ impl Rendezvous {
         Self::new_with_shared_udp(settings, false)
     }
 
-    /// Build the rendezvous node with an internal UDP endpoint when the
-    /// public DHT port is shared with overlay traffic.  The gateway owns the
-    /// public socket and forwards only DHT-shaped datagrams to this endpoint;
-    /// the normal standalone configuration continues to bind the configured
-    /// port directly.
+    /// Build the rendezvous node on the shared public UDP socket.
+    /// The gateway owns reads and supplies bounded in-process datagrams with
+    /// their original peer identity. Standalone mode binds its configured port.
     pub fn new_with_shared_udp(
         settings: &crate::config::DhtSettings,
         shared_udp: bool,
+    ) -> Result<Self, String> {
+        Self::new_with_udp_socket(settings, shared_udp, None)
+    }
+
+    pub fn new_with_udp_socket(
+        settings: &crate::config::DhtSettings,
+        shared_udp: bool,
+        public_socket: Option<Arc<UdpSocket>>,
     ) -> Result<Self, String> {
         let bootstrap = settings
             .bootstrap_routers
@@ -92,6 +100,7 @@ impl Rendezvous {
                 .max(settings.cold_bootstrap_timeout),
             settings.min_neighbors,
             shared_udp,
+            public_socket,
         )
     }
 
@@ -110,6 +119,7 @@ impl Rendezvous {
             LOOKUP_TIMEOUT,
             3,
             false,
+            None,
         )
     }
 
@@ -122,40 +132,54 @@ impl Rendezvous {
         lookup_timeout: Duration,
         min_neighbors: usize,
         shared_udp: bool,
+        public_socket: Option<Arc<UdpSocket>>,
     ) -> Result<Self, String> {
+        #[cfg(not(slskr_mainline_outbound_socket))]
+        if shared_udp {
+            return Err("single-port DHT requires the bundled shared UDP transport".to_owned());
+        }
         let shared_udp_socket = if shared_udp {
-            let socket = UdpSocket::bind(SocketAddr::new(
-                std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                port,
-            ))
-            .map_err(|error| format!("shared DHT UDP bind failed: {error}"))?;
+            let socket = match public_socket {
+                Some(socket) => socket,
+                None => Arc::new(
+                    UdpSocket::bind(SocketAddr::new(
+                        std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                        port,
+                    ))
+                    .map_err(|error| format!("shared DHT UDP bind failed: {error}"))?,
+                ),
+            };
             socket
                 .set_nonblocking(true)
                 .map_err(|error| format!("shared DHT UDP nonblocking setup failed: {error}"))?;
-            Some(Arc::new(socket))
+            Some(socket)
         } else {
             None
         };
         let mut builder = Dht::builder();
         builder
             .bind_address(Ipv4Addr::UNSPECIFIED)
-            // mainline owns this endpoint.  A zero port lets the public
-            // gateway demuxer retain the configured DHT port for QUIC and
-            // overlay traffic without competing for the same UDP socket.
+            // Shared mode supplies the existing socket and bounded ingress;
+            // the builder's port is used only by the standalone socket path.
             .port(if shared_udp { 0 } else { port });
         #[cfg(slskr_mainline_outbound_socket)]
-        if let Some(socket) = shared_udp_socket.as_ref() {
-            builder.outbound_socket(Arc::clone(socket));
-        }
+        let shared_udp_ingress = shared_udp_socket
+            .as_ref()
+            .map(|socket| builder.shared_udp_socket(Arc::clone(socket)));
         if let Some(bootstrap) = bootstrap {
             builder.bootstrap(bootstrap);
+        }
+        // LAN-only nodes have no external bootstrap observations that could
+        // promote the library to server mode; they must serve local peers.
+        if lan_only {
+            builder.server_mode();
         }
         #[allow(deprecated)]
         let dht = builder
             .build()
             .map_err(|error| format!("DHT bind failed: {error}"))?;
         #[allow(deprecated)]
-        let dht_backend = shared_udp.then(|| SocketAddr::V4(dht.info().local_addr()));
+        let dht_backend = None;
         let shared_public_port = shared_udp_socket
             .as_ref()
             .and_then(|socket| socket.local_addr().ok())
@@ -173,6 +197,8 @@ impl Rendezvous {
             peers: RwLock::new(BTreeSet::new()),
             status: RwLock::new(Status::default()),
             dht_backend,
+            #[cfg(slskr_mainline_outbound_socket)]
+            shared_udp_ingress,
             shared_udp_socket,
         })
     }
@@ -271,11 +297,22 @@ impl Rendezvous {
             .collect()
     }
 
-    /// Return the internal mainline endpoint that receives DHT datagrams
-    /// from the public shared-port demuxer, when shared UDP mode is active.
+    /// Return a legacy forwarding endpoint, if present.
+    /// The in-process shared transport needs no dedicated receive endpoint.
     #[must_use]
     pub fn shared_udp_backend(&self) -> Option<SocketAddr> {
         self.dht_backend
+    }
+
+    /// Supply a shared-port datagram without changing its remote identity.
+    /// Admission is bounded and nonblocking; unsupported or full input drops.
+    pub fn accept_shared_udp_datagram(&self, packet: &[u8], remote: SocketAddr) -> bool {
+        #[cfg(slskr_mainline_outbound_socket)]
+        if let (Some(ingress), SocketAddr::V4(peer)) = (&self.shared_udp_ingress, remote) {
+            return ingress.try_send(packet, peer).is_ok();
+        }
+        let _ = (packet, remote);
+        false
     }
 
     /// Return the public UDP socket used for outbound DHT traffic in shared
@@ -383,10 +420,108 @@ mod tests {
         assert!(valid_peer("127.0.0.1:50305".parse().unwrap(), true));
     }
 
+    #[cfg(slskr_mainline_outbound_socket)]
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn shared_udp_ping_reply_reaches_original_remote_peer() {
+        let public = Arc::new(UdpSocket::bind("127.0.0.1:0").unwrap());
+        public.set_nonblocking(true).unwrap();
+        let public_address = public.local_addr().unwrap();
+        let public_reader = tokio::net::UdpSocket::from_std(public.try_clone().unwrap()).unwrap();
+        let mut builder = Dht::builder();
+        builder
+            .bind_address(Ipv4Addr::LOCALHOST)
+            .port(0)
+            .server_mode()
+            .bootstrap(&[] as &[&str]);
+        let ingress = builder.shared_udp_socket(Arc::clone(&public));
+        let node = builder.build().unwrap();
+        let remote = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let request = b"d1:ad2:id20:AAAAAAAAAAAAAAAAAAAAe1:q4:ping1:t4:aaaa1:y1:qe";
+        remote.send_to(request, public_address).await.unwrap();
+        let mut buffer = [0_u8; 2048];
+        let (length, original_peer) = public_reader.recv_from(&mut buffer).await.unwrap();
+        assert_eq!(original_peer, remote.local_addr().unwrap());
+        assert_eq!(node.info().local_addr().port(), public_address.port());
+        let SocketAddr::V4(original_peer) = original_peer else {
+            panic!("IPv4 fixture peer");
+        };
+        ingress.try_send(&buffer[..length], original_peer).unwrap();
+        let (length, source) =
+            tokio::time::timeout(Duration::from_secs(1), remote.recv_from(&mut buffer))
+                .await
+                .expect("DHT reply must reach the original remote through the shared socket")
+                .unwrap();
+        assert_eq!(source, public_address);
+        assert!(buffer[..length]
+            .windows(9)
+            .any(|bytes| bytes == b"1:t4:aaaa"));
+        assert!(buffer[..length].windows(6).any(|bytes| bytes == b"1:y1:r"));
+    }
+
+    #[cfg(slskr_mainline_outbound_socket)]
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn legacy_shared_udp_forwarding_sends_reply_to_forwarder() {
+        let public = Arc::new(UdpSocket::bind("127.0.0.1:0").unwrap());
+        public.set_nonblocking(true).unwrap();
+        let public_address = public.local_addr().unwrap();
+        let mut builder = Dht::builder();
+        builder
+            .bind_address(Ipv4Addr::LOCALHOST)
+            .port(0)
+            .server_mode()
+            .bootstrap(&[] as &[&str]);
+        builder.outbound_socket(Arc::clone(&public));
+        let node = builder.build().unwrap();
+        let forwarder = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let request = b"d1:ad2:id20:AAAAAAAAAAAAAAAAAAAAe1:q4:ping1:t4:aaaa1:y1:qe";
+        forwarder
+            .send_to(request, node.info().local_addr())
+            .await
+            .unwrap();
+        let mut buffer = [0_u8; 2048];
+        let (length, source) =
+            tokio::time::timeout(Duration::from_secs(1), forwarder.recv_from(&mut buffer))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(source, public_address);
+        assert!(buffer[..length]
+            .windows(9)
+            .any(|bytes| bytes == b"1:t4:aaaa"));
+        assert!(buffer[..length].windows(6).any(|bytes| bytes == b"1:y1:r"));
+    }
+
+    #[cfg(slskr_mainline_outbound_socket)]
     #[test]
-    fn shared_udp_mode_moves_mainline_to_a_bounded_internal_endpoint() {
+    fn shared_udp_ingress_bounds_packets_queue_and_closed_admission() {
+        let public = Arc::new(UdpSocket::bind("127.0.0.1:0").unwrap());
+        let mut builder = Dht::builder();
+        let ingress = builder.shared_udp_socket(public);
+        let peer = "127.0.0.1:50000".parse().unwrap();
+        assert_eq!(
+            ingress.try_send(&[0; 2_049], peer).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        for _ in 0..256 {
+            ingress.try_send(b"d", peer).unwrap();
+        }
+        assert_eq!(
+            ingress.try_send(b"d", peer).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        drop(builder);
+        assert_eq!(
+            ingress.try_send(b"d", peer).unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+    }
+
+    #[test]
+    fn shared_udp_mode_needs_no_dedicated_mainline_endpoint() {
         let rendezvous = Rendezvous::with_runtime_builder(
-            50_300,
+            0,
             Some(50_305),
             Some(&[]),
             true,
@@ -394,19 +529,23 @@ mod tests {
             LOOKUP_TIMEOUT,
             3,
             true,
+            None,
         )
         .unwrap();
-        let backend = rendezvous
-            .shared_udp_backend()
-            .expect("shared mode has a mainline backend");
-        assert_ne!(backend.port(), 50_300);
-        assert_ne!(backend.port(), 0);
+        assert!(rendezvous.shared_udp_backend().is_none());
+        let public_port = rendezvous
+            .shared_udp_socket()
+            .expect("shared mode has a public socket")
+            .local_addr()
+            .unwrap()
+            .port();
+        assert_ne!(public_port, 0);
     }
 
     #[test]
     fn shared_udp_mode_exposes_the_public_socket_port() {
         let rendezvous = Rendezvous::with_runtime_builder(
-            50_301,
+            0,
             Some(50_305),
             Some(&[]),
             true,
@@ -414,13 +553,16 @@ mod tests {
             LOOKUP_TIMEOUT,
             3,
             true,
+            None,
         )
         .unwrap();
         let public_socket = rendezvous
             .shared_udp_socket()
             .expect("shared mode has a public socket");
-        assert_eq!(public_socket.local_addr().unwrap().port(), 50_301);
-        assert_ne!(rendezvous.shared_udp_backend().unwrap().port(), 50_301);
+        let public_port = public_socket.local_addr().unwrap().port();
+        assert_ne!(public_port, 0);
+        assert_eq!(rendezvous.shared_public_port, Some(public_port));
+        assert!(rendezvous.shared_udp_backend().is_none());
     }
 
     #[tokio::test]

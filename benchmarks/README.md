@@ -1,5 +1,10 @@
 # Runtime benchmarks
 
+Status: diagnostic-only. These commands are explicit, operator-run
+measurements; the repository does not claim a nightly baseline or a CI timing
+threshold until a retained workload artifact is produced for the target
+environment.
+
 The maintained HTTP benchmark is [`scripts/benchmark-http.py`](../scripts/benchmark-http.py).
 It talks to a real running daemon and emits JSON with status counts, errors,
 throughput, and bounded latency samples.
@@ -55,3 +60,71 @@ so index or query changes can be evaluated against the same database shape.
 
 The old standalone `benchmarks/benchmark.rs` simulated requests and was not a
 valid performance measurement; it has been removed.
+
+The file-transfer payload harness compares the former per-chunk `flush` path
+with the current writer over real loopback TCP sockets. It validates received
+plain and obfuscated payloads and reports bounded throughput samples. Tokio's
+`TcpStream::flush` is a no-op, so results measure only local method-call and
+scheduling effects; they do not establish throughput changes with remote peers.
+
+```bash
+cargo bench --locked -p slskr-client --bench file_transfer_payload -- \
+  --mib 64 \
+  --chunk-bytes 81920 \
+  --trials 5 \
+  --output benchmarks/artifacts/file-transfer-loopback.json
+```
+
+Keep a copy of the complete JSON output with any before/after report. Record
+the toolchain and host conditions alongside it; compare only artifacts from
+the same machine and workload. Cargo runs this harness from the
+`crates/slskr-client` package directory, so relative `--output` paths resolve
+there.
+
+For the RF-021 SQLite indexes, the synthetic cardinality harness creates
+production-shaped tables, compares the existing indexes with the retained
+transfer/webhook composites, and profiles first and deep pages. Its generated
+rows are diagnostic; production database cardinality and the daemon's bundled
+SQLite version are separate evidence.
+
+```bash
+python3 benchmarks/benchmark-sqlite-cardinality.py \
+  --output benchmarks/artifacts/sqlite-cardinality.json
+```
+
+The RF-046 search-response diagnostic compares the current fingerprint bucket
+with the former linear equality scan using 900 seeded responses, 11 files per
+response, and 900 duplicates of the final seeded response. The benchmark uses
+the production `SearchResults` acceptance path for the current implementation
+and a direct `Vec::contains` reference for the former comparison. It is
+diagnostic only and sets no CI timing threshold.
+
+```bash
+cargo bench --locked -p slskr-client --bench search_response_dedup -- \
+  --output benchmarks/artifacts/search-response-dedup.json
+```
+
+The RF-038 share-cache diagnostic compares the production writer with its
+previous `replace`/`format!`/`Vec<String>` serializer. It generates 50,000 file
+entries with a bounded mix of tabs, newlines, and backslashes, verifies that
+both implementations produce identical bytes, and records allocation calls,
+requested bytes, and elapsed time. It requires no daemon, network, or database
+and is not a CI threshold.
+
+```bash
+cargo run --locked -p slskr --features rf-benchmarks \
+  --example share_cache_allocations -- \
+  --output benchmarks/artifacts/share-cache-allocations.json
+```
+
+The RF-045 diagnostic replays a 10,000-result search projection in 50 batches
+through both the current delta-append writer and the former full-projection
+rewrite. It also kills a child process after committed writes and checks the
+projection after reopening the database. The workload uses temporary in-memory
+or local SQLite databases and opens no network listener.
+
+```bash
+cargo run --locked -p slskr --features rf-benchmarks \
+  --example search_result_delta -- \
+  --output benchmarks/artifacts/search-result-delta.json
+```

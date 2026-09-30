@@ -4,6 +4,10 @@
   "description": "TypeScript/JavaScript client library for the slskr HTTP API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "jest",
@@ -21,6 +25,9 @@
   ],
   "author": "slskr contributors",
   "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=18"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/jest": "^30.0.0",
@@ -44,6 +51,6 @@
   "overrides": {
     "glob": "^13.0.6",
     "js-yaml": "^4.3.1",
-    "brace-expansion": "5.0.9"
+    "brace-expansion": "5.0.12"
   }
 }

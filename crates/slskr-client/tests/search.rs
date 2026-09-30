@@ -315,6 +315,27 @@ fn search_results_deduplicate_replayed_responses_after_per_response_truncation()
 }
 
 #[test]
+fn search_results_use_exact_equality_after_fingerprint_bucket_lookup() {
+    let mut results = SearchResults::new();
+    let mut original = response("alice", 10);
+    original.results.push(entry("file.flac"));
+    let mut distinct = original.clone();
+    distinct.results[0].size = 99;
+
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(original.clone()))
+        .unwrap());
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(distinct.clone()))
+        .unwrap());
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(original))
+        .unwrap());
+    assert_eq!(results.len_for(10), 2);
+    assert_eq!(results.responses_for(10)[1], distinct);
+}
+
+#[test]
 fn search_results_release_truncated_vector_capacity() {
     let mut results = SearchResults::new();
     let mut full = response("first", 10);

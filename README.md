@@ -32,6 +32,10 @@ metadata, integrations, and mesh/federation surfaces should be treated as
 configuration-dependent or experimental unless the linked docs and tests say
 otherwise.
 
+For a guided first run, see [Getting Started](./docs/getting-started.md). The
+[feature guide](./docs/FEATURES.md) and [status guide](./docs/status.md)
+describe current capabilities and their setup requirements.
+
 ## Table Of Contents
 
 - [Screenshots](#screenshots)
@@ -140,6 +144,10 @@ OpenAPI and detailed endpoint docs live in:
 - [docs/http-api-features.md](./docs/http-api-features.md)
 - [docs/openapi.json](./docs/openapi.json)
 - [docs/CLIENT_LIBRARIES.md](./docs/CLIENT_LIBRARIES.md)
+
+See [Features](./docs/FEATURES.md) for a product-level map and
+[Status and support boundaries](./docs/status.md) for optional and
+compatibility-only surfaces.
 
 ### Integrations
 
@@ -280,9 +288,9 @@ Common settings:
 | `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
 | `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |
 | `SLSKR_ADVERTISED_PORT` | Public regular peer port advertised to the network. |
-| `SLSKR_OBFUSCATED_LISTENER_BIND` | Native profile only: optional type-1 obfuscated peer listener bind address. |
-| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | Native profile only: public type-1 obfuscated peer port. |
-| `SLSK_OBFUSCATION_MODE` | Native profile only: outbound dial posture, regular-first `compatibility` (default) or obfuscated-first `prefer`. |
+| `SLSKR_OBFUSCATED_LISTENER_BIND` | Frozen compatibility profiles only; native/current traffic shares the regular peer bind. |
+| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | Frozen compatibility profiles only; native/current requires the regular peer advertised port. |
+| `SLSK_OBFUSCATION_MODE` | Native/current outbound dial posture, regular-first `compatibility` (default) or obfuscated-first `prefer`; both retain fallback. |
 | `SLSKR_TRANSFER_MAX_ACTIVE` | Maximum active transfers. |
 | `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
 | `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |
@@ -471,7 +479,10 @@ Deployment assets include:
 
 For container deployments, run the same command, `slskr serve`, mount config
 read-only, mount state read-write, and expose only the HTTP and peer listener
-ports you intend to publish.
+ports you intend to publish. Native/current peer services share one peer port
+number across TCP and UDP; DHT, mesh, and QUIC do not require separate public
+ports. The HTTP UI/API listener remains a separate application port. See
+[Architecture and network layout](./docs/architecture.md).
 
 ## Repository Layout
 
@@ -501,6 +512,12 @@ The table below links the maintained entry points most users need first.
 | Document | Purpose |
 | --- | --- |
 | [docs/README.md](./docs/README.md) | Full documentation index, status notes, and cross-links. |
+| [docs/getting-started.md](./docs/getting-started.md) | Install a release, start the daemon, connect, configure shares, and run a first search. |
+| [docs/FEATURES.md](./docs/FEATURES.md) | User-facing map of slskR feature areas. |
+| [docs/status.md](./docs/status.md) | Available, configured, compatibility-only, and limited behavior. |
+| [docs/configuration.md](./docs/configuration.md) | Config sources, defaults, credentials, network ports, and optional settings. |
+| [docs/architecture.md](./docs/architecture.md) | Main components, state ownership, and shared peer-port layout. |
+| [docs/troubleshooting.md](./docs/troubleshooting.md) | Common startup, auth, network, share, and transfer issues. |
 | [docs/install.md](./docs/install.md) | Build, install, config/state, service, container, and exposure runbook. |
 | [docs/app-surface.md](./docs/app-surface.md) | User-facing app surface and compatibility map. |
 | [web/README.md](./web/README.md) | React Web UI development, audit, build, and screenshot workflow. |

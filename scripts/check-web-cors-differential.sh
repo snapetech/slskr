@@ -54,6 +54,7 @@ write_config() {
   local methods="$6"
   local enforce_security="${7:-false}"
   mkdir -p "$state"
+  mkdir -p "$state/content"
   {
     printf '%s\n' \
       'flags:' \
@@ -389,7 +390,14 @@ run_watch_restart() {
 import json, sys
 options, application = json.loads(sys.argv[1]), json.loads(sys.argv[2])
 cors = options.get("web", {}).get("cors", {})
-raise SystemExit(0 if cors.get("allowedOrigins") == ["https://replacement.example"] and application.get("pendingRestart") is False else 1)
+expected = {
+    "enabled": True,
+    "allowCredentials": False,
+    "allowedOrigins": ["https://replacement.example"],
+    "allowedHeaders": ["X-Replacement"],
+    "allowedMethods": ["PATCH"],
+}
+raise SystemExit(0 if cors == expected and application.get("pendingRestart") is False else 1)
 PY
     then
       break

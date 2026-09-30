@@ -28,27 +28,27 @@ func main() {
 
 	// Create channels for events
 	messageCh := make(chan interface{}, 100)
-	searchUpdateCh := make(chan interface{}, 100)
-	transferUpdateCh := make(chan interface{}, 100)
+	searchResultCh := make(chan interface{}, 100)
+	transferStartedCh := make(chan interface{}, 100)
 	connectionCh := make(chan bool, 10)
 	errorCh := make(chan error, 10)
 
 	// Register listeners
-	ws.On("message", messageCh)
-	ws.On("search_update", searchUpdateCh)
-	ws.On("transfer_update", transferUpdateCh)
+	ws.On("message.received", messageCh)
+	ws.On("search.result", searchResultCh)
+	ws.On("transfer.started", transferStartedCh)
 	ws.OnConnectionChange(connectionCh)
 	ws.OnError(errorCh)
 
 	// Subscribe to topics
-	topics := []string{"messages", "search_updates", "transfer_updates"}
+	topics := []string{"message.received", "search.result", "transfer.started"}
 	err = ws.Subscribe(topics...)
 	if err != nil {
 		log.Fatalf("Error subscribing: %v", err)
 	}
 
 	fmt.Printf("Subscribed to topics: %v\n", ws.GetSubscribedTopics())
-	fmt.Println("Listening for events (press Ctrl+C to stop)...\n")
+	fmt.Println("Listening for events (press Ctrl+C to stop)...")
 
 	// Listen for events
 	ticker := time.NewTicker(10 * time.Second)
@@ -59,19 +59,21 @@ func main() {
 		select {
 		case event := <-messageCh:
 			if m, ok := event.(map[string]interface{}); ok {
-				fmt.Printf("Message from %v: %v\n", m["username"], m["content"])
+				data, _ := m["data"].(map[string]interface{})
+				fmt.Printf("Message from %v: %v\n", data["username"], data["body"])
 				eventCount++
 			}
 
-		case event := <-searchUpdateCh:
+		case event := <-searchResultCh:
 			if m, ok := event.(map[string]interface{}); ok {
-				fmt.Printf("Search update: %v - %v results\n", m["query"], m["result_count"])
+				fmt.Printf("Search result event: %v\n", m["data"])
 				eventCount++
 			}
 
-		case event := <-transferUpdateCh:
+		case event := <-transferStartedCh:
 			if m, ok := event.(map[string]interface{}); ok {
-				fmt.Printf("Transfer %v: %v - %v%%\n", m["id"], m["status"], m["progress"])
+				data, _ := m["data"].(map[string]interface{})
+				fmt.Printf("Transfer %v: %v - %v%%\n", data["id"], data["status"], data["progress_percent"])
 				eventCount++
 			}
 

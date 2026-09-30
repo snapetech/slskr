@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
     time::{Duration, Instant},
 };
 
@@ -322,6 +323,7 @@ fn bounded_search_field(value: String, field: &'static str) -> Result<String, Cl
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SearchResults {
     by_token: HashMap<u32, Vec<FileSearchResponse>>,
+    response_fingerprints: HashMap<u32, HashMap<u64, Vec<usize>>>,
     text_bytes_by_token: HashMap<u32, usize>,
     stored_files: usize,
     stored_text_bytes: usize,
@@ -364,7 +366,19 @@ impl SearchResults {
                 let remaining_per_response =
                     MAX_SEARCH_RESULT_FILES_PER_TOKEN.saturating_sub(response.results.len());
                 response.private_results.truncate(remaining_per_response);
-                if responses.is_some_and(|responses| responses.contains(&response)) {
+                let fingerprint = search_response_fingerprint(&response);
+                let duplicate = self
+                    .response_fingerprints
+                    .get(&response.token)
+                    .and_then(|fingerprints| fingerprints.get(&fingerprint))
+                    .is_some_and(|indices| {
+                        indices.iter().any(|index| {
+                            responses
+                                .and_then(|responses| responses.get(*index))
+                                .is_some_and(|stored| stored == &response)
+                        })
+                    });
+                if duplicate {
                     return Ok(true);
                 }
                 let stored_files = responses
@@ -407,10 +421,19 @@ impl SearchResults {
                 self.stored_files += response_files;
                 self.stored_text_bytes = total_stored_text_bytes;
                 self.stored_responses += 1;
-                self.by_token
-                    .entry(response.token)
+                let response_token = response.token;
+                let response_index = {
+                    let responses = self.by_token.entry(response_token).or_default();
+                    let index = responses.len();
+                    responses.push(response);
+                    index
+                };
+                self.response_fingerprints
+                    .entry(response_token)
                     .or_default()
-                    .push(response);
+                    .entry(fingerprint)
+                    .or_default()
+                    .push(response_index);
                 Ok(true)
             }
             message => Err(ClientError::UnexpectedSearchMessage(Box::new(message))),
@@ -427,6 +450,7 @@ impl SearchResults {
     #[must_use]
     pub fn take(&mut self, token: u32) -> Vec<FileSearchResponse> {
         let responses = self.by_token.remove(&token).unwrap_or_default();
+        self.response_fingerprints.remove(&token);
         let removed_files = responses
             .iter()
             .map(|response| response.results.len() + response.private_results.len())
@@ -456,6 +480,36 @@ impl SearchResults {
     #[must_use]
     pub const fn stored_responses_len(&self) -> usize {
         self.stored_responses
+    }
+}
+
+fn search_response_fingerprint(response: &FileSearchResponse) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    response.username.hash(&mut hasher);
+    response.token.hash(&mut hasher);
+    response.slot_free.hash(&mut hasher);
+    response.average_speed.hash(&mut hasher);
+    response.queue_length.hash(&mut hasher);
+    response.unknown.hash(&mut hasher);
+    hash_search_file_entries(&response.results, &mut hasher);
+    hash_search_file_entries(&response.private_results, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_search_file_entries<H: Hasher>(entries: &[FileEntry], hasher: &mut H) {
+    entries.len().hash(hasher);
+    for entry in entries {
+        entry.code.hash(hasher);
+        entry.filename.hash(hasher);
+        entry.filename_encoding.as_str().hash(hasher);
+        entry.size.hash(hasher);
+        entry.extension.hash(hasher);
+        entry.extension_encoding.as_str().hash(hasher);
+        entry.attributes.len().hash(hasher);
+        for attribute in &entry.attributes {
+            attribute.code.hash(hasher);
+            attribute.value.hash(hasher);
+        }
     }
 }
 

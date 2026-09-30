@@ -20,7 +20,7 @@ class SearchCoordinator:
     async def create_searches(self, queries):
         """Create multiple searches concurrently"""
         print(f"\n=== Creating {len(queries)} searches ===")
-        
+
         tasks = [self.client.create_search(q) for q in queries]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -29,7 +29,7 @@ class SearchCoordinator:
             if isinstance(result, Exception):
                 print(f"✗ Error searching '{query}': {result}")
             else:
-                search_id = result.get('id')
+                search_id = result.get("id")
                 self.searches[search_id] = query
                 successful.append(search_id)
                 print(f"✓ Created search: {query} (ID: {search_id})")
@@ -38,27 +38,28 @@ class SearchCoordinator:
 
     async def monitor_searches(self, search_ids, duration_seconds=5):
         """Monitor search progress"""
-        print(f"\n=== Monitoring {len(search_ids)} searches for {duration_seconds}s ===")
-        
+        print(
+            f"\n=== Monitoring {len(search_ids)} searches for {duration_seconds}s ==="
+        )
+
         start = time.time()
         while time.time() - start < duration_seconds:
             tasks = [
-                self.client.get_search_details(sid, limit=10)
-                for sid in search_ids
+                self.client.get_search_details(sid, limit=10) for sid in search_ids
             ]
-            
+
             try:
                 details_list = await asyncio.gather(*tasks, return_exceptions=True)
-                
+
                 for search_id, details in zip(search_ids, details_list):
                     if isinstance(details, Exception):
                         continue
-                    
-                    result_count = len(details.get('results', []))
+
+                    result_count = len(details.get("results", []))
                     self.results_count[search_id] = result_count
-                    query = self.searches.get(search_id, 'Unknown')
+                    query = self.searches.get(search_id, "Unknown")
                     print(f"  {query}: {result_count} results")
-                
+
                 await asyncio.sleep(1)
             except Exception as e:
                 print(f"Error monitoring searches: {e}")
@@ -68,7 +69,7 @@ class SearchCoordinator:
         """Get top results from a search"""
         try:
             details = await self.client.get_search_details(search_id, limit=limit)
-            return details.get('results', [])
+            return details.get("results", [])
         except ApiError as e:
             print(f"Error getting search details: {e}")
             return []
@@ -95,14 +96,14 @@ class MessageHandler:
     async def send_bulk_messages(self, recipients_messages):
         """Send multiple messages"""
         print(f"\n=== Sending {len(recipients_messages)} messages ===")
-        
+
         tasks = [
             self.client.send_message(recipient, content)
             for recipient, content in recipients_messages
         ]
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         successful = 0
         for (recipient, _), result in zip(recipients_messages, results):
             if isinstance(result, Exception):
@@ -110,7 +111,7 @@ class MessageHandler:
             else:
                 successful += 1
                 print(f"✓ Message sent to {recipient}")
-        
+
         self.messages_sent = successful
         return successful
 
@@ -118,7 +119,7 @@ class MessageHandler:
 async def batch_analytics(client):
     """Gather analytics using batch operations"""
     print("\n=== Batch Analytics ===")
-    
+
     batch = client.batch.builder()
     batch.get("/api/stats", op_id="stats")
     batch.get("/api/config", op_id="config")
@@ -140,15 +141,19 @@ async def batch_analytics(client):
 async def websocket_monitoring(client, duration_seconds=3):
     """Monitor events via WebSocket"""
     print(f"\n=== WebSocket Monitoring for {duration_seconds}s ===")
-    
+
     try:
         ws = await client.connect_ws()
-        
+
         # Subscribe to all event types
-        ws.subscribe("messages", "search_updates", "transfer_updates")
-        
-        event_counts = {"messages": 0, "search_updates": 0, "transfer_updates": 0}
-        
+        ws.subscribe("message.received", "search.result", "transfer.started")
+
+        event_counts = {
+            "message.received": 0,
+            "search.result": 0,
+            "transfer.started": 0,
+        }
+
         # Simulate event reception
         async def event_receiver():
             start = time.time()
@@ -158,7 +163,7 @@ async def websocket_monitoring(client, duration_seconds=3):
 
         result = await event_receiver()
         print(f"Event monitoring complete: {result}")
-        
+
     except Exception as e:
         print(f"Error with WebSocket: {e}")
     finally:
@@ -168,20 +173,21 @@ async def websocket_monitoring(client, duration_seconds=3):
 async def transfer_operations(client):
     """Handle transfer operations"""
     print("\n=== Transfer Operations ===")
-    
+
     try:
         # List active transfers
         transfers = await client.list_transfers(
-            direction="download",
-            status="active",
-            limit=10
+            direction="download", status="active", limit=10
         )
-        
+
         print(f"Active downloads: {len(transfers)}")
-        
+
         for transfer in transfers[:3]:
-            print(f"  - {transfer.get('filename')}: {transfer.get('progress')}%")
-        
+            print(
+                f"  - {transfer.get('filename')}: "
+                f"{transfer.get('progress_percent', 0)}%"
+            )
+
         return len(transfers)
     except ApiError as e:
         print(f"Error listing transfers: {e}")
@@ -190,12 +196,10 @@ async def transfer_operations(client):
 
 async def main():
     """Main integration example"""
-    
+
     # Initialize client
     client = SlskrClient(
-        base_url="http://127.0.0.1:5030",
-        token="your-api-key-here",
-        debug=True
+        base_url="http://127.0.0.1:5030", token="your-api-key-here", debug=True
     )
 
     try:
@@ -221,7 +225,7 @@ async def main():
         # 3. Message operations
         handler = MessageHandler(client)
         recent_messages = await handler.list_recent_messages(limit=5)
-        print(f"\n=== Message Operations ===")
+        print("\n=== Message Operations ===")
         print(f"Recent messages: {len(recent_messages)}")
 
         # Send demo messages
@@ -253,6 +257,7 @@ async def main():
     except Exception as e:
         print(f"Integration error: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:

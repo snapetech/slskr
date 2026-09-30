@@ -16,17 +16,18 @@ setup(
     author="slskr contributors",
     url="https://github.com/snapetech/slskr",
     packages=find_packages(),
-    python_requires=">=3.7",
+    python_requires=">=3.10,<4",
     install_requires=[
-        "aiohttp>=3.8.0",
+        "aiohttp>=3.8.0,<4",
     ],
     extras_require={
         "dev": [
-            "pytest>=6.0",
-            "pytest-asyncio>=0.18.0",
-            "black>=21.0",
-            "flake8>=3.9",
-            "mypy>=0.900",
+            "pytest>=8,<9",
+            "pytest-asyncio>=0.23,<2",
+            "black>=24,<26",
+            "flake8>=7,<8",
+            "mypy>=1.11,<2",
+            "build>=1,<2",
         ],
     },
     classifiers=[
@@ -35,10 +36,9 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "License :: OSI Approved :: GNU Affero General Public License v3",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
     ],
 )

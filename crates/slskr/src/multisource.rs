@@ -267,6 +267,51 @@ impl SwarmStore {
             job.result = Some(result);
         }
     }
+
+    pub(super) fn fail_unfinished(&mut self, error: &str, now: u64) {
+        for job in self.records.values_mut() {
+            if job.status == "queued" || job.status == "in_progress" {
+                fail_job(job, error, now);
+            }
+        }
+    }
+}
+
+fn fail_job(job: &mut SwarmJob, error: &str, now: u64) {
+    job.status = "failed".to_owned();
+    job.updated_at = now;
+    job.result = Some(SwarmResult {
+        id: job.id.clone(),
+        success: false,
+        filename: job.filename.clone(),
+        output_path: job.output_path.clone(),
+        bytes_downloaded: job.bytes_downloaded,
+        total_time_ms: 0,
+        sources_used: 0,
+        final_hash: String::new(),
+        chunks: Vec::new(),
+        error: Some(error.to_owned()),
+    });
+}
+
+pub(super) async fn spawn_managed(
+    state: &crate::AppState,
+    id: String,
+    request: SwarmRequest,
+    output_path: PathBuf,
+    public_output_path: String,
+) -> bool {
+    let store = Arc::clone(&state.multisource);
+    let task_id = id.clone();
+    if state.managed_background_tasks.try_spawn(async move {
+        execute(task_id, request, output_path, public_output_path, store).await;
+    }) {
+        return true;
+    }
+    if let Some(job) = state.multisource.write().await.records.get_mut(&id) {
+        fail_job(job, "daemon is shutting down", unix_timestamp());
+    }
+    false
 }
 
 pub fn validate_request(request: &mut SwarmRequest) -> Result<String, String> {
@@ -866,6 +911,40 @@ fn unix_timestamp() -> u64 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn shutdown_fails_unfinished_jobs_and_preserves_terminal_jobs() {
+        let request = SwarmRequest {
+            filename: "shutdown.flac".to_owned(),
+            file_size: 4,
+            expected_hash: Some("00".repeat(32)),
+            output_path: None,
+            chunk_size: 2,
+            sources: Vec::new(),
+        };
+        let mut store = SwarmStore::default();
+        for status in ["queued", "in_progress", "completed", "failed"] {
+            let mut job = new_job(status.to_owned(), &request, "shutdown.flac".to_owned(), 1);
+            job.status = status.to_owned();
+            store.insert(job);
+        }
+        store.fail_unfinished("daemon shut down", 2);
+        for id in ["queued", "in_progress"] {
+            let job = store.get(id).unwrap();
+            assert_eq!(job.status, "failed");
+            assert_eq!(job.updated_at, 2);
+            assert_eq!(
+                job.result.as_ref().unwrap().error.as_deref(),
+                Some("daemon shut down")
+            );
+        }
+        for id in ["completed", "failed"] {
+            let job = store.get(id).unwrap();
+            assert_eq!(job.status, id);
+            assert_eq!(job.updated_at, 1);
+            assert!(job.result.is_none());
+        }
+    }
+
     #[tokio::test]
     async fn source_dns_resolution_is_bounded() {
         let error = resolve_source_addrs(
@@ -1215,7 +1294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_swarm_removes_temporary_workspace() {
+    async fn managed_shutdown_cancels_swarm_and_removes_temporary_workspace() {
         let (first_address, first_stalled, first_server) = spawn_stalling_range_source().await;
         let (second_address, second_stalled, second_server) = spawn_stalling_range_source().await;
         let root =
@@ -1243,17 +1322,32 @@ mod tests {
         };
         let id = uuid::Uuid::new_v4().to_string();
         let store = Arc::new(RwLock::new(SwarmStore::default()));
-        let download = tokio::spawn(execute(
-            id,
-            request,
-            output_path,
+        store.write().await.insert(new_job(
+            id.clone(),
+            &request,
             "multisource/assembled.flac".to_owned(),
-            store,
+            unix_timestamp(),
         ));
+        let registry = crate::managed_tasks::ManagedTaskRegistry::default();
+        let task_store = Arc::clone(&store);
+        assert!(registry.try_spawn(async move {
+            execute(
+                id,
+                request,
+                output_path,
+                "multisource/assembled.flac".to_owned(),
+                task_store,
+            )
+            .await;
+        }));
 
-        first_stalled.await.expect("first chunk request must stall");
-        second_stalled
+        timeout(Duration::from_secs(5), first_stalled)
             .await
+            .expect("first chunk request deadline")
+            .expect("first chunk request must stall");
+        timeout(Duration::from_secs(5), second_stalled)
+            .await
+            .expect("second chunk request deadline")
             .expect("second chunk request must stall");
         assert!(fs::read_dir(&root)
             .expect("read cancellation test root")
@@ -1263,11 +1357,20 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(".slskr-swarm-")));
 
-        download.abort();
-        assert!(download
+        registry.shutdown().await;
+        store
+            .write()
             .await
-            .expect_err("swarm must be cancelled")
-            .is_cancelled());
+            .fail_unfinished("daemon shut down", unix_timestamp());
+        let jobs = store.read().await;
+        let job = jobs.list()[0];
+        assert_eq!(job.status, "failed");
+        assert_eq!(
+            job.result.as_ref().unwrap().error.as_deref(),
+            Some("daemon shut down")
+        );
+        drop(jobs);
+        assert!(!registry.try_spawn(async {}));
         assert!(!fs::read_dir(&root)
             .expect("read cancellation test root after abort")
             .any(|entry| entry

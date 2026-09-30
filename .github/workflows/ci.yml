@@ -21,6 +21,29 @@ permissions:
   contents: read
 
 jobs:
+  web-assets:
+    name: Production web assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build production web assets
+        run: |
+          npm --prefix web ci --allow-git=root --legacy-peer-deps --no-audit --no-fund
+          npm --prefix web run build
+          node web/scripts/verify-build-output.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
+        with:
+          name: ci-web-assets
+          path: web/build/
+          if-no-files-found: error
+          retention-days: 7
+
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -57,6 +80,8 @@ jobs:
           sudo apt-get install -y ripgrep shellcheck
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Lint GitHub workflows
+        run: actionlint
       - name: Restore cargo-audit
         id: cargo-audit-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache@v6.1.0
@@ -68,13 +93,20 @@ jobs:
         run: cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
       - run: scripts/check-process-memory-guard.sh
       - run: scripts/test-process-memory-guard.sh
+      - run: scripts/test-live-interop-account-validation.sh
+      - run: scripts/check-audit-tooling.sh
       - run: scripts/check-public-posture.sh
       - run: scripts/validate-changelog.sh
       - run: python3 scripts/test_release_notes.py
+      - run: python3 -m unittest -v scripts.test_compare_benchmark scripts.test_profile_sqlite
+      - run: scripts/check-docs-freshness.sh
+      - run: scripts/test-check-docs-freshness.sh
+      - run: scripts/check-plan-freshness.sh
+      - run: scripts/test-check-plan-freshness.sh
       - run: scripts/check-rust-format.sh
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo check -p slskr-web --target wasm32-unknown-unknown
-      - run: cargo test --workspace
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo check --locked -p slskr-web --target wasm32-unknown-unknown
+      - run: cargo test --locked --workspace
       - run: cargo audit
       - run: scripts/run-security-scans.sh
       - run: scripts/check-client-sdk-gates.sh
@@ -82,19 +114,62 @@ jobs:
       - run: bash scripts/check-web-audit.sh
       - run: npm --prefix web run lint
       - run: npm --prefix web test
+      - name: Verify E2E fixture path discovery
+        working-directory: web
+        run: npx playwright test e2e/fixture-paths.spec.ts e2e/harness-lifecycle.spec.ts --reporter=line
+      - run: npm --prefix web run test:api-lifecycle-coverage
       - run: npm --prefix web run build
+      - run: npm --prefix web run test:bundle-budget
       - run: node web/scripts/verify-build-output.mjs
       - run: node web/scripts/smoke-subpath-build.mjs
       - run: npm --prefix dashboard ci
       - run: bash scripts/check-web-audit.sh dashboard
       - run: npm --prefix dashboard run type-check
       - run: npm --prefix dashboard run lint
-      - run: npm --prefix dashboard test
+      - run: npm --prefix dashboard run test:coverage
       - run: npm --prefix dashboard run build
-      - run: npm --prefix client-ts ci --ignore-scripts
-      - run: bash scripts/check-web-audit.sh client-ts
-      - run: npm --prefix client-ts run lint
-      - run: npm --prefix client-ts run build
+      - run: npm --prefix dashboard run test:bundle-budget
+      - name: Prove shared peer gateway shutdown
+        run: |
+          cargo build --locked -p slskr --bin slskr
+          python3 scripts/run-shared-tcp-shutdown-proof.py \
+            --output target/reproducibility/shared-tcp-shutdown.json \
+            --cycles 3
+          python3 scripts/run-shared-tcp-shutdown-proof.py \
+            --output target/reproducibility/shared-all-transports-shutdown.json \
+            --all-udp-transports --cycles 3
+          python3 scripts/run-rf-shutdown-overlap.py \
+            --output target/reproducibility/rf-shutdown-overlap.json \
+            --fixture-files 20000
+      - name: Collect reproducibility evidence
+        run: |
+          python3 scripts/collect-reproducibility-metadata.py \
+            --output target/reproducibility/ci-rust.json \
+            --artifact-name ci-reproducibility-rust \
+            --artifact dashboard/coverage/coverage-summary.json \
+            --artifact web/build/index.html \
+            --artifact target/reproducibility/rf-shutdown-overlap.json \
+            --artifact target/reproducibility/shared-tcp-shutdown.json \
+            --artifact target/reproducibility/shared-all-transports-shutdown.json \
+            --validate
+      - name: Retain reproducibility evidence
+        id: reproducibility-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
+        with:
+          name: ci-reproducibility-rust
+          path: |
+            target/reproducibility/ci-rust.json
+            target/reproducibility/rf-shutdown-overlap.json
+            target/reproducibility/shared-tcp-shutdown.json
+            target/reproducibility/shared-all-transports-shutdown.json
+            dashboard/coverage/coverage-summary.json
+            web/build/index.html
+          if-no-files-found: error
+          retention-days: 30
+      - name: Link reproducibility evidence
+        env:
+          REPRODUCIBILITY_ARTIFACT_URL: ${{ steps.reproducibility-artifact.outputs.artifact-url }}
+        run: printf '[Reproducibility evidence](%s)\n' "$REPRODUCIBILITY_ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
 
   linux-aarch64:
     name: Linux AArch64
@@ -116,14 +191,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
       - name: Check native GNU build
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
       - name: Run native GNU tests
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
       - name: Check static musl build
-        run: cargo check -p slskr --target aarch64-unknown-linux-musl
+        run: cargo check --locked -p slskr --target aarch64-unknown-linux-musl
 
   platform-builds:
     name: Platform ${{ matrix.name }}
+    needs: web-assets
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     env:
@@ -194,51 +270,21 @@ jobs:
       - name: Select full Perl for vendored OpenSSL
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $perlCandidates = @(
-            Get-Command perl.exe -All -ErrorAction SilentlyContinue |
-              ForEach-Object Source
-            'C:\Strawberry\perl\bin\perl.exe'
-          ) | Select-Object -Unique
-
-          $perl = $null
-          foreach ($candidate in $perlCandidates) {
-            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-              continue
-            }
-
-            & $candidate -MLocale::Maketext::Simple -e 1
-            if ($LASTEXITCODE -eq 0) {
-              $perl = $candidate
-              break
-            }
-          }
-
-          if (-not $perl) {
-            throw 'No Perl installation with Locale::Maketext::Simple is available for vendored OpenSSL'
-          }
-
-          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        run: ./scripts/select-windows-perl.ps1
       - name: Install native packages
         if: matrix.apt != ''
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.apt }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
       - name: Run native workspace tests
         if: matrix.native_tests
         shell: bash
-        run: cargo test --workspace
-      - name: Build production web assets
-        shell: bash
-        run: |
-          npm --prefix web ci --allow-git=root --legacy-peer-deps --no-audit --no-fund
-          npm --prefix web run build
+        run: cargo test --locked --workspace
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact@v8.3.0
+        with:
+          name: ci-web-assets
+          path: web/build
       - name: Build release archive
         shell: bash
         env:
@@ -330,6 +376,7 @@ jobs:
           scripts/check-workflow-release-policy.sh
           scripts/check-package-artifact-matrix.sh
           scripts/check-aur-packaging-checksums.sh
+          scripts/check-aur-package-smoke.sh
           scripts/check-release-version-metadata.sh
           scripts/check-kubernetes-public-posture.sh
       - name: Lint deployment charts

@@ -82,7 +82,7 @@ func main() {
 			break
 		}
 		fmt.Printf("  - From: %v\n", m["username"])
-		fmt.Printf("    Content: %v\n", m["content"])
+		fmt.Printf("    Body: %v\n", m["body"])
 	}
 
 	// List transfers

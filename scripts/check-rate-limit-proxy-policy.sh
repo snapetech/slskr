@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
-controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests.rs)
+controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests/*.rs)
 
 if ! rg -n 'SLSKR_TRUSTED_PROXY_CIDRS|trusted_proxy_cidrs' crates/slskr/src docs >/dev/null; then
   printf 'rate-limit proxy policy check failed: trusted proxy CIDR configuration is missing\n' >&2
@@ -34,15 +34,15 @@ if ! rg -n 'BUG-008 .*Verified' docs/dev/bug-burndown-ledger.md >/dev/null; then
   status=1
 fi
 
-if ! rg -n --fixed-strings -- 'authenticated_rate_limit_user_key' crates/slskr/src/lib.rs >/dev/null ||
-   ! rg -n --fixed-strings -- 'if !utils::is_authorized_from(config, authorization, cookie, remote_addr)' crates/slskr/src/lib.rs >/dev/null ||
-   ! rg -n --fixed-strings -- '.map(|token| rate_limit_user_key(&token))' crates/slskr/src/lib.rs >/dev/null ||
+if ! rg -n --fixed-strings -- 'authenticated_rate_limit_user_key' crates/slskr/src/request_security.rs >/dev/null ||
+   ! rg -n --fixed-strings -- 'if !utils::is_authorized_from(config, authorization, cookie, remote_addr)' crates/slskr/src/request_security.rs >/dev/null ||
+   ! rg -n --fixed-strings -- '.map(|token| rate_limit_user_key(&token))' crates/slskr/src/request_security.rs >/dev/null ||
    ! rg -n --fixed-strings -- 'authenticated_rate_limit_key_uses_verified_credential_identity' "${controller_sources[@]}" >/dev/null; then
   printf 'rate-limit proxy policy check failed: verified authenticated rate-limit identity is missing\n' >&2
   status=1
 fi
 
-if rg -n 'rate_limit_user_key\((authorization|cookie)' crates/slskr/src/lib.rs >/dev/null; then
+if rg -n 'rate_limit_user_key\((authorization|cookie)' crates/slskr/src/request_security.rs >/dev/null; then
   printf 'rate-limit proxy policy check failed: rate-limit identity must hash only a verified credential\n' >&2
   status=1
 fi

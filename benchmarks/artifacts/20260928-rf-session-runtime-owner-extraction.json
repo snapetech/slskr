@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "20b2a05538e290c09dc09af0348a5a50b635fc6b",
+  "source": "crates/slskr/src/session_runtime.rs",
+  "originalBytes": 113411,
+  "originalLines": 3083,
+  "originalSha256": "2212a913b48b5d78e30a5b132b272e1933b6b7307bdeb71eaadb173401e5131f",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 36,
+  "parentScopedDeclarations": [
+    "bridge_soulseek_room_message_to_pods",
+    "connect_session",
+    "dispatch_queued_downloads_after_login",
+    "handle_incoming_soulseek_pod_message",
+    "handle_peer_message",
+    "handle_session_command",
+    "is_remote_queue_response",
+    "persist_room_join_checked",
+    "persist_room_leave_checked",
+    "project_server_message",
+    "record_pod_room_mirror_failure",
+    "record_room_dispatch_failure",
+    "schedule_incoming_search_response",
+    "search_dispatch_message",
+    "send_active_interest_command",
+    "send_due_wishlist_search",
+    "send_room_join_if_connected",
+    "send_room_leave_if_connected",
+    "send_session_command",
+    "spawn_gold_star_club",
+    "spawn_session_manager",
+    "try_send_session_command",
+    "update_listeners",
+    "update_session"
+  ],
+  "registrySha256": "aca08379767e03f68b8ca886f9789352e0a8b099d86a4a94b626e20ad8115cd5",
+  "registryLines": 50,
+  "owners": {
+    "crates/slskr/src/session_runtime_owners/command_dispatch.rs": {
+      "lines": 382,
+      "sha256": "c9d9300196142a920c7263231d0be16544d7d1d301c5d501c7a5566b900f7da8"
+    },
+    "crates/slskr/src/session_runtime_owners/incoming_search.rs": {
+      "lines": 88,
+      "sha256": "f7dd4c2ae66fde54da4f6b95a0204fdfc724ef343638ba30604c9a1ce53abf24"
+    },
+    "crates/slskr/src/session_runtime_owners/login_replay.rs": {
+      "lines": 276,
+      "sha256": "04f356e9734e95e5c41ca77426a40613ad800dab20e9b34ca95f2e776f34d9b9"
+    },
+    "crates/slskr/src/session_runtime_owners/peer_connection.rs": {
+      "lines": 67,
+      "sha256": "0d35a15383a36365610f54df86c2c14412c2c3244307074dc64037954a85b2ed"
+    },
+    "crates/slskr/src/session_runtime_owners/peer_message_dispatch.rs": {
+      "lines": 397,
+      "sha256": "1070b5ef24d41af51edc8b41b9fda5f0cc8f6856954fa55f2e5408fe8466f3ba"
+    },
+    "crates/slskr/src/session_runtime_owners/pod_room_bridge.rs": {
+      "lines": 184,
+      "sha256": "0a2d979e1b3c4c4f108707bb0d4d715f0982ecda6267a1f66bf6a40d12f4e05b"
+    },
+    "crates/slskr/src/session_runtime_owners/room_dispatch.rs": {
+      "lines": 96,
+      "sha256": "5a58c0187795fa901638f98a90b259905c5a056675b4c7a36d7d2bcfa7d87312"
+    },
+    "crates/slskr/src/session_runtime_owners/server_projection.rs": {
+      "lines": 474,
+      "sha256": "61ba07ff1a6263a68108564296bfe0046f9770a2a3f001ee38640ffaebfba801"
+    },
+    "crates/slskr/src/session_runtime_owners/server_transport.rs": {
+      "lines": 143,
+      "sha256": "bbe96142461219fb4a9a62263da05a91a2ea1284963a0e6ada6c94305506d443"
+    },
+    "crates/slskr/src/session_runtime_owners/session_connection.rs": {
+      "lines": 274,
+      "sha256": "ea89d457b711b8e4c506d58c28698002a1855754843d37c8958fa2f2c64cd6e1"
+    },
+    "crates/slskr/src/session_runtime_owners/session_supervision.rs": {
+      "lines": 325,
+      "sha256": "bfd2cc0ae9df1b2a015364e3ad35c02262a89c1eddefc3092e5d03ac9b4acb2c"
+    },
+    "crates/slskr/src/session_runtime_owners/wishlist_dispatch.rs": {
+      "lines": 398,
+      "sha256": "0d90f04d8caf198cbff93a95e220fc01d5359de89f0004701fe37317726f220c"
+    }
+  },
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 13,
+      "originalSha256": "df1fb510b21459d3fb842c16a1910a058db28e02e19475bbcccf08b6ca3a0600",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "publish_configured_interests",
+      "owner": "login_replay",
+      "originalBytes": 1264,
+      "originalSha256": "2a20b08d24d71628854e24f3576aa09d8415afaa403cddab647f24e4d3f1fd27",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "replay_watched_users",
+      "owner": "login_replay",
+      "originalBytes": 1048,
+      "originalSha256": "18d2e7958b6de9f28ca65a1ec17e9dea69ebbf44cc30eabbc7ca9617d2a567ef",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "sync_contact_statuses",
+      "owner": "login_replay",
+      "originalBytes": 1026,
+      "originalSha256": "d0e8515e03747f0f6f7b5642a48c97e7e62799e6e0837dc7f76d0f7ba297ce7f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "sync_room_tickers",
+      "owner": "login_replay",
+      "originalBytes": 1188,
+      "originalSha256": "0cafd8185f0b6abcf785a49bc4865fa545eaf3f8c3d6584a3ed4649c2d8476d7",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "check_privileges_after_login",
+      "owner": "login_replay",
+      "originalBytes": 518,
+      "originalSha256": "45f4e5e2a3b5235ce05419e623a35ef6f2a9d56d40ac034c5774f36fccff3332",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "dispatch_queued_downloads_after_login",
+      "owner": "login_replay",
+      "originalBytes": 1415,
+      "originalSha256": "137043dc3d60ac9b1bc7d9b9e75837e4886a0899d33f4da23d31fa4c8b74ccc1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_room_join_if_connected",
+      "owner": "room_dispatch",
+      "originalBytes": 694,
+      "originalSha256": "b3485e2cc9fe8290e1d32ce71f3901e0c58cb24244e3043c002636c487b9d050",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_room_leave_if_connected",
+      "owner": "room_dispatch",
+      "originalBytes": 694,
+      "originalSha256": "d4e7c61d7125c12e558f98e9f157da83e4eed9949f569722b7422748ac112f4f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "record_room_dispatch_failure",
+      "owner": "room_dispatch",
+      "originalBytes": 408,
+      "originalSha256": "4663126f46f88838323aa908aba1251e8db9b1ade371c04837df2eded1fff519",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_room_join_checked",
+      "owner": "room_dispatch",
+      "originalBytes": 340,
+      "originalSha256": "ae232c43264bb909cdd2335bc57f17a14d612144bace3a20825eca7993791ded",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_room_leave_checked",
+      "owner": "room_dispatch",
+      "originalBytes": 339,
+      "originalSha256": "350d433d390b10c5bc1251b4bda3a440f2990c6de7ef07ad91e09fbdffa29fad",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "record_pod_room_mirror_failure",
+      "owner": "room_dispatch",
+      "originalBytes": 381,
+      "originalSha256": "8eec7392d7b7f5fa9cf0409bfbfaa36a2872f614d8d7339fa652f215b62b6fd2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "replay_joined_rooms",
+      "owner": "login_replay",
+      "originalBytes": 1245,
+      "originalSha256": "6cddb991ef6150765989e9da2752b728c9fa2520750863435eaa72e60e5c358e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_session_ping",
+      "owner": "server_transport",
+      "originalBytes": 1002,
+      "originalSha256": "86f7772bb539d2d5a874106822962e77b8e1173284d329940d0460cd1e53cccd",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_active_server_message",
+      "owner": "server_transport",
+      "originalBytes": 1658,
+      "originalSha256": "0f8a3c2ea0b1ac9005999559e9da08dc7103d9a1db92943d826f0c40fcd48c4a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_remote_queue_response",
+      "owner": "server_transport",
+      "originalBytes": 164,
+      "originalSha256": "408f5daaf9d87f39952a266b7f9a9b1088944f67e02d9e93956befdf8677f43b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_connect_to_peer_request",
+      "owner": "peer_connection",
+      "originalBytes": 1489,
+      "originalSha256": "7e9b3a741fa4c1896ee7640d1e366c9703e843d843cd09dde46920596882d645",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "connect_pierce_firewall",
+      "owner": "peer_connection",
+      "originalBytes": 905,
+      "originalSha256": "e4dd5d14312ea483227edbb2a15cf51e467bfc1da4e68c3c8eea2963e4ebba9c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_session_command",
+      "owner": "server_transport",
+      "originalBytes": 262,
+      "originalSha256": "82cef73ab2a5f51458eae08b238f3386f9da351bed8b4eefba2d44164cc82602",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_active_interest_command",
+      "owner": "server_transport",
+      "originalBytes": 341,
+      "originalSha256": "c77d12064e982432912106d4fb128c5cc712db2761c7466f4908d28eb0d6540d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "try_send_session_command",
+      "owner": "server_transport",
+      "originalBytes": 268,
+      "originalSha256": "1e82e37eb2471d9215c6126d9591d4e74cfdde7515e53f1ff936e113f20ae208",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_session",
+      "owner": "server_transport",
+      "originalBytes": 474,
+      "originalSha256": "7fa71fd657ea2cc4dbac938ea1ac41dd022ae432f3ebe1c1e158a4d04b5b9739",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_listeners",
+      "owner": "server_transport",
+      "originalBytes": 243,
+      "originalSha256": "92953d560abd15d6bda26d3361ec17e2a8949bbc8904ed2ad9eeeca059cc77a5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_session_command",
+      "owner": "command_dispatch",
+      "originalBytes": 13142,
+      "originalSha256": "1a8c1f5cf1bedca6c1bd4c97a181991e373a0c7a740794c1c69f8cfc33cf1992",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_peer_message",
+      "owner": "peer_message_dispatch",
+      "originalBytes": 16189,
+      "originalSha256": "66fa21cb8a77cc3213338b168b944a85f809f7773a1524c2db92beaf77d70e47",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "connect_session",
+      "owner": "session_connection",
+      "originalBytes": 9804,
+      "originalSha256": "f10e36c8c860904bceb1db8d82ebe080e78dde20d4cbed86f32b179f809bb96c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "send_due_wishlist_search",
+      "owner": "wishlist_dispatch",
+      "originalBytes": 10670,
+      "originalSha256": "b9aade7069049d2b36babf2a7b0be8cabb6e2d54bcc376b985b1ac4e3aa83152",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "project_server_message",
+      "owner": "server_projection",
+      "originalBytes": 19283,
+      "originalSha256": "689a16d2f1fea4c0484cba8707d29af0e70f1ceb93a0b74573a1dbeab3ea839f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "spawn_gold_star_club",
+      "owner": "session_supervision",
+      "originalBytes": 2938,
+      "originalSha256": "db480cc8d4b97a1e943db340b902bd818969601d3f8506b147e119297177df6d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "spawn_session_manager",
+      "owner": "session_supervision",
+      "originalBytes": 11332,
+      "originalSha256": "2f5cf5b34d837876e4135c48d596f587a388069478079818fda943ec73aed611",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "spawn_wishlist_smart_fallback",
+      "owner": "wishlist_dispatch",
+      "originalBytes": 3299,
+      "originalSha256": "9231064342980cafdd296f88e93438c0dc7e09d974970af6d79487f727559dd1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_dispatch_message",
+      "owner": "wishlist_dispatch",
+      "originalBytes": 762,
+      "originalSha256": "474eb8183046699e9a9ef00b62105abf6be131e7333b79a9d5a689b51cd44662",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_incoming_soulseek_pod_message",
+      "owner": "pod_room_bridge",
+      "originalBytes": 4218,
+      "originalSha256": "4e6b86362f9e45f9fd565c4167233fbe856eccfda80879bb20b6a14d90240bb6",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "IncomingSearchQueueLease",
+      "owner": "incoming_search",
+      "originalBytes": 49,
+      "originalSha256": "d5fb066d2d270fc9b9996382058301fc1e3d818dd89e61fea1bf393e85171659",
+      "relocations": 2
+    },
+    {
+      "kind": "impl",
+      "name": "IncomingSearchQueueLease",
+      "owner": "incoming_search",
+      "originalBytes": 176,
+      "originalSha256": "4493eaefdfff84f259cef93ea422f81d2512482204c6bf50701354d5ea30f8d5",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "schedule_incoming_search_response",
+      "owner": "incoming_search",
+      "originalBytes": 2489,
+      "originalSha256": "43e4326632ccb3babbadae71018b56dbab3bbd1c28c3743bbd01eb4bf27a957d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "bridge_soulseek_room_message_to_pods",
+      "owner": "pod_room_bridge",
+      "originalBytes": 1680,
+      "originalSha256": "3f7708cf94844d71318afce486b61f2b3548ecf34dd971931601f8aa55de5393",
+      "relocations": 1
+    }
+  ],
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "e6925ac50810d45a406e76bcc5526fb05c3badd10cc6e29f50e203ad9151c0c7"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "96dbe348b077a04414f916f0c8266f3a28d666553b3e4e1e9f75b679b25a50bc"
+    },
+    "features": {
+      "passed": true,
+      "sha256": "ed91e88cee3b453b0659d61778440dbfdb071a7a0835558d55ec7ac8e7075b46"
+    }
+  }
+}
