@@ -1,14 +1,14 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: snapetech.slskr
-PackageVersion: 0.2.40
+PackageVersion: 0.2.41
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
-  - RelativeFilePath: slskr-v0.2.40-x86_64-pc-windows-msvc\slskr.exe
+  - RelativeFilePath: slskr-v0.2.41-x86_64-pc-windows-msvc\slskr.exe
     PortableCommandAlias: slskr
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/snapetech/slskr/releases/download/release-v0.2.40/slskr-v0.2.40-x86_64-pc-windows-msvc.zip
-    InstallerSha256: 46BF8EAE60D9E231CE959344848C1C32FD618E6AF7703F554074E329D0853F3C
+    InstallerUrl: https://github.com/snapetech/slskr/releases/download/release-v0.2.41/slskr-v0.2.41-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 1A2B858149BB03016132EE3B58AC9131C63144E19AA394E092F40A59EFB2729C
 ManifestType: installer
 ManifestVersion: 1.6.0

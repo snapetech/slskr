@@ -30,7 +30,7 @@ rm -rf "$target_dir"
 mkdir -p "$target_dir"
 cp crates/slskr-web/static/index.html "$target_dir/"
 cp crates/slskr-web/static/slskr_web_bootstrap.js "$target_dir/"
-cp crates/slskr-web/static/styles.css "$target_dir/"
+python3 scripts/build-native-styles.py --output "$target_dir/styles.css"
 
 wasm_bindgen_target_dir="target/$wasm_target/release"
 "$wasm_bindgen_bin" \

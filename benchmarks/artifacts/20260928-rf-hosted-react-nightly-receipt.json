@@ -1,0 +1,57 @@
+{
+  "scope": "RF030 retained hosted real-browser mock workflows",
+  "runUrl": "https://github.com/snapetech/slskr/actions/runs/36382238277",
+  "artifactUrl": "https://github.com/snapetech/slskr/actions/runs/36382238277/artifacts/10953526531",
+  "jobConclusion": "success",
+  "downloadedAuditHashesMatched": true,
+  "actualScreenshotsDownloaded": 84,
+  "receipt": {
+    "schemaVersion": 1,
+    "evidenceMode": "real Chromium against deterministic mock responses",
+    "sourceCommit": "3f0b6010d93c5f86755d6dd21e831b9075b688be",
+    "worktreeDirty": false,
+    "startedUtc": "2026-09-28T05:32:59.171671+00:00",
+    "harnessSha256": "2f1d1b9395c648cb15e0517009786c8a6e87524945eed1a594c6ff91f33e9243",
+    "scenarios": [
+      {
+        "scenario": "success",
+        "renderChecks": 84,
+        "observedUiResponses": 2383,
+        "viewports": [
+          "desktop",
+          "mobile"
+        ],
+        "auditSha256": "800ef8f01db192635565f9b0821c6a94905f4e6ec47afdd1f7640a4def9f933e"
+      },
+      {
+        "scenario": "rendered-loading-and-empty",
+        "renderChecks": 1,
+        "observedUiResponses": 10,
+        "viewports": [
+          "desktop"
+        ],
+        "auditSha256": "3e99387f9bc895d9957f2ab78a7de069304b59c228f9c206359c34706a68b733"
+      },
+      {
+        "scenario": "rendered-validation-and-server-error",
+        "renderChecks": 1,
+        "observedUiResponses": 15,
+        "viewports": [
+          "desktop"
+        ],
+        "auditSha256": "bf9445726e48b6bb0c9b60bb82ba0ad98a5c75a0e5e9eb9a2b0d0b059b80bf56"
+      },
+      {
+        "scenario": "authorization-reconnect-and-restart",
+        "renderChecks": 1,
+        "observedUiResponses": 39,
+        "viewports": [
+          "desktop"
+        ],
+        "auditSha256": "10dc89fb275168b5d84651a0fba40dc1adba7f54ae9dc08eee3cee25fa8ab76d"
+      }
+    ],
+    "success": true
+  },
+  "deployedDeviceOrCredentialedInteropProof": false
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-066 genuine ticketed movie playback and byte ranges",
+  "date": "2026-09-28",
+  "sourceSha256": {
+    "crates/slskr/src/preview_stream_controller.rs": "6e6f15213120eaf96b4a63b4546a73703c5cb645d592fa2c503b8723ae037c5b",
+    "crates/slskr/src/focused_controller_tests/content_persistence.rs": "8cffdf58e9f30a89e03e6385720f1b728d404891ba08dfbb9d5373fe84fa3021",
+    "web/e2e/fixtures/ticketed-share.ts": "bfad67f368a2f835832c2de7d292ceb5de2417f0d54c45802634fdd651fd76f1",
+    "web/e2e/fixtures/ensure-fixtures.ts": "a35de90e5c48de06ebfed8d548d640375f43dab1206db0a5dcb3a6999abd5e55",
+    "web/e2e/helpers.ts": "e7237f0abc8ec9c64cc0f69d7ead6ef21a3a48fdd5857631f03f01659f97b5cd",
+    "web/e2e/harness/SlskrNode.ts": "1fdbb5d21f1bc7dfdae640f101a009b6d0ae852a8aa864f67239d2eb616ae927",
+    "web/e2e/harness-lifecycle.spec.ts": "a1a80cc67c326a66db74343f0ddc1e1f5e637d2870baa41378ccf5e3f44645ce",
+    "web/e2e/streaming.spec.ts": "0b664ad00989e91fe86e4186675d376cd627ab417f1dafed197abb119743a4be",
+    "web/e2e/multippeer-sharing.spec.ts": "bf4b0ac821a5d94c287439ff38b8c162d62db5796ab6ad889b5e332ac78bad32"
+  },
+  "logSha256": {
+    "target/rf-movie-mime-full-tests.log": "ec614878cd041c5d9e9ea2289fcc854fcb56f3345ecd83a62129565aca04bfcd",
+    "target/rf-movie-mime-clippy.log": "21d1437895198dd4aba49d5778570652171d0e4a9977bc46e10c842332192156",
+    "target/rf-movie-mime-controller-check.log": "e7005f636863321cfd275bdd177851a23539bf335986c075d7c96e212ee2c0e1",
+    "target/rf-movie-mime-streaming.log": "936d3bf3da1ee8620fb0e7c1708b813fd15ecaeac63641e044133a7217b341ff",
+    "target/rf-decoded-movie-sharing.log": "17ce6ad82572fbfe44bbc2d4d2452fa9907f840a5f26648fc92376b921dfe563",
+    "target/rf-ticketed-harness-tests.log": "66bacc9ed54c9581af475cc549b7703fd8c07ca1c36c5e6e5cde6984016d7738"
+  },
+  "binarySha256": "d279d7645d22e5000d67f3493062104fb3b68ff032c9f643ba41c9e547bdf302",
+  "sourceBase": "1ab9ad30607b6d930a02f4ff39027a65f48682ca",
+  "dirtySourceCheckpoint": true,
+  "validation": {
+    "daemonTestsPassed": 705,
+    "daemonTestsIgnored": 1,
+    "strictClippy": "passed",
+    "fullControllerLegacyAllTargets": "passed",
+    "playwrightUtilityTestsPassed": 7,
+    "movieRangeAndSeekCasesPassed": 2,
+    "sharingCasesPassed": 5,
+    "browserPlayback": "video readyState >= 2, videoWidth > 0, totalVideoFrames > 0, no media error; actual popup opened through recipient UI and stream-ticket exchange",
+    "ranges": "start, offset, suffix; exact 77410288-byte movie length; video/mp4; two initial bytes verified; missing/invalid tickets rejected; query share token rejected",
+    "staticManifestFiles": 7,
+    "staticCorruptionRegression": "passed",
+    "peerPortPolicy": "native harness uses one loopback peer port for TCP/overlay/DHT; production combined QUIC endpoint unchanged"
+  },
+  "remainingAcceptance": [
+    "recipient_backfills_and_verifies_download",
+    "concurrency_limit_blocks_excess_streams"
+  ],
+  "scope": "Does not count the remaining two failures as accepted or claim a deployed network/browser matrix. Earlier missing-media skips were not evidence of unavailable Linux codecs."
+}

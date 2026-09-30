@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-011/RF-035 actual Windows smoke and workflow lint corrections",
+  "date": "2026-09-28",
+  "sourceSha256": {
+    "scripts/test-process-memory-guard.sh": "3703f5227fc3e639186aec250624ef7e3a54947c32a8afbd4acb1b4f90a823a0",
+    "scripts/select-windows-perl.ps1": "759d93d8d045aa0378d4bb7a1f71b3c21bb1ed64bffebf7df4eb4b5c64c151e8",
+    ".github/workflows/ci.yml": "e2776b7c2bd22f879cc61b0d01324b2441b5c4e1391fc55046605548dd56ecc9",
+    ".github/workflows/windows-smoke.yml": "4e589eb2131cc7e09815b3ca91ad90cac209e23b2132c2f8570330a65657cc5b",
+    "scripts/check-workflow-release-policy.sh": "1deb757de78cb588bc66bc92d8ad65c9880c0f36aa22bb3d7d45bc2731d5f5e3"
+  },
+  "previousHostedFailure": {
+    "conclusion": "failure",
+    "headSha": "9b8e52f214935106a9aac26908a5fbcc21ce30d8",
+    "jobs": [
+      {
+        "completedAt": "2026-09-28T09:11:54Z",
+        "conclusion": "failure",
+        "databaseId": 108861112816,
+        "name": "rust",
+        "startedAt": "2026-09-28T09:11:16Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-28T09:11:18Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-28T09:11:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:25Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 2,
+            "startedAt": "2026-09-28T09:11:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:26Z",
+            "conclusion": "success",
+            "name": "Enable Windows long paths for Git dependencies",
+            "number": 3,
+            "startedAt": "2026-09-28T09:11:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:41Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "number": 4,
+            "startedAt": "2026-09-28T09:11:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:41Z",
+            "conclusion": "success",
+            "name": "Clear Unix compiler wrapper",
+            "number": 5,
+            "startedAt": "2026-09-28T09:11:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:48Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "number": 6,
+            "startedAt": "2026-09-28T09:11:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:48Z",
+            "conclusion": "success",
+            "name": "Process memory guard",
+            "number": 7,
+            "startedAt": "2026-09-28T09:11:48Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:50Z",
+            "conclusion": "failure",
+            "name": "Process memory guard regression",
+            "number": 8,
+            "startedAt": "2026-09-28T09:11:48Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:50Z",
+            "conclusion": "skipped",
+            "name": "Rust fmt",
+            "number": 9,
+            "startedAt": "2026-09-28T09:11:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:50Z",
+            "conclusion": "skipped",
+            "name": "Rust tests",
+            "number": 10,
+            "startedAt": "2026-09-28T09:11:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:50Z",
+            "conclusion": "skipped",
+            "name": "WASM check",
+            "number": 11,
+            "startedAt": "2026-09-28T09:11:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:50Z",
+            "conclusion": "skipped",
+            "name": "Web build",
+            "number": 12,
+            "startedAt": "2026-09-28T09:11:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:50Z",
+            "conclusion": "skipped",
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "number": 23,
+            "startedAt": "2026-09-28T09:11:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:52Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "number": 24,
+            "startedAt": "2026-09-28T09:11:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-28T09:11:52Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 25,
+            "startedAt": "2026-09-28T09:11:52Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/snapetech/slskr/actions/runs/36401784119/job/108861112816"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/snapetech/slskr/actions/runs/36401784119"
+  },
+  "failureLogSha256": "f37df9e736f20404ef113533f1fb5019db5ba3bcd8f95b4f29ad5f74a950ea27",
+  "rootCause": "Native Node cwd D:\\a\\slskr\\slskr was compared directly to the Git Bash POSIX repo path. The regression now compares native Node paths outside and inside the guard.",
+  "validation": {
+    "localMemoryGuardRegression": "passed",
+    "actionlint": "v1.7.12 passed",
+    "allShellScriptsShellcheck": "passed with the existing release-gate exclusions",
+    "sharedPerlHelperPowerShellSyntax": "passed",
+    "workflowPolicy": "passed before new explicit lint/helper guard additions"
+  },
+  "scope": "Main CI previously installed actionlint but did not execute it; new explicit step is required by policy. The main-matrix Perl selection implementation is extracted unchanged and reused by Windows Smoke, with pinned toolchain PATH and Rust cache. Fresh actual Windows Smoke and hosted actionlint completion remain pending."
+}

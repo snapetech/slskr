@@ -31,17 +31,8 @@ if [[ ! "$tasks_max" =~ ^[1-9][0-9]{0,5}$ || "$tasks_max" -gt 512 ]]; then
 fi
 
 process_guard_context_active=0
-if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" ]]; then
-  inherited_process_virtual_memory_kib="unlimited"
-  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
-    inherited_process_virtual_memory_kib="$(ulimit -v)"
-  fi
-  if [[ "$inherited_process_virtual_memory_kib" =~ ^[0-9]+$ ]] \
-    && ((inherited_process_virtual_memory_kib <= memory_kib)); then
-    process_guard_context_active=1
-  elif grep -Eq '/slskr-process-memory-guard-[^/]+\.service' /proc/self/cgroup 2>/dev/null; then
-    process_guard_context_active=1
-  fi
+if scripts/process-memory-guard-active.sh "$memory_kib"; then
+  process_guard_context_active=1
 fi
 
 # Keep Node's managed heap below the process cap. Chromium's native mappings
@@ -53,6 +44,13 @@ case "$(basename "$1")" in
     fi
     ;;
 esac
+
+# Reuse an inherited, verified boundary. Adding RLIMIT_AS inside a resident
+# cgroup prevents V8/Chromium from reserving address space even though their
+# real memory and swap remain bounded by the parent unit.
+if [[ "$process_guard_context_active" -eq 1 ]]; then
+  exec "$@"
+fi
 
 # A user systemd manager gives a reliable resident-memory ceiling for Chromium
 # and its renderer processes. The environment switch exists only for the

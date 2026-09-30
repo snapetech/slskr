@@ -45,9 +45,9 @@ function AppContent() {
     <Router>
       <div className="flex h-screen bg-gray-50">
         <Sidebar />
-        <div className="flex flex-col flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
           <Header />
-          <main className="flex-1 overflow-auto p-8">
+          <main className="min-w-0 flex-1 overflow-auto p-4 sm:p-8">
             {!isConnected ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">

@@ -10,6 +10,11 @@ audits.
 | Document | Use it for |
 | --- | --- |
 | [Project README](../README.md) | Product overview, screenshots, quick start, feature summary, and top-level links. |
+| [Getting started](getting-started.md) | First run from a release archive through login, shares, and a first search. |
+| [Features](FEATURES.md) | User-facing map of current slskR feature areas. |
+| [Status and support boundaries](status.md) | Which behavior is ordinary, configured, compatibility-only, or limited. |
+| [Configuration guide](configuration.md) | Config sources, network defaults, credentials, and optional features. |
+| [Troubleshooting](troubleshooting.md) | Common operator problems and focused checks. |
 | [Install guide](install.md) | Build, install, service, container, config, state, and exposure runbook. |
 | [Credential storage](credential-storage.md) | Soulseek credential-source choices, systemd credentials, Web UI behavior, and security notes. |
 | [Config example](slskr.config.example.toml) | Annotated TOML config with the supported runtime settings. |
@@ -25,6 +30,13 @@ audits.
 | [Web UI endpoint inventory](webui-endpoints.txt) | Route inventory used during parity and audit work. |
 | [Rust Web UI notes](rust-web-ui.md) | Rust/WASM migration target notes; not the currently shipped browser bundle. |
 | [Rust UI parity ledger](rust-ui-parity-ledger.md) | UI parity and migration audit ledger. |
+
+## Architecture
+
+| Document | Use it for |
+| --- | --- |
+| [Architecture and network layout](architecture.md) | Daemon components, state ownership, and the native/current shared peer port. |
+| [App surface](app-surface.md) | CLI, daemon, API, Web UI, auth, and compatibility details. |
 
 The currently shipped browser UI is the React/Vite app in `web/`. Release
 archives package the built assets and `slskr serve` serves them on the same
@@ -57,6 +69,7 @@ http://127.0.0.1:5030
 | Document | Use it for |
 | --- | --- |
 | [Release guide](release.md) | Tag, archive, manifest, checksum, and verification policy. |
+| [Status and support boundaries](status.md) | Product capability and compatibility limits. |
 | [Live interop matrix](live-interop-test-matrix.md) | Live Soulseek-network and cross-client verification gates. |
 | [VPN certification](vpn-certification.md) | Per-account VPN isolation, credential pool setup, and certification runner. |
 | [Full network test plan](full-network-test-plan.md) | Test phases, pass criteria, and release-readiness certification plan. |
@@ -103,8 +116,10 @@ The `docs/dev/` directory holds audit ledgers and internal review playbooks:
 ## Documentation Status
 
 - The canonical operator entry points are the root README, this index,
-  [install.md](install.md), [app-surface.md](app-surface.md), and
-  [http-api.md](http-api.md).
+  [getting-started.md](getting-started.md), [install.md](install.md),
+  [configuration.md](configuration.md), [status.md](status.md),
+  [troubleshooting.md](troubleshooting.md), [app-surface.md](app-surface.md),
+  and [http-api.md](http-api.md).
 - The shipped Web UI is documented in [../web/README.md](../web/README.md).
   Rust/WASM UI docs are retained as migration notes until that target replaces
   the React bundle.

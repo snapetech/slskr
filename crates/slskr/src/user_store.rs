@@ -96,7 +96,8 @@ impl UserStore {
             .filter(|record| seen_usernames.insert(record.username.clone()))
             .take(MAX_USER_RECORDS)
             .map(|record| {
-                updated_at = updated_at.max(record.updated_at as u64);
+                let persisted_updated_at = record.updated_at.max(0) as u64;
+                updated_at = updated_at.max(persisted_updated_at);
                 UserRecord {
                     username: record.username,
                     watched: record.watched,
@@ -108,7 +109,7 @@ impl UserStore {
                     directory_count: record
                         .directory_count
                         .and_then(|value| value.try_into().ok()),
-                    updated_at: record.updated_at as u64,
+                    updated_at: persisted_updated_at,
                 }
             })
             .collect();
@@ -326,4 +327,25 @@ pub(super) async fn persist_user_projection(
         .await
         .map_err(|error| format!("user projection persistence failed: {error}"))?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_negative_user_timestamp_does_not_wrap() {
+        let store = UserStore::from_persisted(vec![crate::persistence::UserProjectionRecord {
+            username: "peer".to_owned(),
+            watched: false,
+            status: None,
+            average_speed: None,
+            upload_count: None,
+            file_count: None,
+            directory_count: None,
+            updated_at: -1,
+        }]);
+        assert_eq!(store.records[0].updated_at, 0);
+        assert_ne!(store.updated_at, u64::MAX);
+    }
 }

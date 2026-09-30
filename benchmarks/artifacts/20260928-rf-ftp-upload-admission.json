@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local daemon suite and bounded admission regressions; not deployed FTP throughput proof",
+  "sourceSha": "65aa9791a9e5726a0c1f11c4340cb03db4360212",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/app_state.rs": "6e71a10a5662231f2be44d41f64e2f5a632fbba80ce9a9cefe3d653ada1c1224",
+    "crates/slskr/src/daemon_serve.rs": "4a84d47c6a78009ba815fcd3ecadfcf9bf711821693b902e5a8d80798368001f",
+    "crates/slskr/src/ftp.rs": "e89881bdf3699699e8d71ba3e893c9b3eb5f71ddc4a29ee34fdbaacea5385ca5",
+    "crates/slskr/src/ftp_upload_queue.rs": "6e0a079b1ffddff8ec8cef3db6cc89cc2ea0c3ff68d2846a143177444ffc985b",
+    "crates/slskr/src/ftp_upload_queue_tests.rs": "845db69fe874faadcffd26275c2c03300dbf8872124d21124f1dc2ba1fd94cbe",
+    "crates/slskr/src/transfer_completion.rs": "cec3e20015cffd0ec7a8ba016c3e80fed959f2779fb7154ab9b6e8461fdc6ce9",
+    "crates/slskr/src/focused_controller_tests/ftp_admission.rs": "bf0748a7b647d7753fe92abde47b13f7ec643ef414dbb75dbd19c015de9af328",
+    "crates/slskr/src/focused_controller_tests/fixtures.rs": "c9df1e0b86e283471f41e1ce97c7a31405c5bd35ba5c11362295ff512b78b0fe",
+    "crates/slskr/src/controller_tests/full_state_fixtures.rs": "9157b608690313a1d0696f82fbe62931ed6de560fe580b20c692c1191668ac42",
+    "crates/slskr/src/controller_tests/full_route_fixtures.rs": "7022619a05cf2f20212e978a5b377c81f4f5a254c3e2b887bcd1235f48c50708",
+    "scripts/check-runtime-boundary-hardening.sh": "5557e313246fd3429678c7383dcc91239cfa790d77b824c029e691883aacc232"
+  },
+  "logsSha256": {
+    "target/rf-ftp-admission-daemon-tests.log": "62c2c2b9a7fce688595adb1762a679106f719fe687c415c136282f8f906f09ab",
+    "target/rf-ftp-admission-clippy.log": "5f6ff303097e8ab27bc421041732d26b596ddbc54dc46ef589e3f96c6d619b92",
+    "target/rf-ftp-admission-full-controller.log": "93f7dd10528b1aa087cf680dafeddcb5ec8d4de39df6aea0af992c010c6383db"
+  },
+  "limits": {
+    "perDaemonTotalAdmittedJobs": 64,
+    "perDaemonActiveUploads": 4,
+    "fullAdmission": "caller backpressure before spawn"
+  },
+  "tests": {
+    "daemonPassed": 695,
+    "defaultIgnoredMountFixture": 1,
+    "admissionRegressionsPassed": 4,
+    "acceptedQueuedJobsAllCompleteWhenSlotsRelease": true,
+    "shutdownWakesBlockedAdmission": true,
+    "completedAndCancelledJobsReleaseSlots": true,
+    "closedRegistryRejectsWithoutPollingUpload": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  },
+  "limitations": [
+    "Existing FTP retry/connection deadlines are preserved; no added duration cap",
+    "Backpressure can delay completion caller during prolonged server stalls",
+    "This does not close broader RF-006 ownership or hosted evidence"
+  ]
+}

@@ -119,6 +119,8 @@ func TestWebSocketReconnectsAfterUnexpectedClose(t *testing.T) {
 	var connectionMu sync.Mutex
 	connectionCount := 0
 	releaseSecond := make(chan struct{})
+	defer close(releaseSecond)
+	secondConnection := make(chan struct{})
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := upgrader.Upgrade(writer, request, nil)
@@ -129,6 +131,9 @@ func TestWebSocketReconnectsAfterUnexpectedClose(t *testing.T) {
 		connectionCount++
 		current := connectionCount
 		connectionMu.Unlock()
+		if current == 2 {
+			close(secondConnection)
+		}
 		if current == 1 {
 			_ = connection.Close()
 			return
@@ -161,6 +166,11 @@ func TestWebSocketReconnectsAfterUnexpectedClose(t *testing.T) {
 	waitForState(true)
 	waitForState(false)
 	waitForState(true)
+	select {
+	case <-secondConnection:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the server to accept the reconnect")
+	}
 
 	connectionMu.Lock()
 	if connectionCount != 2 {
@@ -171,7 +181,6 @@ func TestWebSocketReconnectsAfterUnexpectedClose(t *testing.T) {
 	if err := client.Disconnect(context.Background()); err != nil {
 		t.Fatalf("disconnect failed: %v", err)
 	}
-	close(releaseSecond)
 }
 
 func TestWebSocketRejectsInvalidBaseURLBeforeDial(t *testing.T) {

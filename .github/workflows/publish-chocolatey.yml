@@ -6,6 +6,11 @@ on:
       tag:
         description: Release tag to publish
         required: true
+      publish:
+        description: Push the validated package to Chocolatey
+        type: boolean
+        default: true
+        required: false
 
 permissions:
   contents: read
@@ -13,6 +18,7 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -43,7 +49,7 @@ jobs:
           }
           $escapedName = [regex]::Escape($asset[0].Name)
           $matches = @(Select-String -Path $checksumPath `
-            -Pattern "^\s*([0-9a-fA-F]{64})\s+\*?$escapedName\s*$")
+            -Pattern "^\s*([0-9a-fA-F]{64})\s+\*?(?:\./)?$escapedName\s*$")
           if ($matches.Count -ne 1) {
             throw "SHA256SUMS.txt does not contain one entry for $($asset[0].Name)"
           }
@@ -103,7 +109,44 @@ jobs:
           if ($installScript -notmatch '\$checksum\s*=\s*"[0-9a-fA-F]{64}"') {
             throw "nupkg installer does not contain a SHA-256 checksum"
           }
+      - name: Record validated package evidence
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $asset = Get-ChildItem release-assets\*.zip | Select-Object -First 1
+          $package = Get-ChildItem release-assets\*.nupkg | Select-Object -First 1
+          $sourceCommit = (git rev-parse HEAD).Trim()
+          $receipt = [ordered]@{
+            schemaVersion = 1
+            evidenceMode = 'actual release asset; clean Windows package runner'
+            tag = $env:RELEASE_TAG
+            sourceCommit = $sourceCommit
+            workflowSourceCommit = $env:GITHUB_SHA
+            runUrl = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            assetName = $asset.Name
+            assetSha256 = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            packageName = $package.Name
+            packageSha256 = (Get-FileHash $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            releaseAssetChecksumVerified = $true
+            packageUrlAndChecksumSmokePassed = $true
+            publishRequested = ($env:PUBLISH_REQUESTED -eq 'true')
+          }
+          $receipt | ConvertTo-Json | Set-Content release-assets\chocolatey-validation.json -Encoding utf8
+      - name: Retain validated Chocolatey package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
+        with:
+          name: chocolatey-validation-${{ github.run_id }}
+          path: |
+            release-assets/*.nupkg
+            release-assets/chocolatey-validation.json
+            release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Push package when credentials are configured
+        if: inputs.publish
         shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}

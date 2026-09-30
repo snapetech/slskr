@@ -21,7 +21,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const PodMessageBackfillPanel = ({ visible = true }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

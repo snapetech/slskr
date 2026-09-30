@@ -1002,6 +1002,10 @@ pub(super) async fn legacy_route_dispatch_group_05(
             }
             let mut grants = state.share_grants.write().await;
             let previous = grants.clone();
+            let requested_limit = match crate::share_stream_limits::request_limit(body) {
+                Ok(limit) => limit,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
             let Some((record, created)) = grants.create_with_contract_and_permissions(
                 id,
                 collection_id,
@@ -1010,6 +1014,12 @@ pub(super) async fn legacy_route_dispatch_group_05(
             ) else {
                 return Ok(routing::service_unavailable_response("share grant capacity is full"));
             };
+            let record = if created {
+                match requested_limit {
+                    Some(limit) => grants.set_stream_limit(&record.id, limit).expect("created grant remains owned"),
+                    None => record,
+                }
+            } else { record };
             let json = record.json();
             let mutated = grants.clone();
             drop(grants);
@@ -1170,7 +1180,18 @@ pub(super) async fn legacy_route_dispatch_group_05(
                 }
             }
             let previous = grants.clone();
+            let requested_limit = match crate::share_stream_limits::request_limit(body) {
+                Ok(limit) => limit,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
+            let permissions = if requested_limit.is_some() && extract_json_string_field(body, "permissions").is_none() {
+                grants.get(id).map(|record| record.permissions).unwrap_or(permissions)
+            } else { permissions };
             if let Some(record) = grants.update(id, permissions) {
+                let record = match requested_limit {
+                    Some(limit) => grants.set_stream_limit(id, limit).expect("updated grant remains owned"),
+                    None => record,
+                };
                 let json = record.json();
                 if let Err(error) = persist_share_grant(state, &record).await {
                     *grants = previous;

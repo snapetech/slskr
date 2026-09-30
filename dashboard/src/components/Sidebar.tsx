@@ -32,61 +32,66 @@ export default function Sidebar() {
   ];
 
   return (
-    <div className="relative flex w-64 flex-col bg-gray-900 text-white shadow-lg">
-      <div className="p-6">
-        <h1 className="text-2xl font-bold">slskr</h1>
-        <p className="text-gray-400 text-sm">Admin Dashboard</p>
+    <div className="relative flex w-16 shrink-0 flex-col bg-gray-900 text-white shadow-lg sm:w-64">
+      <div className="p-2 text-center sm:p-6 sm:text-left">
+        <h1 className="hidden text-2xl font-bold sm:block">slskr</h1>
+        <span aria-hidden="true" className="block text-xl font-bold sm:hidden">S</span>
+        <p className="hidden text-gray-400 text-sm sm:block">Admin Dashboard</p>
       </div>
 
-      <nav className="mt-8">
+      <nav className="mt-4 sm:mt-8">
         {links.map(({ path, label, icon: Icon }) => (
           <Link
             key={path}
             to={path}
             aria-current={location.pathname === path ? "page" : undefined}
-            className={`flex items-center px-6 py-3 transition-colors ${
+            className={`flex min-h-11 items-center justify-center px-2 py-3 transition-colors sm:justify-start sm:px-6 ${
               location.pathname === path
                 ? "bg-blue-600 text-white"
                 : "text-gray-300 hover:bg-gray-800 hover:text-white"
             }`}
           >
-            <Icon aria-hidden="true" className="w-5 h-5 mr-3" />
-            {label}
+            <Icon aria-hidden="true" className="mr-0 h-5 w-5 sm:mr-3" />
+            <span className="sr-only sm:not-sr-only">{label}</span>
           </Link>
         ))}
       </nav>
 
-      <div className="absolute bottom-0 w-64 border-t border-gray-700 p-6">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
+      <div className="absolute bottom-0 w-full border-t border-gray-700 p-2 sm:w-64 sm:p-6">
+        <p className="mb-3 hidden text-xs font-semibold uppercase tracking-widest text-gray-400 sm:block">
           Keep the node moving
         </p>
-        <div className="mb-5 grid grid-cols-2 gap-2">
+        <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <a
-            className="flex items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition-colors hover:border-sky-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-400"
+            aria-label="Support slskr development with PayPal"
+            className="flex min-h-8 items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-1 py-2 text-xs font-semibold text-sky-300 transition-colors hover:border-sky-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-400 sm:px-3"
             href="https://www.paypal.com/donate/?business=donations%40snape.tech"
             rel="noopener noreferrer"
             target="_blank"
             title="Support slskr development with PayPal"
           >
-            <HeartHandshake className="h-4 w-4" /> PayPal
+            <HeartHandshake aria-hidden="true" className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">PayPal</span>
           </a>
           <a
-            className="flex items-center justify-center gap-2 rounded-full border border-rose-400/40 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-300 transition-colors hover:border-rose-200 hover:text-white focus:outline-none focus:ring-2 focus:ring-rose-300"
+            aria-label="Support slskr development on Ko-fi"
+            className="flex min-h-8 items-center justify-center gap-2 rounded-full border border-rose-400/40 bg-rose-400/10 px-1 py-2 text-xs font-semibold text-rose-300 transition-colors hover:border-rose-200 hover:text-white focus:outline-none focus:ring-2 focus:ring-rose-300 sm:px-3"
             href="https://ko-fi.com/snapetech"
             rel="noopener noreferrer"
             target="_blank"
             title="Support slskr development on Ko-fi"
           >
-            <Coffee className="h-4 w-4" /> Ko-fi
+            <Coffee aria-hidden="true" className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Ko-fi</span>
           </a>
         </div>
         <button
-          className="flex items-center w-full text-gray-300 hover:text-white transition-colors"
+          className="flex min-h-10 w-full items-center justify-center text-gray-300 transition-colors hover:text-white sm:justify-start"
           onClick={handleLogout}
           type="button"
         >
-          <LogOut className="w-5 h-5 mr-3" />
-          Logout
+          <LogOut aria-hidden="true" className="mr-0 h-5 w-5 sm:mr-3" />
+          <span className="sr-only sm:not-sr-only">Logout</span>
         </button>
       </div>
     </div>

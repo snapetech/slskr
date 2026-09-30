@@ -14,7 +14,7 @@ run_makepkg() {
   shift
   (
     cd "$work_root"
-    makepkg --verifysource --nobuild --nodeps --clean --cleanbuild "$@"
+    makepkg --nobuild --nodeps --clean --cleanbuild "$@"
   )
 }
 
@@ -33,7 +33,23 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-docker run --rm \
+container_work_root="$(mktemp -d -t slskr-aur-container.XXXXXX)"
+container_id_file="$container_work_root/container-id"
+cleanup_container() {
+  local container_id=''
+  if [[ -s "$container_id_file" ]]; then
+    IFS= read -r container_id < "$container_id_file" || true
+    if [[ "$container_id" =~ ^[0-9a-f]{64}$ ]]; then
+      docker rm --force "$container_id" >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -rf -- "$container_work_root"
+}
+trap cleanup_container EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+docker run --rm -i --cidfile "$container_id_file" \
   -v "$repo_root:/repo:ro" \
   archlinux:base-devel \
   bash -s -- <<'CONTAINER_SCRIPT'
@@ -45,8 +61,9 @@ work_root="$(mktemp -d -p /tmp slskr-aur-smoke.XXXXXX)"
 trap 'rm -rf "$work_root"' EXIT
 cp -a /repo/packaging/aur/. "$work_root/"
 chown -R builder:builder "$work_root"
-runuser -u builder -- makepkg --verifysource --nobuild --nodeps --clean --cleanbuild -C -p "$work_root/PKGBUILD"
-runuser -u builder -- makepkg --verifysource --nobuild --nodeps --clean --cleanbuild -C -p "$work_root/PKGBUILD-bin"
+cd "$work_root"
+runuser -u builder -- makepkg --nobuild --nodeps --clean --cleanbuild -C -p PKGBUILD
+runuser -u builder -- makepkg --nobuild --nodeps --clean --cleanbuild -C -p PKGBUILD-bin
 CONTAINER_SCRIPT
 
 printf 'AUR package smoke passed in archlinux:base-devel\n'

@@ -46,6 +46,7 @@ Primary runners:
 
 - `scripts/run-live-interop-matrix.sh`: `slskr` account login and local peer smoke.
 - `scripts/run-live-interop-matrix.sh`: now also runs private-message and room-message probes after login/local-peer checks.
+- The credential file must include the configured base account range plus every selected probe index. The default base range is accounts 1–6, so non-VPN mode needs accounts 1–6; VPN mode needs accounts 1–8. Missing probe accounts are rejected before public-host DNS lookup.
 - `scripts/run-cross-client-validation.sh`: adjacent checkout validation, runtime/library unit validation, daemon peer probes, daemon browse probes, and daemon fixture-download probes.
 - `.github/workflows/live-parity.yml`: scheduled/manual CI proof for the Rust web UI headless parity audit plus hermetic local `slskd_api` automation-client smoke, with screenshots, web assets, and daemon logs uploaded as artifacts. It also runs the credentialed public live matrix when the `SLSKR_LIVE_INTEROP_ENV` secret is configured, or uploads a skipped TSV when live credentials are intentionally absent.
 - `scripts/fetch-open-commons-fixtures.sh`: downloads hash-pinned public-domain/CC0 media fixtures into ignored local storage for realistic share/search/transfer payloads.

@@ -1,29 +1,40 @@
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const OPTIONAL_MEDIA_FILES = [
   'music/open_goldberg/01_aria.ogg',
   'movie/sintel_512kb_stereo.mp4',
-  'tv/pioneer_one_s01e01_sample.mp4',
 ];
 
-function getRepoRootFromCwd(cwd: string = process.cwd()): string {
-  return path.join(cwd, '..', '..', '..');
+export function getRepoRootFromCwd(cwd: string = process.cwd()): string {
+  let candidate = path.resolve(cwd);
+  while (true) {
+    if (
+      existsSync(path.join(candidate, 'Cargo.toml')) &&
+      existsSync(path.join(candidate, 'crates', 'slskr', 'Cargo.toml'))
+    ) {
+      return candidate;
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      throw new Error(`Cannot locate slskr repository root from ${cwd}`);
+    }
+    candidate = parent;
+  }
 }
 
 function getFullFixturesPath(
   fixturesDir: string,
   cwd: string = process.cwd(),
 ): string {
-  const repoRoot = getRepoRootFromCwd(cwd);
   return path.isAbsolute(fixturesDir)
     ? fixturesDir
-    : path.join(repoRoot, fixturesDir);
+    : path.join(getRepoRootFromCwd(cwd), fixturesDir);
 }
 
 async function validateManifestFiles(
@@ -101,11 +112,21 @@ export function hasDownloadedMediaFixtures(
   fixturesDir: string = 'test-data/slskr-test-fixtures',
   cwd: string = process.cwd(),
 ): boolean {
-  const fullFixturesPath = getFullFixturesPath(fixturesDir, cwd);
+  return OPTIONAL_MEDIA_FILES.every((mediaFile) => hasMediaFixture(mediaFile, fixturesDir, cwd));
+}
 
-  return OPTIONAL_MEDIA_FILES.every((mediaFile) =>
-    existsSync(path.join(fullFixturesPath, mediaFile)),
-  );
+export function hasMediaFixture(
+  mediaFile: string,
+  fixturesDir: string = 'test-data/slskr-test-fixtures',
+  cwd: string = process.cwd(),
+): boolean {
+  const fullFixturesPath = getFullFixturesPath(fixturesDir, cwd);
+  try {
+    const stat = statSync(path.join(fullFixturesPath, mediaFile));
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -120,7 +141,6 @@ export async function ensureFixtures(
   fixturesDir: string = 'test-data/slskr-test-fixtures',
   fetchIfMissing: boolean = false,
 ): Promise<void> {
-  const repoRoot = getRepoRootFromCwd();
   const fullFixturesPath = getFullFixturesPath(fixturesDir);
 
   // Check if fixtures directory exists
@@ -151,14 +171,14 @@ export async function ensureFixtures(
     }
   }
 
-  // Optional media is intentionally outside the checked-in manifest.
-  // Streaming specs skip when these locally supplied files are absent.
+  // Optional media has pinned download declarations outside the static files
+  // baseline. Each streaming spec checks its own actual media dependency.
   const missingMedia: string[] = [];
   for (const mediaFile of OPTIONAL_MEDIA_FILES) {
     const filePath = path.join(fullFixturesPath, mediaFile);
     try {
       const stat = await fs.stat(filePath);
-      if (stat.size === 0) {
+      if (!stat.isFile() || stat.size === 0) {
         missingMedia.push(mediaFile);
       }
     } catch {
@@ -171,14 +191,15 @@ export async function ensureFixtures(
       `[E2E] Missing ${missingMedia.length} media files, fetching...`,
     );
     try {
+      const repoRoot = getRepoRootFromCwd();
       const fetchScript = path.join(
         repoRoot,
         'scripts',
         'fetch-test-fixtures.sh',
       );
-      await execAsync(`bash "${fetchScript}"`, {
+      await execFileAsync('bash', [fetchScript], {
         cwd: repoRoot,
-        env: { ...process.env, FIXTURES_DIR: fullFixturesPath },
+        env: { ...process.env, SLSKR_FIXTURES_ROOT: fullFixturesPath },
       });
       const remainingMedia: string[] = [];
       for (const mediaFile of OPTIONAL_MEDIA_FILES) {
@@ -195,19 +216,19 @@ export async function ensureFixtures(
         console.log('[E2E] Optional media files are available');
       } else {
         console.warn(
-          '[E2E] No downloadable media assets are declared; optional streaming files remain unavailable.',
+          '[E2E] Fetch completed without installing all required optional media.',
         );
       }
     } catch (error) {
       console.warn(`[E2E] Failed to fetch media files: ${error}`);
-      console.warn('[E2E] Tests will continue with static fixtures only');
+      console.warn('[E2E] Tests will continue with available fixtures');
     }
   } else if (missingMedia.length > 0) {
     console.warn(
       `[E2E] ${missingMedia.length} media files missing (optional): ${missingMedia.join(', ')}`,
     );
     console.warn(
-      '[E2E] Tests will use static fixtures only; optional media must be supplied separately for streaming specs.',
+      '[E2E] Only specs requiring missing media will skip. Run scripts/fetch-test-fixtures.sh.',
     );
   }
 }

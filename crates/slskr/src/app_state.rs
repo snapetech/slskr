@@ -82,7 +82,10 @@ pub(super) struct AppState {
     pub(super) download_requests: Arc<Semaphore>,
     pub(super) download_batch_requests: Arc<Semaphore>,
     pub(super) websocket_connections: Arc<Semaphore>,
+    pub(super) ftp_uploads: ftp::FtpUploadQueue,
+    pub(super) relay_cleanup: relay::ConnectionCleanup,
     pub(super) external_visualizer_processes: Arc<Semaphore>,
+    pub(super) visualizer_children: external_visualizer_processes::ExternalVisualizerProcesses,
     pub(super) songid_run_slots: Arc<Semaphore>,
     pub(super) songid_jobs: Option<mpsc::Sender<SongIdJob>>,
     pub(super) collections: RwLock<CollectionStore>,
@@ -101,6 +104,7 @@ pub(super) struct AppState {
     pub(super) backfill_connections: Arc<Semaphore>,
     pub(super) pending_backfill_transfers: RwLock<BTreeMap<u32, PendingBackfillTransfer>>,
     pub(super) security: RwLock<SecurityState>,
+    pub(super) share_stream_limits: share_stream_limits::ShareStreamLimits,
     pub(super) share_grants: RwLock<ShareGrantStore>,
     pub(super) share_access_tokens: RwLock<ShareAccessTokenStore>,
     pub(super) incoming_shares: RwLock<IncomingShareStore>,
@@ -348,7 +352,39 @@ impl AppState {
     }
 
     pub(super) async fn shutdown_managed_tasks(&self) {
+        self.share_stream_limits.close();
+        self.ftp_uploads.close();
+        self.relay_cleanup.close();
+        self.visualizer_children.shutdown().await;
         self.managed_background_tasks.shutdown().await;
+        if let Some(database) = self.db.as_ref() {
+            let _turn = self.webhook_persistence_lock.lock().await;
+            if let Err(error) = database
+                .fail_unconfirmed_webhook_logs(
+                    "delivery outcome unknown: daemon shut down before confirmation",
+                )
+                .await
+            {
+                eprintln!("[WEBHOOK] Failed to reconcile cancelled deliveries: {error}");
+            }
+        }
+        self.relay.write().await.protocol.shutdown_connections();
+        self.port_forwarding.shutdown().await;
+        if let Some(gateway) = self.private_gateway.as_ref() {
+            gateway.clear_runtime_connections().await;
+        }
+        {
+            let mut runtime = self.runtime.write().await;
+            runtime.bridge_active_clients.clear();
+            runtime.set_bridge_running(
+                false,
+                self.config.media_services.virtual_soulfind.bridge.enabled,
+            );
+        }
+        self.multisource.write().await.fail_unfinished(
+            "daemon shut down before the swarm completed",
+            unix_timestamp(),
+        );
         if let Err(error) = self.persist_distributed_shutdown_snapshot().await {
             eprintln!("distributed persistence shutdown flush failed: {error}");
         }

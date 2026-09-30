@@ -52,12 +52,16 @@ if ! contains_pattern '--working-directory="\$repo_root"' "$guard"; then
   printf 'Process memory guard check failed: systemd units must preserve the repository working directory\n' >&2
   status=1
 fi
-if ! contains_pattern 'with-process-memory-guard\.sh' scripts/audit-parity-manifest.py; then
+if ! contains_pattern 'with-process-memory-guard\.sh' scripts/parity_audit_process.py; then
   printf 'Process memory guard check failed: parity manifest browser/build subprocesses are unguarded\n' >&2
   status=1
 fi
-if ! contains_pattern 'command = guarded_process_command\(command, cwd\)' scripts/audit-parity-manifest.py; then
+if ! contains_pattern 'command = guarded_process_command\(command, cwd\)' scripts/parity_audit_process.py; then
   printf 'Process memory guard check failed: parity manifest Node inventory commands are unguarded\n' >&2
+  status=1
+fi
+if ! contains_pattern '^from parity_audit_process import' scripts/audit-parity-manifest.py; then
+  printf 'Process memory guard check failed: manifest must import the guarded process owner\n' >&2
   status=1
 fi
 if ! contains_pattern 'with-process-memory-guard\.sh' scripts/run-release-gate.sh; then

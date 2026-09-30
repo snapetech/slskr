@@ -36,7 +36,7 @@ vi.mock('react-toastify', () => ({
 
 describe('MediaCore', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mediacore.getContentIdStats.mockResolvedValue({
       mappingsByDomain: {},
       totalDomains: 0,
@@ -1232,10 +1232,15 @@ describe('MediaCore', () => {
     render(<MediaCore />);
     await screen.findByText('MediaCore ContentID Registry');
 
-    fireEvent.change(screen.getByPlaceholderText('Search messages...'), {
+    const messageSearchInput = screen.getByPlaceholderText('Search messages...');
+    fireEvent.change(messageSearchInput, {
       target: { value: 'hello' },
     });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[0]);
+    fireEvent.click(
+      within(messageSearchInput.parentElement).getByRole('button', {
+        name: 'Search',
+      }),
+    );
 
     expect(await screen.findByTestId('message-search-error')).toHaveTextContent(
       'Message search unavailable',
@@ -1251,11 +1256,15 @@ describe('MediaCore', () => {
     render(<MediaCore />);
     await screen.findByText('MediaCore ContentID Registry');
 
-    fireEvent.change(
-      screen.getByPlaceholderText('Search for content (artist, album, movie, etc.)'),
-      { target: { value: 'album' } },
+    const contentSearchInput = screen.getByPlaceholderText(
+      'Search for content (artist, album, movie, etc.)',
     );
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[1]);
+    fireEvent.change(contentSearchInput, { target: { value: 'album' } });
+    fireEvent.click(
+      within(contentSearchInput.parentElement).getByRole('button', {
+        name: 'Search',
+      }),
+    );
 
     expect(await screen.findByTestId('content-search-error')).toHaveTextContent(
       'Content search unavailable',
@@ -1321,10 +1330,13 @@ describe('MediaCore', () => {
 
     const searchInput = screen.getByPlaceholderText('Search messages...');
     fireEvent.change(searchInput, { target: { value: 'hello' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[0]);
+    const searchButton = within(searchInput.parentElement).getByRole('button', {
+      name: 'Search',
+    });
+    fireEvent.click(searchButton);
     expect(await screen.findByText('retained message')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[0]);
+    fireEvent.click(searchButton);
 
     expect(
       await screen.findByTestId('message-search-error'),
@@ -1377,11 +1389,13 @@ describe('MediaCore', () => {
     render(<MediaCore />);
     await screen.findByText('MediaCore ContentID Registry');
 
-    fireEvent.change(screen.getByPlaceholderText('Pod ID'), {
+    fireEvent.change(await screen.findByPlaceholderText('Pod ID'), {
       target: { value: 'pod-1' },
     });
     fireEvent.change(
-      screen.getByPlaceholderText('Content ID (e.g., content:audio:album:mb-id)'),
+      await screen.findByPlaceholderText(
+        'Content ID (e.g., content:audio:album:mb-id)',
+      ),
       { target: { value: 'content-1' } },
     );
     fireEvent.click(screen.getByRole('button', { name: 'Get Opinions' }));

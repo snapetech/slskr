@@ -1,0 +1,724 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "eb0c0bfcc779fc45bd863e8a8d92cba65e22d44a",
+  "evidenceScope": "working-tree execution before checkpoint commit; changed source hashes retained",
+  "command": "cargo run -p slskr --bin slskr-bounded-differential --features bounded-controller-api-tests-4",
+  "result": "passed",
+  "changedSourceSha256": {
+    "crates/slskr-client/src/io.rs": "c3d21b01173d700980c7ec03f933025b859cda5b1e2a0e3d0f0b0c524239a786",
+    "crates/slskr-client/tests/listener.rs": "39b526ce68382ea36b3c192f4940ab5f24ad3f6e79c3c8f84dfb94718b8d48d0",
+    "crates/slskr/src/controller_tests/full_bounded_runners.rs": "a9bbbd1b061bdbbbcaec4eb7a1656df33fc9ac5eba34f4e06f53ed98ab600936",
+    "crates/slskr/src/controller_tests/full_controller_api_differential_03.rs": "cdce198d97d3bc24c2d2c0e99e435bc73826865aea08918ab54ad0ec2328ac90",
+    "crates/slskr/src/controller_tests/full_controller_api_differential_05.rs": "577d98913a6d8827209e48ad51c99c7ea2cec5f1cc2de1a159af46d03119a4dd",
+    "crates/slskr/src/controller_tests/full_integrations_differential_03.rs": "e1006cf9b9e65c90fc5e9b08cb7558b579572ee69acda6d0c1201ae4fe350371",
+    "crates/slskr/src/controller_tests/full_media_differential_02.rs": "1d8538fffedc93c88e7abdd34547877223be2413a5ff3270ee1fbe8acc071648",
+    "crates/slskr/src/controller_tests/full_relay_differential_fixtures.rs": "13ace42c430ab8eae8607199ea9d8358caf7c56029a4710b4ed8e1b3a6e2a405",
+    "crates/slskr/src/relay.rs": "d150476f517c40fc3df10af96b18da98d686df66e807c26d08b9bbf0fa4519fd",
+    "crates/slskr/src/versioned_relay_controller.rs": "c284e7216211e98e493577dd939905f153edc21cd47d93a2f516181e92997271"
+  },
+  "binarySha256": "31587c020ad0b9889296e96299683305462849598cd1bd21fefc6789f4b5b84d",
+  "ledgers": [
+    {
+      "name": "relay_open_cases",
+      "rows": [
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "PUT",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "PUT",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "PUT",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "PUT",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "PUT",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/relay/agent",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/controller/downloads/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/controller/downloads/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/controller/downloads/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/controller/downloads/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/files/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/files/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/files/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/files/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/files/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/files/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/shares/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/shares/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/shares/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/shares/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/shares/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/relay/controller/shares/{token}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/streams/{contentId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/streams/{contentId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/streams/{contentId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/streams/{contentId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/relay/streams/{contentId}",
+          "target": "slskdn"
+        }
+      ],
+      "sha256": "0e298dd1942d2147299f735c2b584f575474529f97af10436c49c7df74219eaa"
+    },
+    {
+      "name": "audio_canonical_dedupe_migration",
+      "rows": [
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/canonical/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/audio/variants/dedupe/{recordingId}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/audio/analyzers/migrate",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/audio/analyzers/migrate",
+          "target": "slskdn"
+        }
+      ],
+      "sha256": "09a47284ea815b15cb35b99c25ca3c70331794488ec84d03408712269c31b3ad"
+    },
+    {
+      "name": "controller_upload_lifecycle",
+      "rows": [
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads",
+          "target": "slskd"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads",
+          "target": "slskd"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}",
+          "target": "slskd"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}",
+          "target": "slskd"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}/{id}",
+          "target": "slskd"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}/{id}",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}/{id}",
+          "target": "slskd"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}/{id}",
+          "target": "slskd"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}/{id}",
+          "target": "slskd"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/{username}/{id}",
+          "target": "slskd"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/all/completed",
+          "target": "slskd"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/transfers/uploads/all/completed",
+          "target": "slskd"
+        }
+      ],
+      "sha256": "163e2f4404a7db47dd4f485af2599b79de0acd1a171e7697550633976a3d0ec9"
+    },
+    {
+      "name": "controller_core_failure_restart_and_empty_contracts",
+      "rows": [
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/application",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/session",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/events",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/events",
+          "target": "slskd"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "PUT",
+          "pass": true,
+          "route": "/api/v0/application",
+          "target": "slskd"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/application",
+          "target": "slskd"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "DELETE",
+          "pass": true,
+          "route": "/api/v0/application",
+          "target": "slskd"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/events",
+          "target": "slskd"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/events",
+          "target": "slskd"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/events",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/metrics",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/metrics/kpis",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/summary",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/histogram",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/leaderboard",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/exceptions",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/directories",
+          "target": "slskd"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/users/none",
+          "target": "slskd"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/leaderboard",
+          "target": "slskd"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/exceptions",
+          "target": "slskd"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/telemetry/reports/transfers/histogram",
+          "target": "slskd"
+        }
+      ],
+      "sha256": "a9a27075c0cb9ff5527b6a549c10e4ac77f30b84a3799624bcdfd12544577512"
+    }
+  ],
+  "toolchain": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: x86_64-unknown-linux-gnu\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "platform": {
+    "system": "Linux",
+    "architecture": "x86_64",
+    "kernel": "7.1.7-arch1-1"
+  }
+}

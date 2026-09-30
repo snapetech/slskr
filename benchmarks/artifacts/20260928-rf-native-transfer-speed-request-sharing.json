@@ -1,0 +1,3340 @@
+{
+  "scope": "RF063 native player/System shared speed snapshot; RF073 hosted rerun pending",
+  "sourceCommitBeforeChanges": "23e53097ce1d9385717aed992e94066fb20a6eaa",
+  "worktreeDirty": true,
+  "cacheTtlMs": 1000,
+  "nativeLibraryTests": 88,
+  "strictClippy": "passed",
+  "wasmCompile": "passed",
+  "browserAudit": {
+    "apiResponses": [],
+    "apiRequestBudget": {
+      "enabled": true,
+      "maximumByRoute": {
+        "/searches": 14,
+        "/discovery-graph": 13,
+        "/playlist-intake": 19,
+        "/wishlist": 10,
+        "/downloads": 14,
+        "/uploads": 14,
+        "/messages": 13,
+        "/users": 16,
+        "/contacts": 15,
+        "/solid": 20,
+        "/collections": 21,
+        "/sharegroups": 20,
+        "/shared": 20,
+        "/browse": 8,
+        "/system": 39
+      },
+      "minimumRepeatedEndpointIntervalMs": 200,
+      "settleMs": 500
+    },
+    "evidenceMode": "mock",
+    "errors": [],
+    "generatedAt": "2026-09-28T05:52:30.478Z",
+    "routes": [
+      {
+        "initialApiRequestCount": 13,
+        "apiRequestCount": 14,
+        "apiRequestCountBudget": 14,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/1/responses",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/records",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/hated-interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/transfers/downloads/peer-audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Search",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/searches",
+        "primaryActionCount": 17,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "searches-desktop.png",
+        "selectedStatus": "Selected Result group",
+        "selectedTitle": "Result group",
+        "toastText": "Queue Download sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 13,
+        "apiRequestCount": 14,
+        "apiRequestCountBudget": 14,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/1/responses",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/records",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/hated-interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/transfers/downloads/peer-audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Search",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/searches",
+        "primaryActionCount": 17,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "searches-mobile.png",
+        "selectedStatus": "Selected Result group",
+        "selectedTitle": "Result group",
+        "toastText": "Queue Download sending",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 13,
+        "apiRequestCount": 13,
+        "apiRequestCountBudget": 13,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/1/responses",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/records",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/hated-interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Discovery Graph",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/discovery-graph",
+        "primaryActionCount": 9,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "discovery-graph-desktop.png",
+        "selectedStatus": "Selected Result group",
+        "selectedTitle": "Result group",
+        "toastText": "Download: No executable UI contract is registered for the DiscoveryGraph route.",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 13,
+        "apiRequestCount": 13,
+        "apiRequestCountBudget": 13,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/1/responses",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/searches/records",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/hated-interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/soulseek/interests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Discovery Graph",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/discovery-graph",
+        "primaryActionCount": 9,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "discovery-graph-mobile.png",
+        "selectedStatus": "Selected Result group",
+        "selectedTitle": "Result group",
+        "toastText": "Download: No executable UI contract is registered for the DiscoveryGraph route.",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 19,
+        "apiRequestCount": 19,
+        "apiRequestCountBudget": 19,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/bridge/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/jobs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/mesh/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/albums/completion",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/release-radar/subscriptions",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/pods",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/security/dashboard",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/solid/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/songid/runs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-feeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-providers",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Playlist Intake",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/playlist-intake",
+        "primaryActionCount": 9,
+        "confirmationVisible": false,
+        "rowCount": 0,
+        "screenshot": "playlist-intake-desktop.png",
+        "selectedStatus": "",
+        "selectedTitle": "",
+        "toastText": "",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 19,
+        "apiRequestCount": 19,
+        "apiRequestCountBudget": 19,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/bridge/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/jobs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/mesh/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/albums/completion",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/release-radar/subscriptions",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/pods",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/security/dashboard",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/solid/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/songid/runs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-feeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-providers",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Playlist Intake",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/playlist-intake",
+        "primaryActionCount": 9,
+        "confirmationVisible": false,
+        "rowCount": 0,
+        "screenshot": "playlist-intake-mobile.png",
+        "selectedStatus": "",
+        "selectedTitle": "",
+        "toastText": "",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 9,
+        "apiRequestCount": 10,
+        "apiRequestCountBudget": 10,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/wishlist",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/wishlist/want-1/search",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Wishlist",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/wishlist",
+        "primaryActionCount": 11,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "wishlist-desktop.png",
+        "selectedStatus": "Selected rare audit pressing",
+        "selectedTitle": "rare audit pressing",
+        "toastText": "Run Wishlist Search sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 9,
+        "apiRequestCount": 10,
+        "apiRequestCountBudget": 10,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/wishlist",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/wishlist/want-1/search",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Wishlist",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/wishlist",
+        "primaryActionCount": 11,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "wishlist-mobile.png",
+        "selectedStatus": "Selected rare audit pressing",
+        "selectedTitle": "rare audit pressing",
+        "toastText": "Run Wishlist Search sending",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 14,
+        "apiRequestCount": 14,
+        "apiRequestCountBudget": 14,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/config/download-filter",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations/default",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/downloads/requests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/downloads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/uploads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Downloads",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/downloads",
+        "primaryActionCount": 14,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "downloads-desktop.png",
+        "selectedStatus": "Selected audit-track.flac",
+        "selectedTitle": "audit-track.flac",
+        "toastText": "Cancel Download: Select a live row before running this action.",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 14,
+        "apiRequestCount": 14,
+        "apiRequestCountBudget": 14,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/config/download-filter",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations/default",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/downloads/requests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/downloads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/uploads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Downloads",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/downloads",
+        "primaryActionCount": 14,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "downloads-mobile.png",
+        "selectedStatus": "Selected audit-track.flac",
+        "selectedTitle": "audit-track.flac",
+        "toastText": "Cancel Download: Select a live row before running this action.",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 14,
+        "apiRequestCount": 14,
+        "apiRequestCountBudget": 14,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/config/download-filter",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations/default",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/downloads/requests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/downloads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/uploads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Uploads",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/uploads",
+        "primaryActionCount": 13,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "uploads-desktop.png",
+        "selectedStatus": "Selected shared-track.flac",
+        "selectedTitle": "shared-track.flac",
+        "toastText": "Deny Upload: Select a live row before running this action.",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 14,
+        "apiRequestCount": 14,
+        "apiRequestCountBudget": 14,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/config/download-filter",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/destinations/default",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/downloads/requests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/downloads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/uploads",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Uploads",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/uploads",
+        "primaryActionCount": 13,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "uploads-mobile.png",
+        "selectedStatus": "Selected shared-track.flac",
+        "selectedTitle": "shared-track.flac",
+        "toastText": "Deny Upload: Select a live row before running this action.",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 12,
+        "apiRequestCount": 13,
+        "apiRequestCountBudget": 13,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/conversations",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/conversations/chat-audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/pods",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/private-message-auto-response",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/conversations/chat-audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Messages",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/messages",
+        "primaryActionCount": 19,
+        "confirmationVisible": false,
+        "rowCount": 2,
+        "screenshot": "messages-desktop.png",
+        "selectedStatus": "Selected chat-audit",
+        "selectedTitle": "chat-audit",
+        "toastText": "Send Message sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 12,
+        "apiRequestCount": 13,
+        "apiRequestCountBudget": 13,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/conversations",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/conversations/chat-audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/pods",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/private-message-auto-response",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/conversations/chat-audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Messages",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/messages",
+        "primaryActionCount": 19,
+        "confirmationVisible": false,
+        "rowCount": 2,
+        "screenshot": "messages-mobile.png",
+        "selectedStatus": "Selected chat-audit",
+        "selectedTitle": "chat-audit",
+        "toastText": "Send Message sending",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 15,
+        "apiRequestCount": 16,
+        "apiRequestCountBudget": 16,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts/nearby",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/notes",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/endpoint",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/info",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/users/Online/directory",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Users",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/users",
+        "primaryActionCount": 15,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "users-desktop.png",
+        "selectedStatus": "Selected peer-audit",
+        "selectedTitle": "peer-audit",
+        "toastText": "Request Directory sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 15,
+        "apiRequestCount": 16,
+        "apiRequestCountBudget": 16,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts/nearby",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/notes",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/endpoint",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/info",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/users/Online/directory",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Users",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/users",
+        "primaryActionCount": 15,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "users-mobile.png",
+        "selectedStatus": "Selected peer-audit",
+        "selectedTitle": "peer-audit",
+        "toastText": "Request Directory sending",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 15,
+        "apiRequestCount": 15,
+        "apiRequestCountBudget": 15,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts/nearby",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/notes",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/endpoint",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/info",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Contacts",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/contacts",
+        "primaryActionCount": 15,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "contacts-desktop.png",
+        "selectedStatus": "Selected friend-audit",
+        "selectedTitle": "friend-audit",
+        "toastText": "Send Message: Enter the required value before running this action.",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 15,
+        "apiRequestCount": 15,
+        "apiRequestCountBudget": 15,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/contacts/nearby",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/notes",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/endpoint",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/info",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/users/peer-audit/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Contacts",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/contacts",
+        "primaryActionCount": 15,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "contacts-mobile.png",
+        "selectedStatus": "Selected friend-audit",
+        "selectedTitle": "friend-audit",
+        "toastText": "Send Message: Enter the required value before running this action.",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 19,
+        "apiRequestCount": 20,
+        "apiRequestCountBudget": 20,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/bridge/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/jobs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/mesh/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/albums/completion",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/release-radar/subscriptions",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/pods",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/security/dashboard",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/solid/status",
+            "count": 2,
+            "minimumIntervalMs": 583.9
+          },
+          {
+            "endpoint": "GET /api/v0/songid/runs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-feeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-providers",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Solid",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/solid",
+        "primaryActionCount": 11,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "solid-desktop.png",
+        "selectedStatus": "Selected https://audit.example/profile/card#me",
+        "selectedTitle": "https://audit.example/profile/card#me",
+        "toastText": "Resolve WebID sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 19,
+        "apiRequestCount": 20,
+        "apiRequestCountBudget": 20,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/bridge/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/jobs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/mesh/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/albums/completion",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/release-radar/subscriptions",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/pods",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/security/dashboard",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/solid/status",
+            "count": 2,
+            "minimumIntervalMs": 578.6
+          },
+          {
+            "endpoint": "GET /api/v0/songid/runs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-feeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-providers",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Solid",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/solid",
+        "primaryActionCount": 11,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "solid-mobile.png",
+        "selectedStatus": "Selected https://audit.example/profile/card#me",
+        "selectedTitle": "https://audit.example/profile/card#me",
+        "toastText": "Resolve WebID sending",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 20,
+        "apiRequestCount": 21,
+        "apiRequestCountBudget": 21,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/downloads/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/incomplete/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items/browser",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants/by-collection/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shared",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/sharegroups",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares/catalog",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Collections",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/collections",
+        "primaryActionCount": 11,
+        "confirmationVisible": false,
+        "rowCount": 2,
+        "screenshot": "collections-desktop.png",
+        "selectedStatus": "Selected Audit Collection",
+        "selectedTitle": "Audit Collection",
+        "toastText": "Open Collection sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 20,
+        "apiRequestCount": 21,
+        "apiRequestCountBudget": 21,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/downloads/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/incomplete/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items/browser",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants/by-collection/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shared",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/sharegroups",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares/catalog",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Collections",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/collections",
+        "primaryActionCount": 11,
+        "confirmationVisible": false,
+        "rowCount": 2,
+        "screenshot": "collections-mobile.png",
+        "selectedStatus": "Selected Audit Collection",
+        "selectedTitle": "Audit Collection",
+        "toastText": "Open Collection sending",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 20,
+        "apiRequestCount": 20,
+        "apiRequestCountBudget": 20,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/downloads/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/incomplete/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items/browser",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants/by-collection/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shared",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/sharegroups",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares/catalog",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Share Groups",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/sharegroups",
+        "primaryActionCount": 12,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "sharegroups-desktop.png",
+        "selectedStatus": "Selected Audit Group",
+        "selectedTitle": "Audit Group",
+        "toastText": "Add Share Group Member: Enter the required value before running this action.",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 20,
+        "apiRequestCount": 20,
+        "apiRequestCountBudget": 20,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/downloads/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/incomplete/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items/browser",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants/by-collection/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shared",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/sharegroups",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares/catalog",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Share Groups",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/sharegroups",
+        "primaryActionCount": 12,
+        "confirmationVisible": false,
+        "rowCount": 1,
+        "screenshot": "sharegroups-mobile.png",
+        "selectedStatus": "Selected Audit Group",
+        "selectedTitle": "Audit Group",
+        "toastText": "Add Share Group Member: Enter the required value before running this action.",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 20,
+        "apiRequestCount": 20,
+        "apiRequestCountBudget": 20,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/downloads/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/incomplete/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items/browser",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants/by-collection/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shared",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/sharegroups",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares/catalog",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Shared with Me",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/shared",
+        "primaryActionCount": 10,
+        "confirmationVisible": false,
+        "rowCount": 0,
+        "screenshot": "shared-desktop.png",
+        "selectedStatus": "",
+        "selectedTitle": "",
+        "toastText": "",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 20,
+        "apiRequestCount": 20,
+        "apiRequestCountBudget": 20,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/collections/collection-1/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/downloads/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/files/incomplete/directories",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items/browser",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/share-grants/by-collection/collection-1",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shared",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/sharegroups",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares/catalog",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Shared with Me",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/shared",
+        "primaryActionCount": 10,
+        "confirmationVisible": false,
+        "rowCount": 0,
+        "screenshot": "shared-mobile.png",
+        "selectedStatus": "",
+        "selectedTitle": "",
+        "toastText": "",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 8,
+        "apiRequestCount": 8,
+        "apiRequestCountBudget": 8,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Browse",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/browse",
+        "primaryActionCount": 12,
+        "confirmationVisible": false,
+        "rowCount": 0,
+        "screenshot": "browse-desktop.png",
+        "selectedStatus": "",
+        "selectedTitle": "",
+        "toastText": "",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 8,
+        "apiRequestCount": 8,
+        "apiRequestCountBudget": 8,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "Browse",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/browse",
+        "primaryActionCount": 12,
+        "confirmationVisible": false,
+        "rowCount": 0,
+        "screenshot": "browse-mobile.png",
+        "selectedStatus": "",
+        "selectedTitle": "",
+        "toastText": "",
+        "viewport": "mobile"
+      },
+      {
+        "initialApiRequestCount": 38,
+        "apiRequestCount": 39,
+        "apiRequestCountBudget": 39,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/bridge/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/config",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/database/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/diagnostics",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/events",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/integrations/lidarr/manualimport/history",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/integrations/lidarr/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/integrations/lidarr/sync/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues/by-artist",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues/by-codec",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues/by-release",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/logs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/mesh/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/albums/completion",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/release-radar/subscriptions",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/options",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/options/yaml",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/options/yaml/location",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/quarantine-jury/audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/quarantine-jury/requests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/security/dashboard",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/solid/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/songid/runs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-providers",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/telemetry/metrics",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/telemetry/metrics/kpis",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/telemetry/reports/transfers/summary",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/shares/rescan",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "System",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 108,
+          "mainPaddingBottom": 132,
+          "playerHeight": 128
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/system",
+        "primaryActionCount": 38,
+        "confirmationVisible": false,
+        "rowCount": 39,
+        "screenshot": "system-desktop.png",
+        "selectedStatus": "Selected database / stats",
+        "selectedTitle": "database / stats",
+        "toastText": "Rescan Shares sending",
+        "viewport": "desktop"
+      },
+      {
+        "initialApiRequestCount": 38,
+        "apiRequestCount": 39,
+        "apiRequestCountBudget": 39,
+        "apiRequestMetrics": [
+          {
+            "endpoint": "GET /api/v0/application",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/bridge/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/config",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/database/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/diagnostics",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/events",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/health",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/integrations/lidarr/manualimport/history",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/integrations/lidarr/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/integrations/lidarr/sync/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues/by-artist",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues/by-codec",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/health/issues/by-release",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/library/items",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/listening-party",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/logs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/mesh/stats",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/albums/completion",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/musicbrainz/release-radar/subscriptions",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/nowplaying",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/options",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/options/yaml",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/options/yaml/location",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/player/external-visualizer",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/quarantine-jury/audit",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/quarantine-jury/requests",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/security/dashboard",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/server",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/shares",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/solid/status",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/songid/runs",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/source-providers",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/telemetry/metrics",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/telemetry/metrics/kpis",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/telemetry/reports/transfers/summary",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/transfers/speeds",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "GET /api/v0/version",
+            "count": 1,
+            "minimumIntervalMs": null
+          },
+          {
+            "endpoint": "POST /api/v0/shares/rescan",
+            "count": 1,
+            "minimumIntervalMs": null
+          }
+        ],
+        "developerOpen": false,
+        "heading": "System",
+        "inspectorCount": 1,
+        "layout": {
+          "bodyPaddingBottom": 0,
+          "mainPaddingBottom": 12,
+          "playerHeight": 401
+        },
+        "nativeWorkspaceCount": 1,
+        "path": "/system",
+        "primaryActionCount": 38,
+        "confirmationVisible": false,
+        "rowCount": 39,
+        "screenshot": "system-mobile.png",
+        "selectedStatus": "Selected database / stats",
+        "selectedTitle": "database / stats",
+        "toastText": "Rescan Shares sending",
+        "viewport": "mobile"
+      }
+    ],
+    "scenario": "success"
+  }
+}

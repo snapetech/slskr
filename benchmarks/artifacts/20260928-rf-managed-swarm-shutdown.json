@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "1a1318889bb51a2ca6e9e8c4f15fd446cc4bcbeb",
+  "evidenceScope": "working-tree execution before checkpoint commit; changed source hashes retained",
+  "changedSourceSha256": {
+    "crates/slskr/src/app_state.rs": "8b1926e300236e8355bd30247114c53c92cf1b27fe7bbe5bf24379451f392054",
+    "crates/slskr/src/feature_mutation_controller.rs": "6b0128473ac2e5bab4c6da41992e6864cefaf02ce8e283203c399a3b8498de34",
+    "crates/slskr/src/focused_controller_tests/lifecycle.rs": "3d93a5beb6d246c7ff80e7318eb163869fa8135d780c2f3e31c20d7f9a5e1001",
+    "crates/slskr/src/managed_tasks.rs": "acaba2b534593ddc3ae0ce1a03077f35f86a9e95ab750c663be687dada86fd94",
+    "crates/slskr/src/multisource.rs": "c6342727aeb6e1f45c2c8c60213b11f2bd4fb381381325492f245b5e70b6f4bf",
+    "crates/slskr/src/route_dispatch_group_7_stream_services.rs": "7d303a543e8e2da4308e87a50b9986de1c2be30999db36e8ba972cadafbe21e7"
+  },
+  "gates": [
+    {
+      "command": "cargo test -p slskr --lib",
+      "result": "passed",
+      "logSha256": "0da90e0c3edd8466150256ae48454b7c7cbd670f6b722606577fd85cd6ecb53d"
+    },
+    {
+      "command": "cargo clippy -p slskr --all-targets -- -D warnings",
+      "result": "passed",
+      "logSha256": "3ee7875e772b95b161c109b57d9ed10b237178ac178db46bb84901fa722b69f0"
+    },
+    {
+      "command": "cargo check -p slskr --all-targets --features full-controller-tests,legacy-route-dispatch",
+      "result": "passed",
+      "logSha256": "5c970e5a00f4d59045a71bb3f92423e5fab3cb54cccd74a2722d745eeec53b14"
+    },
+    {
+      "command": "cargo run -p slskr --bin slskr-bounded-differential --features bounded-controller-api-tests-3",
+      "result": "passed",
+      "logSha256": "c616ac868109b565026b3bae6156671d2660935ea0e8af9a6fd441e1586264de"
+    }
+  ]
+}

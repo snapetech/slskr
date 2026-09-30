@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-066 real invite/contact browser compatibility",
+  "date": "2026-09-28",
+  "sourceSha256": {
+    "crates/slskr/src/route_dispatch_group_5_library_profile.rs": "6b8ee851e8e7c18ba54c4aa61c25fc0ca0082321594fdb2c602da05358c4c532",
+    "crates/slskr/src/route_dispatch_group_7_media_profile_import.rs": "dfaf3338cab0980f0db67ed63e3f2a5f421072dd28b722880828a8e62700c911",
+    "crates/slskr/src/focused_controller_tests/identity_integrations.rs": "e0f589a0071c5ff5dbeecea341102c1f3abbbc24c7dc67d2b797dd0391558114",
+    "web/src/lib/identity.js": "992c10ff360850abc1eb192b5a149ff20f86517fe4db4b6bd43ff2d19c7599c3",
+    "web/src/lib/identity.test.js": "aecd9aed02cd62d2627abc06e08bdd824270c9241999bf5a53f035b67559dfe2",
+    "web/src/components/Contacts/Contacts.jsx": "caa96bdd23199c6acff9b5b5d3691ca7c5256c3f0cf59925df244e5f810d66ae",
+    "web/src/components/Contacts/Contacts.test.jsx": "86ec65aa6aab516700f9306f1eed02a1c8edeef7ab2c23c1acb7844f5c75ca36"
+  },
+  "validation": {
+    "daemonTestsPassed": 704,
+    "daemonTestsIgnored": 1,
+    "webTestsPassed": 930,
+    "strictClippy": "passed",
+    "fullControllerLegacyAllTargets": "passed",
+    "actualBrowserInviteAddFriend": "passed; three native locally owned nodes; external Soulseek connection disabled; no extra peer ports"
+  },
+  "logSha256": {
+    "target/rf-profile-full-tests.log": "d82801d394452b4faef70cc5a407871c6d7059d7b1fd115edd75cb2dad70fe99",
+    "target/rf-profile-full-web-tests.log": "1a84a5c47e157559c4f47defc4af5d0812b2919297d625b39fe27dd4520de9a2",
+    "target/rf-profile-e2e.log": "2f001c5028cf45e1b5b1e83ffcbd76171df532b38bc1269d05c6bdfb378f3e37"
+  },
+  "scope": "Invite imports create unverified username contacts, not authenticated identity or share permission. Session summaries retain redaction. Remaining movie range/concurrency/backfill acceptance is open."
+}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, TestTube } from 'lucide-react';
 import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
+import { useAbortableRequests } from '../hooks/useAbortableRequests';
 
 interface WebhooksPageProps {
   apiUrl: string;
@@ -67,6 +68,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   const [newUrl, setNewUrl] = useState('');
   const [selectedEvents, setSelectedEvents] = useState<string[]>(['search.created']);
   const requestIdRef = useRef(0);
+  const { createController, releaseController } = useAbortableRequests();
 
   const availableEvents = [
     'search.created',
@@ -114,6 +116,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   const handleCreateWebhook = async () => {
     if (!newUrl) return;
 
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, '/api/admin/webhooks'), apiKey, {
         method: 'POST',
@@ -121,43 +124,60 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
           url: newUrl,
           events: selectedEvents,
         }),
+        signal: controller.signal,
       });
-      
+      if (controller.signal.aborted) return;
       setShowForm(false);
       setNewUrl('');
       setSelectedEvents(['search.created']);
-      await fetchWebhooks();
+      await fetchWebhooks(controller.signal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
   const handleDeleteWebhook = async (id: string) => {
     if (!window.confirm('Delete this webhook?')) return;
 
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, `/api/admin/webhooks/${encodeURIComponent(id)}`), apiKey, {
         method: 'DELETE',
+        signal: controller.signal,
       });
-      await fetchWebhooks();
+      if (!controller.signal.aborted) await fetchWebhooks(controller.signal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
   const handleTestWebhook = async (id: string) => {
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, `/api/admin/webhooks/${encodeURIComponent(id)}/test`), apiKey, {
         method: 'POST',
+        signal: controller.signal,
       });
 
-      alert('Test webhook sent!');
+      if (!controller.signal.aborted) alert('Test webhook sent!');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to test webhook');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Failed to test webhook');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
-  if (loading) return <div className="text-center text-gray-500">Loading webhooks...</div>;
+  if (loading) return <div role="status" className="text-center text-gray-500">Loading webhooks...</div>;
 
   return (
     <div className="space-y-6">
@@ -173,7 +193,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-red-800">{error}</p>
         </div>
       )}
@@ -183,8 +203,9 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
           <h3 className="text-lg font-semibold mb-4">Create Webhook</h3>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">URL</label>
+              <label htmlFor="webhook-url" className="block text-sm font-medium text-gray-700 mb-2">URL</label>
               <input
+                id="webhook-url"
                 type="url"
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
@@ -258,12 +279,14 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleTestWebhook(webhook.id)}
+                    aria-label={`Send test webhook to ${webhook.url}`}
                     className="p-2 hover:bg-blue-100 rounded text-blue-600"
                   >
                     <TestTube className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDeleteWebhook(webhook.id)}
+                    aria-label={`Delete webhook ${webhook.url}`}
                     className="p-2 hover:bg-red-100 rounded text-red-600"
                   >
                     <Trash2 className="w-4 h-4" />

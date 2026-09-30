@@ -1,0 +1,872 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "bcbfbc67059726f1801434b930be80edab2d563f",
+  "source": "crates/slskr-web/src/rustymilk_ui.rs",
+  "originalBytes": 100032,
+  "originalLines": 2802,
+  "originalSha256": "f06b90154647ca4929b8437103f219856a0c63837471c7200ff3498e67081a13",
+  "originalLibrarySha256": "f18728f7672bd4e4e02d0e559232b4977c2b749c80833c68c61f53790e8860a1",
+  "librarySha256": "60cd1e2c0c682472b9447a7c819a466bb1a0e60e1171137dd323b4e996365489",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 84,
+  "publicDeclarations": [],
+  "owners": {
+    "crates/slskr-web/src/rustymilk_ui_owners/browser_http_requests.rs": {
+      "lines": 93,
+      "sha256": "b9990dba482ef66e768728c650395b51ea5a7eaa0178f814d9c721c0de715ae1"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/live_player_refresh.rs": {
+      "lines": 98,
+      "sha256": "2f4388356ffc6cb98670b414f2eb889ff935e5f6db5eb9b91112368f6e0c6832"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/live_route_refresh.rs": {
+      "lines": 250,
+      "sha256": "4974274dc1ff0d72c32412408316ab7e3d1ea00fb944ef1801c6aefc39bc3993"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_audio_analysis.rs": {
+      "lines": 119,
+      "sha256": "47d20296d08fdc5b144d12ad6f653743a78e8d3356010c4dc813b27f9a0594e6"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_automation.rs": {
+      "lines": 151,
+      "sha256": "f77dd7770257e6ea67e1629ed9c6dccf1896bb04e3a12461a12c08b5e0a83b76"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_browser_controls.rs": {
+      "lines": 332,
+      "sha256": "4ca38040067b63d89e48830221d606de3807a3bd7288dfacd374d69ccad66c71"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_file_imports.rs": {
+      "lines": 417,
+      "sha256": "3ab3f4ab1d61ee62d33d97bf064f623f60c73123a272f6eb82c66410e56519cf"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_library_actions.rs": {
+      "lines": 370,
+      "sha256": "f22a3ffa320353949a15ceff99e14a6afa5dedef2c3e602e6a7fcd631ef8b4ff"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_library_projection.rs": {
+      "lines": 223,
+      "sha256": "0dfd0a5fb3e072e3744379eb0dc9c9f2721fff9541e8f8cf7e6a23c43953aee5"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_library_storage.rs": {
+      "lines": 322,
+      "sha256": "779d9167b2b9a5221e63a21b2eddf135f7da192e3846b142a3df7eaabb0932ab"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_playlist_actions.rs": {
+      "lines": 159,
+      "sha256": "56fdcbb2fd44f10906dee140cc163243c97759e05db4311610d09d4c0f9080b3"
+    },
+    "crates/slskr-web/src/rustymilk_ui_owners/visualizer_preset_editor.rs": {
+      "lines": 295,
+      "sha256": "2a7a2a2fe3660cedb551a83cc0d3e87a9e32c20c950dcf566b1dec7fcbb1f866"
+    }
+  },
+  "items": [
+    {
+      "kind": "fn",
+      "name": "mount_rustymilk_buttons",
+      "owner": "visualizer_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 9639,
+      "originalSha256": "58f57350da641c7c2ca319fdc2b215ce0b22bc68ee756537ef045974ad6d47f3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_rustymilk_selects",
+      "owner": "visualizer_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 2155,
+      "originalSha256": "9573ad507641730bb65788fa4c66873bd7208ff73678685544b63c49f2f86ecf",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_mouse_position",
+      "owner": "visualizer_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 380,
+      "originalSha256": "3ed36fb6702260537d234e245a0cdbaed111bb61126bd87ae5e67fa6698bb18e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_rustymilk_mouse_input",
+      "owner": "visualizer_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 2073,
+      "originalSha256": "0aaeb799e0ec11e146e19da7b8722094ec35b1e8c13360bd7394064e177948e2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_count",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 424,
+      "originalSha256": "d1850d6123ac932260889083ef549b9f552a0225686b3ffbf5384d8e4013a4db",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_active_preset_source",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 787,
+      "originalSha256": "1bcff098a3995bf63398ace451d6dc6ff4de9fcc0c0684358839724e04e098e2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_active_preset_name",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 471,
+      "originalSha256": "db0eac33bc538cef67278de7891c2684fe22024f373bbfaa37aeb379afacfb17",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_favorite_key",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 563,
+      "originalSha256": "052a0a710fec85d42708b2670757b9f46206f07aa885bccbcb5d95d4f27681dc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_favorites_only",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 214,
+      "originalSha256": "552fae4e97b9b484f8555c7447b1b70e5c966cd9d0a3fe0a13f2359ca3c7ecff",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_active_playlist",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 196,
+      "originalSha256": "76843f63c44d8c9b33051cc59d9e06879854176f59c72e55beba70e340922595",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_search_query",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 244,
+      "originalSha256": "63e573512757dd9f28c1b8b0d01e5840583e5286fc3010175ae5a6e21d56c799",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_visible_preset_indices",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 1453,
+      "originalSha256": "975003ecdf47260ce548f0bbdb821c3e5417af772893392367d875ce8fe7097e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_empty_visible_preset_message",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 467,
+      "originalSha256": "fea3523d8b33cf45d76f7f06567554d0e793e7751e300dc201ca6a9640f2a4e4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_rustymilk_library_controls",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 2159,
+      "originalSha256": "497eb6a77c76947a66da563e15f2b53a0fe4fb1e5851d2ad1a0308b8a904679a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "set_rustymilk_active_preset",
+      "owner": "visualizer_library_projection",
+      "wasmOnly": true,
+      "originalBytes": 857,
+      "originalSha256": "6ea16fc04ce8645234e1afb9b0b9bc5e1eda3243105b5c8295c6a373f8dc2fe0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_imported_presets",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 1173,
+      "originalSha256": "c96c78245ee7193ce5f385b7940c86955fb2d529f65cf130a96acd0706621733",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_rustymilk_imported_presets",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 778,
+      "originalSha256": "6d953bb6c2e7a355e95dd67288658defe1c08f180244ddb40401918b4d727feb",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_favorite_presets",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 778,
+      "originalSha256": "a73e1125c6071b6eb267f1dbbbb4ed8cca3f6a1edd40290b50c7e261405e4634",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_rustymilk_favorite_presets",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 648,
+      "originalSha256": "b2b017672d6fe837aeffc9225f53e2b10e7ad3ba75af2d06543656169f5b2ae3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_preset_search",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 430,
+      "originalSha256": "87b68463a07d43ea50d58b011409bb9f2518084ab5be6f77639914d955285024",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_simple_setting",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 397,
+      "originalSha256": "49f04f4c3bae07ce7d01e1f600b665521cc5a6aca3b675d513389625f947ffea",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_rustymilk_simple_setting",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 353,
+      "originalSha256": "b7591c058f0a38f6501ebf32447b3975a3ef55d77a460565df0e8cacde4171a6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_active_playlist",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 191,
+      "originalSha256": "6e025022717088a535150727c7c56bcdca0c813b98587fcd19c9da791672725e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_playlists",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 1268,
+      "originalSha256": "45dee7b60ab693a429fb55da15f7e2dfd8b619c6063c30064ba4eec6b72c5d71",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_playlists_from_document",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 306,
+      "originalSha256": "b43825a68cc6b447f30a56f2b14250bc5e46c637458fd6e4d0eac900e60ca919",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_rustymilk_playlists",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 862,
+      "originalSha256": "6a9d0973ae5d42dcbfd6cb7f3ae64908490ac7493bd79e68a65b83d7f18e089c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_rustymilk_preset_search",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 494,
+      "originalSha256": "a97b98f9494bcb863b6562c01ce7c1bc03ab87e5ba0f8251c67e9334141e3edf",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_rustymilk_texture_assets",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 920,
+      "originalSha256": "33d3e40293cfd128e4aae78f6384bec00938be92934c7d863fdf700a581e3111",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_rustymilk_texture_assets",
+      "owner": "visualizer_library_storage",
+      "wasmOnly": true,
+      "originalBytes": 672,
+      "originalSha256": "3ad755ff74035eee5d6635508621beb873a5c60b319c789455ccaaaf807d10db",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "import_rustymilk_preset",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1387,
+      "originalSha256": "0cd816efbc4028de6b8e6b248a615d6154984e80f74d68c0034bc974bb5f4c58",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "reset_rustymilk_import",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 679,
+      "originalSha256": "9e3311a383c0e7eda6da979471236ecffb4906c3d54ebbd686d22948678fa04d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "cycle_rustymilk_preset",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 299,
+      "originalSha256": "a7922641d574f6b209f403fcbae3e5b18c0f686e00d535671910dfa1b7b08013",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "cycle_rustymilk_preset_by",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1177,
+      "originalSha256": "1b2dbc9b0402de274be062bca6360d2618b02ee295111ced75c78fe70f8e60d1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_rustymilk_preset",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1213,
+      "originalSha256": "688c84b4b12267747017bc108f0653bdb6dc6849dfeb04101e94a03ed78202c1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "clear_rustymilk_preset_search",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1037,
+      "originalSha256": "2e42d8f70a3e91c3bbae4ce3449fc14c1793d0dbf097855ffdc4d8b089e6ee6f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "toggle_rustymilk_favorite",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1166,
+      "originalSha256": "9f8c4ec3fa7d09163d8c0c59b5f4c3b9e3305cbf9716aab16f0cb030501fa4c8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "toggle_rustymilk_favorites_only",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1574,
+      "originalSha256": "0acbe518e309b1c1a9ca8bced3edc16259cbc68d461ba211f93a18fa45b149af",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "random_rustymilk_preset",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 853,
+      "originalSha256": "427d07f8dc24a040c64bb946ffc0602b46f3353a2ff7c0f8bee6de79e7f34d0c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "remove_rustymilk_active_preset",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 2067,
+      "originalSha256": "7f6c2abb119cf0978e8a83a8672c963b62157ab876591ec4cd104b6ba0364bc8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "clear_rustymilk_library",
+      "owner": "visualizer_library_actions",
+      "wasmOnly": true,
+      "originalBytes": 1093,
+      "originalSha256": "d1848b0819b98cd99d7da297e91062147366d13024a3863de0e556bea00e204b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "save_rustymilk_playlist",
+      "owner": "visualizer_playlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 1572,
+      "originalSha256": "ea4c1f8d482d1ca89363deb309710fc4d6dec806139d98f1c54d12bad203f494",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "cycle_rustymilk_playlist",
+      "owner": "visualizer_playlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 1576,
+      "originalSha256": "a0c7e1347d1bc85d4a2c280fd512d9288b80217f0a582a1726aba43a51db0bd2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rename_rustymilk_playlist",
+      "owner": "visualizer_playlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 841,
+      "originalSha256": "2bb64c2973e78ee3336a416f6d8bc6317aa0cd8bc4cc0d1557b0d977927270c5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "clear_rustymilk_playlist_filter",
+      "owner": "visualizer_playlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 654,
+      "originalSha256": "aa1523e980098b4e151ca8d4d2193d7260652e65f432aa03e0107d8497437a07",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "remove_rustymilk_playlist",
+      "owner": "visualizer_playlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 1168,
+      "originalSha256": "d9e4b1b5179e798064f614f2ba15efce39d8f6f3cc145716c704087194849b98",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "store_rustymilk_edited_source",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 1519,
+      "originalSha256": "cb44531845bb317952eb43606fcdd2331fce2c64c88f92f1966e60132010e219",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "active_rustymilk_parsed",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 496,
+      "originalSha256": "1c1cc9a707c51f72e9533b4e286c0af1ec5e9f73463638d0d1a52a34f24ef18a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "apply_rustymilk_parameter",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 1539,
+      "originalSha256": "f4649b661a294f6547d62a7189f5795f4d3c66379b408c3988d52f71338402d6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "randomize_rustymilk_parameters",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 1170,
+      "originalSha256": "e3d838e5acd2c115b6ad7339cf010d0fbb16cdb8be67b7f71c8fb1f677532a70",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "import_rustymilk_fragment",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 1141,
+      "originalSha256": "f8da475029cb7a7aa2d500cbc0f247b64239c0c8ad25e064240741a097ba224c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "export_rustymilk_fragment",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 903,
+      "originalSha256": "df0cce22b401201075e4af38f13af12dcd76329db5276169959ce52bb103d4b4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "remove_rustymilk_fragment",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 1253,
+      "originalSha256": "c9ccee1b5a196c4686a57e48f7a65f12a9faa02f034fe9c0eed77e9e4f3b1a3d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "export_rustymilk_preset",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 573,
+      "originalSha256": "329f5135b6d572a6d4c4bdab8522033901363090f7df40fa836774e744d672e3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_rustymilk_text",
+      "owner": "visualizer_preset_editor",
+      "wasmOnly": true,
+      "originalBytes": 1013,
+      "originalSha256": "e0dba63a1fe87b0a4a3900681efa02f790bbc463129b5980dcbef1c3fdaf7ae0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_fps_cap_ms",
+      "owner": "visualizer_automation",
+      "wasmOnly": true,
+      "originalBytes": 348,
+      "originalSha256": "21bce1527902fc7bf12cf26599c4ab6327e3ad7a7a143239fb88b354fba84eae",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "cycle_rustymilk_automation",
+      "owner": "visualizer_automation",
+      "wasmOnly": true,
+      "originalBytes": 670,
+      "originalSha256": "bdd5cb632634a2e84b6b5bf0d080b9d2b3b07bc7f900a469150b29823cb4aa24",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_select_number",
+      "owner": "visualizer_automation",
+      "wasmOnly": true,
+      "originalBytes": 387,
+      "originalSha256": "4026a5636419e83144f95d902e905fc8183487252feef76c79652b9f24e024e0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "maybe_advance_rustymilk_automation",
+      "owner": "visualizer_automation",
+      "wasmOnly": true,
+      "originalBytes": 1687,
+      "originalSha256": "54fbce8bd07c0c7e68f6578db30486dfa0d472bbbf969a10746a2e38cb1dab21",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "toggle_rustymilk_debug",
+      "owner": "visualizer_automation",
+      "wasmOnly": true,
+      "originalBytes": 1509,
+      "originalSha256": "a586abb3b4b94dcb12d55cb8dc5de63aa1b17c90a394e0b7abb1f1a26fbd8e6e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "import_rustymilk_texture_asset",
+      "owner": "visualizer_automation",
+      "wasmOnly": true,
+      "originalBytes": 821,
+      "originalSha256": "6d32fca5e6e8befdea038261ffb051b500a2a0e1710c8e44b93039ab1e8866a6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_import_file_name",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 329,
+      "originalSha256": "3b7c723c6b82dc7b72853a545303d11cc89c450a9e314748a57b0af6efb4da36",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_rustymilk_preset_file_name",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 227,
+      "originalSha256": "f7f4a69597b203080b35ac57447850fae8ee62bf0b2ed80c7a805b5e73275fd1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_rustymilk_texture_file_name",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 259,
+      "originalSha256": "3a35c8cc65a44244b567ff7607e6ab79b7031721b4bc076842e5f6223c0bf06a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_rustymilk_preset_input",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 3177,
+      "originalSha256": "0f44f66cc5f8da696f33328e62ad0b85be100fe599a93345e4fbdd547a7e7c2e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "store_rustymilk_imported_preset",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 1494,
+      "originalSha256": "c5380808b2494bd6b37dbd9e73189c1f38f9e95527fdef0ccc12db4bf3f804dd",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_rustymilk_preset_file",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 1201,
+      "originalSha256": "c0b265af46a6183d4d9a7182c9b3147aee929d9c9d57ec819c02b6dac341e7fe",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_rustymilk_texture_file",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 1200,
+      "originalSha256": "25bce14904d8be9f4e40031732d7b5cfff6a2ff95a6e60a8411992edd0fef3af",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_rustymilk_pack_input",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 2649,
+      "originalSha256": "e9023a6fd417e76438e176236cd91edb6633c87a217a747c7fce15b2c835fe2d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_rustymilk_texture_input",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 3176,
+      "originalSha256": "bc1d6ed126e4962de75d8214ef7bdf797c8831888b0fa8b2c9e4f7d6d8e1e908",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "store_rustymilk_texture_asset",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 790,
+      "originalSha256": "26f70bb426dea3dabfbcf38a436a77605d696662d7d0bdf436a916cc2f77b7cb",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_rustymilk_texture_status",
+      "owner": "visualizer_file_imports",
+      "wasmOnly": true,
+      "originalBytes": 390,
+      "originalSha256": "555a8c79e54482cf126f3b1cd98dccfe4e4911f09934cca2e46961b41ceee280",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "RustyMilkAudioAnalyzer",
+      "owner": "visualizer_audio_analysis",
+      "wasmOnly": true,
+      "originalBytes": 266,
+      "originalSha256": "9bb974563fd6257af139f7c5a9c34c0f1cdb715f341fd18d8a219cf1d55ee401",
+      "relocations": 6
+    },
+    {
+      "kind": "impl",
+      "name": "RustyMilkAudioAnalyzer",
+      "owner": "visualizer_audio_analysis",
+      "wasmOnly": true,
+      "originalBytes": 2399,
+      "originalSha256": "bb95f723eb0063ec24aa07b21a4fd6742488cedc3d5c0263ff65919e0546f2f8",
+      "relocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "RustyMilkAudioSnapshot",
+      "owner": "visualizer_audio_analysis",
+      "wasmOnly": true,
+      "originalBytes": 207,
+      "originalSha256": "a151ba27355e17498a9e4ea0aa476ee06c72ceeceaddeb74dce9066ff1f07ee0",
+      "relocations": 5
+    },
+    {
+      "kind": "impl",
+      "name": "RustyMilkAudioSnapshot",
+      "owner": "visualizer_audio_analysis",
+      "wasmOnly": true,
+      "originalBytes": 291,
+      "originalSha256": "90d29592f34f0865aaca44dc63f38ebee6e31a7416b5ddb35dd378c350e248bb",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "RustyMilkAudioBands",
+      "owner": "visualizer_audio_analysis",
+      "wasmOnly": true,
+      "originalBytes": 176,
+      "originalSha256": "71137b83beb2ef537769daa5105bbe140dba0439c840e4b63ed3f4d0134f518a",
+      "relocations": 5
+    },
+    {
+      "kind": "impl",
+      "name": "RustyMilkAudioBands",
+      "owner": "visualizer_audio_analysis",
+      "wasmOnly": true,
+      "originalBytes": 327,
+      "originalSha256": "404fc17698713fedf000b16f6a5240eee8795dd6ba15a0bb079277873ef73dea",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "refresh_player_status",
+      "owner": "live_player_refresh",
+      "wasmOnly": true,
+      "originalBytes": 4143,
+      "originalSha256": "f8acad2dae591fdde4574d1b678718c8fb49c4610bdf51b0e692f490adea0ee4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "live_response_identifier",
+      "owner": "live_route_refresh",
+      "wasmOnly": true,
+      "originalBytes": 315,
+      "originalSha256": "ac20dc70d47743716769c8410ed1147e60dbbc54315a2286d1abdb194f1d2e72",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "live_endpoint_segment",
+      "owner": "live_route_refresh",
+      "wasmOnly": true,
+      "originalBytes": 3398,
+      "originalSha256": "f8773a398e5155ef410087c4c82e8a82abbf35d7f87d7baa3bc2ec8a40fd59bb",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "concrete_live_endpoint_path",
+      "owner": "live_route_refresh",
+      "wasmOnly": true,
+      "originalBytes": 1374,
+      "originalSha256": "86985628854d76d622b137e5f92a40541d876f11c72563267c5d32d400dc5c1c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "refresh_route_data",
+      "owner": "live_route_refresh",
+      "wasmOnly": true,
+      "originalBytes": 4443,
+      "originalSha256": "2e8167da03b111e6f1475dbbf1322027b6636f868cdffa43a40a018c73cb6709",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "fetch_text",
+      "owner": "browser_http_requests",
+      "wasmOnly": true,
+      "originalBytes": 696,
+      "originalSha256": "03e063cdfbece2fd51e5e17717e2f896fdf0d52946aaeeaa853bb4c9feceb830",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "TRANSFER_SPEEDS_REQUEST_CACHE_TTL_MS",
+      "owner": "browser_http_requests",
+      "wasmOnly": true,
+      "originalBytes": 89,
+      "originalSha256": "bb146fc1437bfc7c2179bef8cdd23faf0edcfed4dfa4949ef271a469d0178c68",
+      "relocations": 0
+    },
+    {
+      "kind": "macro",
+      "name": null,
+      "owner": "browser_http_requests",
+      "wasmOnly": true,
+      "originalBytes": 181,
+      "originalSha256": "c4343dd151e4a772b65ae17cdfe664b015c13967b8d26a64ddb233a25981472e",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "fetch_text_request",
+      "owner": "browser_http_requests",
+      "wasmOnly": true,
+      "originalBytes": 686,
+      "originalSha256": "9f8df3017c897b4af1468110c544537217541d38e959048d17f8a82303b5bc76",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "fetch_text_with_method",
+      "owner": "browser_http_requests",
+      "wasmOnly": true,
+      "originalBytes": 262,
+      "originalSha256": "9767206d76836c337fb0cca46cccca19b05d3158fefdaa07c2bc96b3925b60b4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "fetch_text_with_method_and_headers",
+      "owner": "browser_http_requests",
+      "wasmOnly": true,
+      "originalBytes": 1149,
+      "originalSha256": "e0e11ca66eb9a0c63fd9882259cdfc15121b84abb5b7c0fcd535d59febd3ddd3",
+      "relocations": 1
+    }
+  ],
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "80ccb2a0bc19d6e6f2f9fe8d8df7a53787e97fb799d69852aab8b5de9b147e76"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "087082a3a60ee10f237de20e480780a7f8b37d3174c7efba0c931bd7b5cd5d1d"
+    },
+    "wasm": {
+      "passed": true,
+      "sha256": "5a303e720e94b499168b0336b617d2e1389b36d745338ddf5ab8f0f57efb9cdc"
+    }
+  }
+}

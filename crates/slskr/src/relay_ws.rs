@@ -70,6 +70,10 @@ where
     }
 
     let connection_id = format!("relay-{}", Uuid::new_v4().simple());
+    let mut connection_lease = state
+        .relay_cleanup
+        .reserve(&state, connection_id.clone())
+        .await?;
     let now = crate::unix_timestamp();
     let challenge = state
         .relay
@@ -103,7 +107,7 @@ where
     relay::register_hub_connection(connection_id.clone(), outbound_tx);
 
     let (inbound_tx, mut inbound_rx) = mpsc::channel(HUB_INBOUND_QUEUE_CAPACITY);
-    let reader_task = tokio::spawn(async move {
+    let reader_task = async move {
         loop {
             let frame = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
             let done = matches!(&frame, Ok(WebSocketFrame::Close(_)) | Err(_));
@@ -111,7 +115,7 @@ where
                 break;
             }
         }
-    });
+    };
 
     let mut keepalive = time::interval(SIGNALR_KEEPALIVE_INTERVAL);
     keepalive.tick().await;
@@ -149,11 +153,15 @@ where
                 },
             }
         }
-    }
-    .await;
+    };
 
-    reader_task.abort();
-    let _ = reader_task.await;
+    // Both futures belong to this connection. Cancellation drops the reader
+    // immediately; if it finishes first, drain its bounded frame queue.
+    tokio::pin!(reader_task, serve_result);
+    let serve_result = tokio::select! {
+        result = &mut serve_result => result,
+        () = &mut reader_task => serve_result.await,
+    };
     relay::unregister_hub_connection(&connection_id);
     state
         .relay
@@ -161,6 +169,7 @@ where
         .await
         .protocol
         .deregister_connection(&connection_id);
+    connection_lease.completed();
     serve_result
 }
 

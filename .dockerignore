@@ -11,6 +11,13 @@ web/build
 dashboard/dist
 client-ts/dist
 
+.env
+.env.*
+**/.env
+**/.env.*
+.secrets
+**/.secrets
+
 release
 artifacts
 *.log

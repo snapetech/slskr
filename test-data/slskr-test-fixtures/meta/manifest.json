@@ -38,5 +38,35 @@
       "sha256": "e7cc958fd9feb2320ff1976fe317db519cd941ae489f3fd2df5931c25e87ca5d",
       "bytes": 5620
     }
+  ],
+  "assets": [
+    {
+      "license": "CC-BY-3.0",
+      "attribution": "Sintel, Blender Foundation | durian.blender.org",
+      "source": "https://durian.blender.org/sharing/",
+      "download_via_script": [
+        {
+          "path": "movie/sintel_512kb_stereo.mp4",
+          "url": "https://archive.org/download/Sintel/sintel-2048-stereo_512kb.mp4",
+          "bytes": 77410288,
+          "publishedSha1Verified": "1918a22b3e9829605a3656949b0b5e2b96a4583b",
+          "sha256": "93df4e31869e879354a5055a8549fb9335df0f5f73f4963c9bf0db2c888bb704"
+        }
+      ]
+    },
+    {
+      "license": "CC0-1.0",
+      "attribution": "Kimiko Ishizaka, Open Goldberg Variations; J. S. Bach composition in the public domain",
+      "source": "https://commons.wikimedia.org/wiki/File:Goldberg_Variations_01_Aria.ogg",
+      "download_via_script": [
+        {
+          "path": "music/open_goldberg/01_aria.ogg",
+          "url": "https://upload.wikimedia.org/wikipedia/commons/4/42/Goldberg_Variations_01_Aria.ogg",
+          "bytes": 9064070,
+          "publishedSha1Verified": "7955e74a97024b64c3ab2e4733e4d72db3654f4a",
+          "sha256": "70e465253efee94dada9e0f545b7eda68966d8744ba6d1bf64a2d081fc65a1f3"
+        }
+      ]
+    }
   ]
 }

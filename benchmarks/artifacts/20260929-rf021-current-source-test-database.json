@@ -1,0 +1,206 @@
+{
+  "benchmark": "slskr-sqlite",
+  "cases": {
+    "queued-transfers-deep-page": {
+      "latencyMs": {
+        "maximum": 0.591,
+        "median": 0.56,
+        "minimum": 0.507,
+        "p95": 0.589
+      },
+      "plan": [
+        {
+          "detail": "SEARCH transfers USING INDEX idx_transfers_status_started (status=?)",
+          "id": 8,
+          "notUsed": 145,
+          "parent": 0
+        }
+      ],
+      "rows": {
+        "first": 100,
+        "maximum": 100,
+        "minimum": 100
+      },
+      "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 1000"
+    },
+    "queued-transfers-first-page": {
+      "latencyMs": {
+        "maximum": 0.578,
+        "median": 0.51,
+        "minimum": 0.367,
+        "p95": 0.565
+      },
+      "plan": [
+        {
+          "detail": "SEARCH transfers USING INDEX idx_transfers_status_started (status=?)",
+          "id": 8,
+          "notUsed": 145,
+          "parent": 0
+        }
+      ],
+      "rows": {
+        "first": 100,
+        "maximum": 100,
+        "minimum": 100
+      },
+      "statement": "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at, updated_at_ms FROM transfers WHERE status = 'queued' ORDER BY started_at DESC LIMIT 100 OFFSET 0"
+    },
+    "search-results-deep-page": {
+      "latencyMs": {
+        "maximum": 0.371,
+        "median": 0.341,
+        "minimum": 0.32,
+        "p95": 0.37
+      },
+      "plan": [
+        {
+          "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+          "id": 8,
+          "notUsed": 123,
+          "parent": 0
+        }
+      ],
+      "rows": {
+        "first": 100,
+        "maximum": 100,
+        "minimum": 100
+      },
+      "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 500"
+    },
+    "search-results-first-page": {
+      "latencyMs": {
+        "maximum": 0.32,
+        "median": 0.313,
+        "minimum": 0.202,
+        "p95": 0.319
+      },
+      "plan": [
+        {
+          "detail": "SEARCH search_results USING INDEX idx_search_results_search (search_id=?)",
+          "id": 8,
+          "notUsed": 123,
+          "parent": 0
+        }
+      ],
+      "rows": {
+        "first": 100,
+        "maximum": 100,
+        "minimum": 100
+      },
+      "statement": "SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at FROM search_results WHERE search_id = 'search-0000' ORDER BY id LIMIT 100 OFFSET 0"
+    },
+    "webhook-logs-deep-page": {
+      "latencyMs": {
+        "maximum": 0.306,
+        "median": 0.24,
+        "minimum": 0.231,
+        "p95": 0.305
+      },
+      "plan": [
+        {
+          "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook_timestamp (webhook_id=?)",
+          "id": 8,
+          "notUsed": 145,
+          "parent": 0
+        }
+      ],
+      "rows": {
+        "first": 100,
+        "maximum": 100,
+        "minimum": 100
+      },
+      "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 1000"
+    },
+    "webhook-logs-first-page": {
+      "latencyMs": {
+        "maximum": 0.286,
+        "median": 0.271,
+        "minimum": 0.179,
+        "p95": 0.283
+      },
+      "plan": [
+        {
+          "detail": "SEARCH webhook_logs USING INDEX idx_webhook_logs_webhook_timestamp (webhook_id=?)",
+          "id": 8,
+          "notUsed": 145,
+          "parent": 0
+        }
+      ],
+      "rows": {
+        "first": 100,
+        "maximum": 100,
+        "minimum": 100
+      },
+      "statement": "SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = 'webhook-000' ORDER BY timestamp DESC LIMIT 100 OFFSET 0"
+    }
+  },
+  "ciArtifact": "ci-linux-musl-x64 from GitHub run 36613453093",
+  "ciArtifactArchiveSha256": "de9d0850d9f4f7950424fe040c6a4b2b3c5e63badc65e35941f7233ff2d1c18b",
+  "database": "kspls0 isolated current-source SlskR test database (path redacted)",
+  "databaseBytes": 555638784,
+  "dataset": {
+    "deepPageOffset": 1000,
+    "kind": "deterministic synthetic workload seeded into the current SlskR schema",
+    "logsPerWebhookAverage": 5000,
+    "pageLimit": 100,
+    "queuedTransferPercent": 1,
+    "resultsPerSearchAverage": 1000,
+    "searchGroups": 1000,
+    "searchResults": 1000000,
+    "transfers": 500000,
+    "webhookGroups": 100,
+    "webhookLogs": 500000
+  },
+  "evidenceMode": "current-source-isolated-test-database",
+  "host": {
+    "logicalCpus": 32,
+    "machine": "x86_64",
+    "pythonVersion": "3.14.7",
+    "sqliteVersion": "3.53.4",
+    "system": "Linux-7.2.4-arch1-2-x86_64-with-glibc2.44"
+  },
+  "instanceBootstrap": {
+    "command": "slskr serve --app-dir /data --no-start --no-logo --no-version-check",
+    "credentialsConfigured": false,
+    "hostPortsPublished": 0,
+    "longRunningService": false,
+    "networkMode": "none",
+    "persistenceEnabled": true
+  },
+  "integrityCheck": "ok",
+  "measuredIterations": 20,
+  "measurementLimit": "Synthetic rows are not production cardinalities; the production SlskR database is not present on kspls0.",
+  "rowCountsAfter": {
+    "search_results": 1000000,
+    "transfers": 500000,
+    "webhook_logs": 500000
+  },
+  "rowCountsBefore": {
+    "search_results": 0,
+    "transfers": 0,
+    "webhook_logs": 0
+  },
+  "schemaVersion": 1,
+  "sourceSha": "69cf4141325f234bdd63c3f52df179b069607781",
+  "sqliteVersion": "3.53.4",
+  "startedAt": "2026-09-29T19:26:20.369273+00:00",
+  "tableIndexes": {
+    "search_results": [
+      "idx_search_results_search"
+    ],
+    "transfers": [
+      "idx_transfers_status_started",
+      "idx_transfers_started",
+      "idx_transfers_request",
+      "sqlite_autoindex_transfers_1"
+    ],
+    "webhook_logs": [
+      "idx_webhook_logs_timestamp",
+      "idx_webhook_logs_webhook_timestamp",
+      "idx_webhook_logs_queued",
+      "idx_webhook_logs_webhook",
+      "sqlite_autoindex_webhook_logs_1"
+    ]
+  },
+  "warmupIterations": 3
+}

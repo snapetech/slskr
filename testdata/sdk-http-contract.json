@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "api_error": {
+    "path": "/api/config",
+    "status": 422,
+    "body": {
+      "error": "validation_failed",
+      "message": "Invalid query",
+      "details": "query is required"
+    },
+    "expected_attempts": 1
+  },
+  "retry": {
+    "path": "/api/health",
+    "mutation_path": "/api/searches",
+    "configured_retries": 3,
+    "transport_failures_before_success": 1,
+    "success_body": {
+      "status": "ok"
+    },
+    "get_attempts": {
+      "go": 1,
+      "python": 2,
+      "typescript": 2
+    },
+    "mutation_attempts": {
+      "go": 1,
+      "python": 1,
+      "typescript": 1
+    }
+  }
+}

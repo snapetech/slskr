@@ -34,6 +34,16 @@ jobs:
           components: clippy,rustfmt
           targets: wasm32-unknown-unknown
 
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # Swatinem/rust-cache@v2
+
+      - name: Prefer rustup toolchain binaries
+        shell: bash
+        run: dirname "$(rustup which cargo)" >> "$GITHUB_PATH"
+
+      - name: Select full Perl for vendored OpenSSL
+        shell: pwsh
+        run: ./scripts/select-windows-perl.ps1
+
       - name: Clear Unix compiler wrapper
         shell: pwsh
         run: |

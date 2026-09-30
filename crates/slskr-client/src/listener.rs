@@ -20,6 +20,8 @@ use crate::{
 
 pub const DEFAULT_INIT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+const PIERCE_FIREWALL_FRAME_LEN: usize = 1 + std::mem::size_of::<u32>();
+
 #[derive(Debug)]
 pub enum IncomingConnection<S> {
     PeerMessages(PeerMessageConnection<S>),
@@ -223,7 +225,9 @@ where
 /// the dedicated [`demux_incoming`]/[`Listener::accept`] path. Keeping the raw
 /// contract separate is necessary because those bytes are also valid first
 /// bytes of a frame length or an obfuscation key; no byte-only parser can
-/// distinguish those streams without guessing.
+/// distinguish those streams without guessing. A prefix advertising two known
+/// or potentially nested init interpretations is rejected before either body
+/// is read.
 pub async fn demux_shared_incoming<S>(mut stream: S) -> Result<IncomingConnection<S>, ClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -231,34 +235,24 @@ where
     let mut buffered = Vec::with_capacity(8);
     read_shared_bytes(&mut stream, &mut buffered, 4).await?;
 
-    // Known init messages are at least nine bytes on the wire. Handle a
-    // shorter plain frame before reading the obfuscation lookahead so an
-    // unknown one-byte init extension is not over-read.
-    let plain_length = u32::from_le_bytes(
-        buffered[..4]
-            .try_into()
-            .expect("shared demux reads a four-byte prefix"),
-    ) as usize;
-    let short_plain = (1..=crate::io::DEFAULT_MAX_FRAME_LEN)
-        .contains(&plain_length)
-        .then_some(4 + plain_length)
-        .filter(|encoded_len| *encoded_len < 8);
-    if let Some(encoded_len) = short_plain {
-        read_shared_bytes(&mut stream, &mut buffered, encoded_len).await?;
-        if let Ok(message) = decode_shared_candidate(&buffered[..encoded_len], false) {
-            return incoming_from_init_message(message, stream, false);
-        }
-    }
-
     read_shared_bytes(&mut stream, &mut buffered, 8).await?;
     let candidates = shared_frame_candidates(&buffered)?;
+    if candidates.len() == 2 {
+        read_shared_bytes(&mut stream, &mut buffered, 9).await?;
+        if candidates
+            .iter()
+            .all(|candidate| shared_candidate_has_init_header(&buffered, *candidate))
+        {
+            return Err(ClientError::AmbiguousInitFrame);
+        }
+    }
     let mut unknown = None;
     let mut last_error = None;
 
-    // Prefer the shortest valid candidate. This is a compatibility heuristic:
-    // type-1 has no additional wire discriminator here, and the same bytes can
-    // form valid plain and obfuscated init frames. The listener cannot infer
-    // the sender's intent in that case; resolving it requires a protocol change.
+    // Prefer the shortest valid known candidate after rejecting conflicting init headers.
+    // Unknown extension payloads are opaque; if one overlaps a recognized init,
+    // the known interpretation preserves peer interoperability because the wire
+    // carries no marker that can establish the sender's intended interpretation.
     for candidate in candidates {
         if let Err(error) =
             validate_shared_candidate_header(&mut stream, &mut buffered, candidate).await
@@ -286,7 +280,36 @@ where
     let Some((candidate, message)) = unknown else {
         return Err(last_error.unwrap_or(ClientError::ConnectionClosed));
     };
+    // An alternate interpretation may have consumed bytes beyond this frame.
+    // Returning the shorter unknown frame would silently truncate its stream.
+    if buffered.len() != candidate.encoded_len {
+        return Err(ClientError::AmbiguousInitFrame);
+    }
     incoming_from_init_message(message, stream, candidate.obfuscated)
+}
+
+fn shared_candidate_has_init_header(encoded: &[u8], candidate: SharedFrameCandidate) -> bool {
+    let (code, prefix_len) = if candidate.obfuscated {
+        let Ok(decoded) = slskr_protocol::decode_rotated(&encoded[..9]) else {
+            return false;
+        };
+        (decoded[4], 8)
+    } else {
+        (encoded[4], 4)
+    };
+    let length = candidate.encoded_len - prefix_len;
+    match InitCode::try_from(code) {
+        Ok(InitCode::PierceFirewall) => length == PIERCE_FIREWALL_FRAME_LEN,
+        Ok(InitCode::PeerInit) => (13..=MAX_PEER_INIT_FRAME_LEN).contains(&length),
+        Err(_) => {
+            // A supported nested frame's body starts with its four-byte inner
+            // length. The visible code must equal that length's low byte.
+            // Arbitrary unknown extensions do not establish another init form.
+            candidate.obfuscated
+                && (9..=MAX_NESTED_OBFUSCATED_INIT_FRAME_LEN).contains(&length)
+                && usize::from(code) == (length - 4) & 0xff
+        }
+    }
 }
 
 async fn validate_shared_candidate_header<S>(
@@ -311,11 +334,15 @@ where
         .encoded_len
         .checked_sub(prefix_len)
         .expect("shared candidate includes its frame prefix");
-    if code == InitCode::PeerInit.as_u8() && length > MAX_PEER_INIT_FRAME_LEN {
-        return Err(ClientError::FrameTooLarge {
-            length,
-            max: MAX_PEER_INIT_FRAME_LEN,
-        });
+    let max = match InitCode::try_from(code) {
+        Ok(InitCode::PierceFirewall) => PIERCE_FIREWALL_FRAME_LEN,
+        Ok(InitCode::PeerInit) => MAX_PEER_INIT_FRAME_LEN,
+        // Unknown extension init frames share the known initialization bound.
+        // Large peer payloads belong after a successful initialization.
+        Err(_) => MAX_PEER_INIT_FRAME_LEN,
+    };
+    if length > max {
+        return Err(ClientError::FrameTooLarge { length, max });
     }
     Ok(())
 }
@@ -403,33 +430,38 @@ const SHARED_MESH_CLASSIFICATION_ATTEMPTS: usize = 5;
 const SHARED_MESH_CLASSIFICATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 const TLS_HANDSHAKE_CONTENT_TYPE: u8 = 0x16;
 const TLS_MAJOR_VERSION: u8 = 0x03;
+const TLS_CLIENT_HELLO_TYPE: u8 = 0x01;
+const TLS_CLIENT_HELLO_PREFIX_LEN: usize = 6;
+const MAX_TLS_RECORD_LEN: usize = 16 * 1024 + 2048;
 
 /// Classify a stream for the current upstream shared TCP endpoint.
 ///
-/// A mesh overlay connection starts with a TLS record header (`0x16, 0x03`).
-/// Other traffic is passed to the framed Soulseek demux. The peek is
-/// intentionally conservative: a partial TLS header is rejected after the
-/// bounded retry window, while non-TLS traffic is never guessed as mesh
-/// traffic.
+/// A mesh overlay connection starts with a bounded TLS ClientHello record.
+/// A two-byte `0x16, 0x03` prefix also occurs in valid Soulseek frame lengths,
+/// so classification waits for the full TLS record and handshake prefix.
+/// The peek does not consume bytes from either protocol.
 pub async fn demux_shared_mesh_incoming(
     stream: TcpStream,
 ) -> Result<SharedIncomingConnection<TcpStream>, ClientError> {
-    let mut prefix = [0_u8; 2];
+    let mut prefix = [0_u8; TLS_CLIENT_HELLO_PREFIX_LEN];
     for attempt in 0..SHARED_MESH_CLASSIFICATION_ATTEMPTS {
         let peeked = stream.peek(&mut prefix).await?;
-        if peeked >= prefix.len() {
-            if prefix[0] == TLS_HANDSHAKE_CONTENT_TYPE && prefix[1] == TLS_MAJOR_VERSION {
-                return Ok(SharedIncomingConnection::MeshOverlay(stream));
-            }
-            break;
-        }
         if peeked == 0 {
             break;
         }
-        // Soulseek's tagged connection kinds are one byte long. Only a
-        // leading TLS content byte is ambiguous and needs a bounded wait for
-        // the version byte.
-        if prefix[0] != TLS_HANDSHAKE_CONTENT_TYPE {
+        if prefix[0] != TLS_HANDSHAKE_CONTENT_TYPE
+            || (peeked >= 2 && prefix[1] != TLS_MAJOR_VERSION)
+            || (peeked >= 3 && !(1..=4).contains(&prefix[2]))
+        {
+            break;
+        }
+
+        if peeked >= prefix.len() {
+            let record_len = u16::from_be_bytes([prefix[3], prefix[4]]) as usize;
+            if (4..=MAX_TLS_RECORD_LEN).contains(&record_len) && prefix[5] == TLS_CLIENT_HELLO_TYPE
+            {
+                return Ok(SharedIncomingConnection::MeshOverlay(stream));
+            }
             break;
         }
         if attempt + 1 < SHARED_MESH_CLASSIFICATION_ATTEMPTS {
@@ -526,17 +558,17 @@ where
         Ok(ConnectionKind::PeerMessages) => {
             return Ok(IncomingConnection::PeerMessages(
                 PeerMessageConnection::new(stream),
-            ))
+            ));
         }
         Ok(ConnectionKind::FileTransfer) => {
             return Ok(IncomingConnection::FileTransfer(
                 FileTransferConnection::new(stream),
-            ))
+            ));
         }
         Ok(ConnectionKind::Distributed) => {
             return Ok(IncomingConnection::Distributed(DistributedConnection::new(
                 stream,
-            )))
+            )));
         }
         Err(ClientError::UnknownConnectionKind(_)) => {}
         Err(error) => return Err(error),

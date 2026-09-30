@@ -125,7 +125,7 @@ where
     }
 
     let (frame_tx, mut frame_rx) = mpsc::channel(CLIENT_FRAME_CHANNEL_CAPACITY);
-    let reader_task = tokio::spawn(async move {
+    let reader_task = async move {
         loop {
             let frame = read_client_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
             let done = matches!(frame, Ok(ClientFrame::Close(_)) | Err(_));
@@ -133,7 +133,7 @@ where
                 break;
             }
         }
-    });
+    };
 
     // Tokio intervals tick immediately on their first poll. Delay the first
     // heartbeat so a newly connected client can complete a close handshake or
@@ -199,11 +199,15 @@ where
             },
             }
         }
-    }
-    .await;
+    };
 
-    reader_task.abort();
-    let _ = reader_task.await;
+    // Both futures belong to this connection. Cancellation drops the reader
+    // immediately; if it finishes first, drain its bounded frame queue.
+    tokio::pin!(reader_task, result);
+    let result = tokio::select! {
+        result = &mut result => result,
+        () = &mut reader_task => result.await,
+    };
     result
 }
 

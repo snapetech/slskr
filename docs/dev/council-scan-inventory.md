@@ -1,7 +1,7 @@
 # Council Scan Inventory
 
-Scan date: 2026-09-24
-Source commit: 0dfab48cd16e6e7910759fa7d60e5d21b7b28be1
+Scan date: 2026-09-30
+Source digest: d1160a51a9c94c92828149e1688814819b677003c9e65a9f598bc2439b02eccf
 
 > Council process upgrades (mirrored from slskNet.Runtime, 2026-05-06): see `bug-council-severity-schema.md`, `bug-council-sibling-search.md`, `bug-council-negative-space.md`, `bug-council-behavior-pinning.md`, and `bug-council-phases.md`. Future sweep rows on this file should adopt the severity/confidence schema; the wire-frame trust boundary is now declared and enforced by `scripts/check-council-negative-space.sh`.
 
@@ -59,14 +59,21 @@ class whose fresh scan output is not covered by this inventory.
 
 Latest scanner counts:
 
+The 2026-09-27 scalar scan covers extracted production daemon modules and
+excludes controller test segments. Narrowing casts and suspicious signed
+conversions were reviewed by class; the four wrapping paths found in share
+metadata, distributed state, wishlist scheduler state, and user timestamps
+were corrected with focused regressions. The protocol taint lens and
+adversarial corpus pass.
+
 | Candidate Class | Count |
 | --- | ---: |
-| Constructor/mutable collection candidates | 9 |
-| Protocol count/length candidates | 154 |
-| Protocol scalar emission candidates | 183 |
-| Resolver/raw stream candidates | 1018 |
-| Task/cancellation/lifecycle candidates | 1218 |
-| Example Web API candidates | 323 |
+| Constructor/mutable collection candidates | 10 |
+| Protocol count/length candidates | 163 |
+| Protocol scalar emission candidates | 310 |
+| Resolver/raw stream candidates | 1076 |
+| Task/cancellation/lifecycle candidates | 1448 |
+| Example Web API candidates | 321 |
 
 ### Constructor/mutable collection candidates
 
@@ -99,6 +106,10 @@ Latest scanner counts:
 | --- | --- | --- | --- | --- | --- | --- |
 | JSON search response token to protocol `u32` | Backend/API | Fixed | Medium | High | BUG-034: `/api/search-responses` now rejects tokens above `u32::MAX` instead of narrowing with `as u32`. | `search_response_api_rejects_oversized_protocol_token` |
 | Message acknowledgement route ID to protocol `u32` | Backend/API | Fixed | Medium | High | BUG-034: message acknowledgement routes now reject IDs above `u32::MAX` before sending `MessageAcked`. | `messages_api_records_lists_and_acks_messages` oversized ack assertion |
+| Oversized audio metadata to protocol `u32` | Backend/API | Fixed | Medium | High | Share scanning now saturates duration and bitrate instead of wrapping values from large media files. | `oversized_flac_duration_and_mp3_duration_do_not_wrap` |
+| SQLite distributed depth to runtime `u32` | Backend/API | Fixed | Medium | High | Negative and oversized tree/child depths now fail loading instead of wrapping. | `distributed_state_load_rejects_out_of_range_depths` |
+| SQLite wishlist scheduler index and interval | Backend/API | Fixed | Medium | High | Load and save now use checked signed/unsigned conversions. | `wishlist_scheduler_state_rejects_out_of_range_values` |
+| Negative persisted user timestamp to `u64` | Backend/API | Fixed | Low | High | Hydration clamps negative persisted timestamps to zero. | `persisted_negative_user_timestamp_does_not_wrap` |
 | WebSocket outbound frame payload length casts | Backend/API | Existing Guard | Low | High | `write_frame` branches by payload length before `u8`/`u16` casts and uses `u64` for larger payloads. | WebSocket frame/auth tests. |
 | WebSocket masked client frame test helper cast | Tests/Tooling | False Positive | Low | High | Test helper only builds short fixture frames and is not production frame emission. | Keep scoped to tests. |
 | Protocol enum discriminant `as u8`/`as u32` methods | Protocol | Existing Guard | Low | High | Code tables are fixed protocol discriminants and covered by inventory/round-trip tests. | Server/peer/init/distributed code inventory tests. |

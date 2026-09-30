@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "workload": "duplicate-heavy search response acceptance",
+  "seed_responses": 900,
+  "files_per_response": 11,
+  "shared_files_before_unique_tail": 10,
+  "duplicate_attempts": 900,
+  "trials": 7,
+  "current_fingerprint_median_ns": 716366,
+  "former_linear_scan_median_ns": 31642837,
+  "linear_over_current_speedup": 44.171,
+  "current_file_entries_hashed": 9900,
+  "linear_response_comparisons_upper_bound": 810000,
+  "linear_file_entry_comparisons_upper_bound": 8910000,
+  "notes": "Synthetic diagnostic; no CI timing threshold or production-peer claim."
+}

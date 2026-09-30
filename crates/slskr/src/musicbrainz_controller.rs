@@ -618,16 +618,16 @@ pub(super) async fn musicbrainz_mutation_response(
                 .and_then(serde_json::Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .map(str::trim);
-            let error_message = if !is_safe_opaque_reference(&pod_id)
-                || !is_safe_opaque_reference(&channel_id)
-                || sender_peer_id.is_some_and(|value| !is_safe_opaque_reference(value))
+            let error_message = if !safe_radar_reference(&pod_id)
+                || !safe_radar_reference(&channel_id)
+                || sender_peer_id.is_some_and(|value| !safe_radar_reference(value))
             {
                 "Route metadata must be opaque and safe."
             } else if target_peer_ids.is_empty() {
                 "At least one target peer is required."
             } else if target_peer_ids
                 .iter()
-                .any(|value| !is_safe_opaque_reference(value))
+                .any(|value| !safe_radar_reference(value))
             {
                 "Route targets must be opaque and safe."
             } else {

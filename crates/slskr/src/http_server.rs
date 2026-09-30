@@ -70,6 +70,7 @@ pub struct HttpHeaders {
     pub sec_websocket_key: Option<String>,
     pub sec_websocket_protocol: Option<String>,
     pub sec_websocket_version: Option<String>,
+    pub accept_encoding: Option<String>,
     pub connection: String, // "keep-alive" or "close"
     pub user_agent: Option<String>,
 }
@@ -129,6 +130,7 @@ impl HttpHeaders {
                     "sec-websocket-version" => {
                         headers.sec_websocket_version = Some(value.to_string());
                     }
+                    "accept-encoding" => append_list_header(&mut headers.accept_encoding, value),
                     "connection" => headers.connection = value.to_lowercase(),
                     "user-agent" => headers.user_agent = Some(value.to_string()),
                     _ => {}
@@ -394,6 +396,7 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.sec_websocket_version = Some(value.to_string());
             }
+            "accept-encoding" => append_list_header(&mut headers.accept_encoding, value),
             "connection" => {
                 let value = value.to_lowercase();
                 if saw_connection {
@@ -1043,6 +1046,8 @@ mod tests {
             "X-Slskdn-Csrf: csrf-token",
             "X-Share-Token: share-secret",
             "Range: bytes=10-19",
+            "Accept-Encoding: gzip, br",
+            "Accept-Encoding: zstd",
             "Forwarded: for=198.51.100.24;proto=https",
             "X-Forwarded-For: 198.51.100.24, 127.0.0.1",
             "Connection: keep-alive",
@@ -1058,6 +1063,7 @@ mod tests {
         assert_eq!(headers.x_gateway_csrf, Some("csrf-token".to_string()));
         assert_eq!(headers.x_share_token, Some("share-secret".to_string()));
         assert_eq!(headers.range, Some("bytes=10-19".to_string()));
+        assert_eq!(headers.accept_encoding, Some("gzip, br, zstd".to_string()));
         assert_eq!(
             headers.forwarded,
             Some("for=198.51.100.24;proto=https".to_string())

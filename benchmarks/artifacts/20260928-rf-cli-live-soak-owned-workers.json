@@ -1,0 +1,18 @@
+{
+  "scope": "RF006 CLI live-soak bounded lifecycle ownership",
+  "sourceCommitBeforeChanges": "3f0b6010d93c5f86755d6dd21e831b9075b688be",
+  "worktreeDirty": true,
+  "productionPortsAdded": 0,
+  "workerLimitPerListenerOrServer": 64,
+  "focusedTests": 4,
+  "daemonLibraryTests": 672,
+  "defaultIgnoredMountedFilesystemTest": 1,
+  "strictClippy": "passed",
+  "fullControllerLegacyCompilation": "passed",
+  "ownerHashes": {
+    "crates/slskr/src/cli_smoke_soak_owners/live_task_set.rs": "931a25b56b0fa2e2badc89ecdb8ccf0422b2d3537b40282719cd3cd0b02cc593",
+    "crates/slskr/src/cli_smoke_soak_owners/live_peer_runtime.rs": "f08de4d3ae1632d6d826b9d18e9dfc47aedcfac09c9a18e4fd9c9dac1e7b95be",
+    "crates/slskr/src/cli_smoke_soak_owners/live_server_runtime.rs": "12de9de0751e153240391fa98039e7ee6e0af3bea723a26cbd08bb47b80a4fda",
+    "crates/slskr/src/cli_smoke_soak_owners/live_soak_entry.rs": "c500a7e913d0c2783b8c606c4c9519ba1a22133d25ec904d65252bc62dcaa6ba"
+  }
+}

@@ -27,11 +27,19 @@ path = "src/bin/slskr-bounded-differential.rs"
 test = false
 bench = false
 
+[[example]]
+name = "share_cache_allocations"
+required-features = ["rf-benchmarks"]
+
+[[example]]
+name = "search_result_delta"
+required-features = ["rf-benchmarks"]
+
 [features]
 default = ["focused-controller-tests"]
 focused-controller-tests = []
-# The historical controller differential suite is a single monolithic test
-# module. Keep it opt-in so ordinary workspace tests compile the focused suite.
+# Domain-owned controller differential suites remain opt-in so ordinary
+# workspace tests compile the focused suite.
 full-controller-tests = ["bounded-differential"]
 # The pre-split dispatcher is retained only as an opt-in diagnostic oracle.
 # Production builds use the bounded route-group dispatcher by default.
@@ -49,6 +57,7 @@ bounded-file-lifecycle-tests = ["bounded-differential"]
 bounded-protocol-tests = ["bounded-differential"]
 bounded-security-control-tests = ["bounded-differential"]
 bounded-security-authorization-tests = ["bounded-differential"]
+rf-benchmarks = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -67,6 +76,7 @@ cbc = { version = "0.2", features = ["alloc"] }
 oxixml-io = "0.1.2"
 oxixml-model = "0.1.2"
 futures-util = "0.3"
+flate2 = "1"
 hmac = "0.13"
 sha2 = "0.11"
 hex = "0.4"
@@ -97,6 +107,9 @@ openssl = "0.10"
 
 [target.'cfg(any(target_os = "windows", target_env = "musl"))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+
+[dev-dependencies]
+stats_alloc = "=0.1.10"
 
 [lints]
 workspace = true
