@@ -1,6 +1,6 @@
 # Whole-Project Refactor Audit
 
-Status: active refactor evidence; RF-024 and RF-002 remain in progress; latest addenda cover RF-002 wishlist scheduler, Lidarr rejection and wanted-sync reviews, plus RF-024 Batch 187 (2026-09-25).
+Status: historical evidence snapshot through 2026-09-25, not the current RF status. Its earlier RF-024 and RF-002 in-progress wording is superseded by the [living RF plan](refactoring-efficiency-plan.md), whose current matrix marks all 73 RF rows Verified as of 2026-09-29 UTC. Use that plan for current completion status; the findings and addenda below preserve their historical dates and scope.
 
 Audit baseline date: 2026-09-15; evidence addenda through 2026-09-25
 Baseline HEAD: `0dfab48cd16e6e7910759fa7d60e5d21b7b28be1` (local evidence; the
