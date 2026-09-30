@@ -200,6 +200,7 @@ def main():
                                     raise RuntimeError('DHT did not reply to the original peer from the public port')
                             udp_probes.append({'command': 'actual DHT ping/reply', 'publicSourcePort': True})
                         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                        context.minimum_version = ssl.TLSVersion.TLSv1_2
                         context.check_hostname = False
                         context.verify_mode = ssl.CERT_NONE
                         capacity_case = cycle % 2 == 1
