@@ -20,11 +20,11 @@ or if a pinned action is missing from this ledger.
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | CI platform, release archive, and live parity artifact upload. |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | Release archive download before publishing. |
 | `actions/attest-build-provenance` | `v4` | `4d101475d8b20a2381f78447822ac1eab6504dd8` | Dereferenced tag target for release asset attestations. |
-| `softprops/action-gh-release` | `v3` | `3d0d9888cb7fd7b750713d6e236d1fcb99157228` | GitHub Release publisher. |
-| `docker/setup-qemu-action` | `v4.2.0` | `96fe6ef7f33517b61c61be40b68a1882f3264fb8` | QEMU setup for multi-architecture Docker release images. |
-| `docker/setup-buildx-action` | `v4.3.0` | `37fe631027851001ddb9b187196cc803df7f5f0e` | Docker Buildx setup for multi-architecture release images. |
+| `softprops/action-gh-release` | `v3.0.3` | `efb35369e0ad2afab669f228072c1b0d510eae64` | GitHub Release publisher. |
+| `docker/setup-qemu-action` | `v4.4.0` | `99012661954931238ded8c8b007157a8430204e1` | QEMU setup for multi-architecture Docker release images. |
+| `docker/setup-buildx-action` | `v4.4.1` | `f87e5991a6d7451dcb8d9637bfbc97413f497069` | Docker Buildx setup for multi-architecture release images. |
 | `docker/login-action` | `v4.6.0` | `dbcb813823bdd20940b903addbd779551569679f` | GHCR and Docker Hub authentication for release images. |
-| `docker/build-push-action` | `v7` | `53b7df96c91f9c12dcc8a07bcb9ccacbed38856a` | Multi-architecture Docker release image build and push. |
+| `docker/build-push-action` | `v7.4.0` | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` | Multi-architecture Docker release image build and push. |
 | `github/codeql-action/init` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL initialization for GitHub code scanning. |
 | `github/codeql-action/autobuild` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL autobuild for analyzable language matrix entries. |
 | `github/codeql-action/analyze` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL SARIF upload and alert generation. |
