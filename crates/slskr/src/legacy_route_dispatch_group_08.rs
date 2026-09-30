@@ -665,16 +665,7 @@ pub(super) async fn legacy_route_dispatch_group_08(
                 });
             }
             if let Some(command) = resolve_external_visualizer_path(visualizer.command.as_deref()) {
-                let Ok(process_permit) = Arc::clone(&state.external_visualizer_processes)
-                    .try_acquire_owned()
-                else {
-                    return Ok(routing::HttpResponse {
-                        status: "503 Service Unavailable",
-                        content_type: "application/json",
-                        body: "{\"error\":\"external visualizer process limit reached\"}".to_owned(),
-                    });
-                };
-                let mut process = std::process::Command::new(&command);
+                let mut process = tokio::process::Command::new(&command);
                 process.args(
                     visualizer
                         .arguments
@@ -687,26 +678,13 @@ pub(super) async fn legacy_route_dispatch_group_08(
                 ) {
                     process.current_dir(directory);
                 }
-                match process.spawn() {
-                    Ok(mut child) => {
-                        let process_id = child.id();
+                match state.visualizer_children.launch(&mut process, &state.external_visualizer_processes) {
+                    Ok(process_id) => {
                         let name = if visualizer.name.trim().is_empty() {
                             "External visualizer".to_owned()
                         } else {
                             visualizer.name.trim().to_owned()
                         };
-                        tokio::task::spawn_blocking(move || {
-                            let _process_permit = process_permit;
-                            match child.wait() {
-                                Ok(status) if !status.success() => {
-                                    ::tracing::warn!(process_id, ?status, "external visualizer exited unsuccessfully");
-                                }
-                                Ok(_) => {}
-                                Err(error) => {
-                                    ::tracing::warn!(process_id, %error, "external visualizer process wait failed");
-                                }
-                            }
-                        });
                         record_event(
                             state,
                             "external_visualizer.launch",
@@ -721,8 +699,10 @@ pub(super) async fn legacy_route_dispatch_group_08(
                             "error": serde_json::Value::Null,
                         }).to_string()))
                     }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        Ok(routing::service_unavailable_response(&error.to_string()))
+                    }
                     Err(error) => {
-                        drop(process_permit);
                         record_event(
                             state,
                             "external_visualizer.launch.failed",

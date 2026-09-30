@@ -796,13 +796,11 @@ pub(super) async fn multisource_verified_swarm_response(
     state.multisource.write().await.insert(job.clone());
     let store = Arc::clone(&state.multisource);
     if path == "/api/multisource/swarm/async" {
-        tokio::spawn(multisource::execute(
-            id.clone(),
-            request,
-            output_path,
-            public_output_path,
-            store,
-        ));
+        if !multisource::spawn_managed(state, id.clone(), request, output_path, public_output_path)
+            .await
+        {
+            return routing::service_unavailable_response("daemon is shutting down");
+        }
         return routing::accepted_response(
             serde_json::json!({
                 "id": id,

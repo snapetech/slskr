@@ -91,3 +91,40 @@ SQLite version are separate evidence.
 python3 benchmarks/benchmark-sqlite-cardinality.py \
   --output benchmarks/artifacts/sqlite-cardinality.json
 ```
+
+The RF-046 search-response diagnostic compares the current fingerprint bucket
+with the former linear equality scan using 900 seeded responses, 11 files per
+response, and 900 duplicates of the final seeded response. The benchmark uses
+the production `SearchResults` acceptance path for the current implementation
+and a direct `Vec::contains` reference for the former comparison. It is
+diagnostic only and sets no CI timing threshold.
+
+```bash
+cargo bench --locked -p slskr-client --bench search_response_dedup -- \
+  --output benchmarks/artifacts/search-response-dedup.json
+```
+
+The RF-038 share-cache diagnostic compares the production writer with its
+previous `replace`/`format!`/`Vec<String>` serializer. It generates 50,000 file
+entries with a bounded mix of tabs, newlines, and backslashes, verifies that
+both implementations produce identical bytes, and records allocation calls,
+requested bytes, and elapsed time. It requires no daemon, network, or database
+and is not a CI threshold.
+
+```bash
+cargo run --locked -p slskr --features rf-benchmarks \
+  --example share_cache_allocations -- \
+  --output benchmarks/artifacts/share-cache-allocations.json
+```
+
+The RF-045 diagnostic replays a 10,000-result search projection in 50 batches
+through both the current delta-append writer and the former full-projection
+rewrite. It also kills a child process after committed writes and checks the
+projection after reopening the database. The workload uses temporary in-memory
+or local SQLite databases and opens no network listener.
+
+```bash
+cargo run --locked -p slskr --features rf-benchmarks \
+  --example search_result_delta -- \
+  --output benchmarks/artifacts/search-result-delta.json
+```

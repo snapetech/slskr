@@ -124,6 +124,16 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         return Ok(());
     }
     config.validate_controller_startup_hardening()?;
+    if let Some(database) = db.as_ref() {
+        database
+            .fail_unconfirmed_webhook_logs(
+                "delivery outcome unknown: daemon restarted before confirmation",
+            )
+            .await
+            .map_err(|error| {
+                format!("failed to reconcile interrupted webhook deliveries: {error}")
+            })?;
+    }
     let share_index = if config.controller_no_share_scan {
         ShareIndexSnapshot::uninitialized(&config)
     } else if let Some(db) = db.as_ref() {
@@ -503,10 +513,22 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     && config.advanced_networking.overlay_data.listen_port == dht.dht_port));
         shares_public_udp.then_some(SocketAddr::new(bind.ip(), dht.dht_port))
     });
+    let native_public_udp_socket = if shared_mesh_tcp {
+        let bind = config.overlay_bind.expect("shared peer bind was validated");
+        let socket = std::net::UdpSocket::bind(bind)
+            .map_err(|error| format!("shared peer UDP bind failed: {error}"))?;
+        socket
+            .set_nonblocking(true)
+            .map_err(|error| format!("shared peer UDP setup failed: {error}"))?;
+        Some(Arc::new(socket))
+    } else {
+        None
+    };
     let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
-        Some(Arc::new(dht::Rendezvous::new_with_shared_udp(
+        Some(Arc::new(dht::Rendezvous::new_with_udp_socket(
             &config.advanced_networking.dht,
-            shared_dht_udp_bind.is_some(),
+            shared_mesh_tcp || shared_dht_udp_bind.is_some(),
+            native_public_udp_socket.clone(),
         )?))
     } else {
         None
@@ -526,6 +548,9 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 && config.advanced_networking.overlay_data.listen_port
                     == config.advanced_networking.dht.dht_port;
             let quic_bind = config.advanced_networking.overlay.enable_quic.then(|| {
+                if shared_mesh_tcp {
+                    return bind;
+                }
                 let address = if quic_shared_with_dht {
                     IpAddr::V4(Ipv4Addr::LOCALHOST)
                 } else {
@@ -539,6 +564,9 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 SocketAddr::new(address, port)
             });
             let quic_data_bind = config.advanced_networking.overlay_data.enable.then(|| {
+                if shared_mesh_tcp {
+                    return bind;
+                }
                 let shared = quic_data_shared_with_dht;
                 let address = if shared {
                     IpAddr::V4(Ipv4Addr::LOCALHOST)
@@ -586,8 +614,8 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     quic_data_bind,
                     quic_proxy_bind,
                     shared_dht_udp_bind,
-                    dht.as_ref()
-                        .and_then(|rendezvous| rendezvous.shared_udp_socket()),
+                    native_public_udp_socket.clone().or_else(|| dht.as_ref()
+                        .and_then(|rendezvous| rendezvous.shared_udp_socket())),
                     dht.as_ref()
                         .and_then(|rendezvous| rendezvous.shared_udp_backend()),
                     quic_data_policy,
@@ -777,7 +805,10 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         download_requests: Arc::new(Semaphore::new(2)),
         download_batch_requests: Arc::new(Semaphore::new(1)),
         websocket_connections: Arc::new(Semaphore::new(MAX_WEBSOCKET_CONNECTIONS)),
+        ftp_uploads: crate::ftp::FtpUploadQueue::default(),
+        relay_cleanup: crate::relay::ConnectionCleanup::default(),
         external_visualizer_processes: Arc::new(Semaphore::new(MAX_EXTERNAL_VISUALIZER_PROCESSES)),
+        visualizer_children: external_visualizer_processes::ExternalVisualizerProcesses::default(),
         songid_run_slots: Arc::new(Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
         )),
@@ -809,6 +840,7 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pending_backfill_transfers: RwLock::new(BTreeMap::new()),
         security_ban_persistence_lock: AsyncMutex::new(()),
         security: RwLock::new(security_state),
+        share_stream_limits: crate::share_stream_limits::ShareStreamLimits::default(),
         share_grants: RwLock::new(share_grant_store),
         share_access_tokens: RwLock::new(share_access_token_store),
         incoming_shares: RwLock::new(IncomingShareStore::default()),
@@ -847,6 +879,14 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pod_dht_failed_publish_count: std::sync::atomic::AtomicU64::new(0),
         pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
         podcore_runtime_stats: PodCoreRuntimeStats::default(),
+    });
+    let visualizer_state = Arc::clone(&state);
+    state.spawn_managed_task(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            visualizer_state.visualizer_children.reap_finished();
+        }
     });
     state.spawn_managed_task(run_distributed_persistence_worker(
         state.db.clone(),

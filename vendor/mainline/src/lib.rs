@@ -19,7 +19,7 @@ pub mod async_dht;
 pub use common::{Id, MutableItem, Node, RoutingTable};
 
 #[cfg(feature = "node")]
-pub use dht::{Dht, DhtBuilder, Testnet, TestnetBuilder};
+pub use dht::{Dht, DhtBuilder, SharedUdpIngress, Testnet, TestnetBuilder};
 #[cfg(feature = "node")]
 pub use rpc::{
     config::Config,
@@ -41,4 +41,14 @@ pub mod errors {
 
     pub use super::common::DecodeIdError;
     pub use super::common::MutableError;
+}
+
+/// Identify a complete DHT message within the shared transport's parser MTU.
+/// This distinguishes bencoded DHT traffic from binary QUIC packets whose
+/// protected first byte may also equal `d`.
+#[cfg(feature = "node")]
+pub fn is_dht_datagram(packet: &[u8]) -> bool {
+    packet.len() <= 2048
+        && packet.first() == Some(&b'd')
+        && common::messages::Message::from_bytes(packet).is_ok()
 }

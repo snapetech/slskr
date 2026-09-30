@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Save } from 'lucide-react';
 import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
+import { useAbortableRequests } from '../hooks/useAbortableRequests';
 
 interface ConfigurationPageProps {
   apiUrl: string;
@@ -84,6 +85,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
   const [saving, setSaving] = useState<'preferences' | 'filter' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const { createController, releaseController } = useAbortableRequests();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -130,6 +132,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
 
   const savePreferences = async () => {
     if (!preferences) return;
+    const controller = createController();
     setSaving('preferences');
     setError(null);
     setMessage(null);
@@ -139,16 +142,22 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
         body: JSON.stringify({
           autoreplace_enabled: Boolean(preferences.autoreplace_enabled),
         }),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       setMessage('Runtime preferences saved.');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Failed to save preferences');
+      if (!controller.signal.aborted && !isAbortError(saveError)) {
+        setError(saveError instanceof Error ? saveError.message : 'Failed to save preferences');
+      }
     } finally {
-      setSaving(null);
+      releaseController(controller);
+      if (!controller.signal.aborted) setSaving(null);
     }
   };
 
   const saveFilter = async () => {
+    const controller = createController();
     setSaving('filter');
     setError(null);
     setMessage(null);
@@ -160,13 +169,18 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
       await requestJson(apiEndpoint(apiUrl, '/api/config/download-filter'), apiKey, {
         method: 'PUT',
         body: JSON.stringify({ exclude }),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       setExclusions(exclude.join('\n'));
       setMessage('Download filter saved.');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Failed to save download filter');
+      if (!controller.signal.aborted && !isAbortError(saveError)) {
+        setError(saveError instanceof Error ? saveError.message : 'Failed to save download filter');
+      }
     } finally {
-      setSaving(null);
+      releaseController(controller);
+      if (!controller.signal.aborted) setSaving(null);
     }
   };
 
@@ -207,7 +221,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
             onChange={(event) => setPreferences((current) => current
               ? { ...current, autoreplace_enabled: event.target.checked }
               : current)}
-            className="w-4 h-4"
+            className="h-6 w-6"
           />
           Enable automatic replacement
         </label>
@@ -225,7 +239,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
         <button
           onClick={savePreferences}
           disabled={!preferences || saving !== null}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+          className="flex items-center gap-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
           {saving === 'preferences' ? 'Saving...' : 'Save preferences'}

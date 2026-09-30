@@ -147,8 +147,8 @@ pub(super) async fn connect_distributed_parent(
     )
     .await;
     notify_distributed_branch(&state).await;
-    tokio::spawn(run_distributed_link(
-        state,
+    state.spawn_managed_task(run_distributed_link(
+        Arc::clone(&state),
         parent.username.clone(),
         DistributedConnectionRole::Parent,
         stream,
@@ -209,7 +209,7 @@ pub(super) async fn register_distributed_child(
         )
         .await;
     }
-    tokio::spawn(run_distributed_link(
+    state.spawn_managed_task(run_distributed_link(
         Arc::clone(&state),
         username.clone(),
         DistributedConnectionRole::Child,

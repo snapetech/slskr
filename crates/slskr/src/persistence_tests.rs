@@ -1368,6 +1368,32 @@ async fn test_webhook_operations_persist_config_and_logs() {
 }
 
 #[tokio::test]
+async fn wishlist_scheduler_state_rejects_out_of_range_values() {
+    let db = DatabaseManager::in_memory().await.unwrap();
+    db.save_wishlist_scheduler_state(1, Some(60)).await.unwrap();
+
+    db.execute_raw_for_test("UPDATE wishlist_scheduler_state SET next_index = -1 WHERE id = 1")
+        .await
+        .unwrap();
+    assert!(db.load_wishlist_scheduler_state().await.is_err());
+    db.execute_raw_for_test("UPDATE wishlist_scheduler_state SET next_index = 1, server_interval_seconds = -1 WHERE id = 1")
+        .await
+        .unwrap();
+    assert!(db.load_wishlist_scheduler_state().await.is_err());
+
+    assert!(db
+        .save_wishlist_scheduler_state(1, Some(u64::MAX))
+        .await
+        .is_err());
+    if usize::BITS > 63 {
+        assert!(db
+            .save_wishlist_scheduler_state(usize::MAX, None)
+            .await
+            .is_err());
+    }
+}
+
+#[tokio::test]
 async fn test_distributed_tree_state_operations() {
     let root = std::env::temp_dir().join(format!(
         "slskr-distributed-restart-{}-{}",
@@ -1427,6 +1453,37 @@ async fn test_distributed_tree_state_operations() {
     assert_eq!(children, new_children);
     reopened.close_for_test().await;
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn distributed_state_load_rejects_out_of_range_depths() {
+    let db = DatabaseManager::in_memory().await.unwrap();
+    db.save_distributed_state(1, "root", None, &[("child".to_owned(), 1)])
+        .await
+        .unwrap();
+
+    for invalid in ["-1", "4294967296"] {
+        db.execute_raw_for_test(&format!(
+            "UPDATE distributed_tree_state SET branch_level = {invalid} WHERE id = 1"
+        ))
+        .await
+        .unwrap();
+        assert!(db.load_distributed_tree_state().await.is_err());
+        assert!(db.load_distributed_state().await.is_err());
+    }
+
+    db.execute_raw_for_test("UPDATE distributed_tree_state SET branch_level = 1 WHERE id = 1")
+        .await
+        .unwrap();
+    for invalid in ["-1", "4294967296"] {
+        db.execute_raw_for_test(&format!(
+            "UPDATE distributed_children SET depth = {invalid} WHERE username = 'child'"
+        ))
+        .await
+        .unwrap();
+        assert!(db.load_distributed_children().await.is_err());
+        assert!(db.load_distributed_state().await.is_err());
+    }
 }
 
 #[tokio::test]
@@ -1516,4 +1573,88 @@ async fn test_wishlist_scheduler_state_operations() {
     let (next_index, server_interval) = state.unwrap();
     assert_eq!(next_index, 10);
     assert_eq!(server_interval, None);
+}
+
+#[tokio::test]
+async fn webhook_reconciliation_is_indexed_idempotent_and_preserves_terminal_outcomes() {
+    let directory =
+        std::env::temp_dir().join(format!("slskr-webhook-recovery-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("state.db");
+    let db = DatabaseManager::new(path.to_str().unwrap()).await.unwrap();
+    db.insert_webhook(&WebhookRecord {
+        id: "recovery-hook".to_owned(),
+        url: "https://example.invalid/hook".to_owned(),
+        events: "search.created".to_owned(),
+        secret: "fixture-secret".to_owned(),
+        active: true,
+        created_at: 1,
+        last_triggered: None,
+        retry_count: 0,
+        max_retries: 3,
+        timeout_seconds: 30,
+    })
+    .await
+    .unwrap();
+    for status in ["queued", "success", "failed"] {
+        db.insert_webhook_log(&WebhookLogRecord {
+            id: status.to_owned(),
+            webhook_id: "recovery-hook".to_owned(),
+            event: "search.created".to_owned(),
+            correlation_id: status.to_owned(),
+            status: status.to_owned(),
+            request_body: "{}".to_owned(),
+            response_status: Some(200),
+            response_body: Some("preserved".to_owned()),
+            error_message: Some("original".to_owned()),
+            attempt: 2,
+            timestamp: 11,
+        })
+        .await
+        .unwrap();
+    }
+    db.pool.close().await;
+    drop(db);
+    let db = DatabaseManager::new(path.to_str().unwrap()).await.unwrap();
+    let plan = query(
+        "EXPLAIN QUERY PLAN UPDATE webhook_logs SET status = 'failed' WHERE status = 'queued'",
+    )
+    .fetch_all(&db.pool)
+    .await
+    .unwrap();
+    assert!(plan.iter().any(|row| row
+        .try_get::<String, _>("detail")
+        .unwrap()
+        .contains("idx_webhook_logs_queued")));
+    assert_eq!(
+        db.fail_unconfirmed_webhook_logs("outcome unknown after restart")
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.fail_unconfirmed_webhook_logs("second recovery")
+            .await
+            .unwrap(),
+        0
+    );
+    let logs = db.get_webhook_logs("recovery-hook", 10, 0).await.unwrap();
+    for log in logs {
+        assert_eq!(log.attempt, 2);
+        assert_eq!(log.timestamp, 11);
+        assert_eq!(log.response_body.as_deref(), Some("preserved"));
+        if log.id == "queued" {
+            assert_eq!(log.status, "failed");
+            assert_eq!(
+                log.error_message.as_deref(),
+                Some("outcome unknown after restart")
+            );
+        } else {
+            assert_eq!(log.status, log.id);
+            assert_eq!(log.error_message.as_deref(), Some("original"));
+        }
+    }
+    db.pool.close().await;
+    drop(db);
+    std::fs::remove_dir_all(directory).unwrap();
 }

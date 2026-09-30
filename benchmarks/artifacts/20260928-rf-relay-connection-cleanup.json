@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local daemon suite and authenticated relay cancellation; not deployed relay interop proof",
+  "sourceSha": "57a55dbb8d21b3930836d019f06133e99e5e5db4",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/relay.rs": "513799cd2c0825c23ca548bb611e75f815c498e7a33dfc7b9fb0d41a834576df",
+    "crates/slskr/src/relay_ws.rs": "8e46887637f8ac4d09bf52748f2d2e7d7bd0b758f4ee6f50069646d7fba0f3c6",
+    "crates/slskr/src/relay_connection_cleanup.rs": "a07ea072e7149af3808b84f952c34604540a455cc819544188bf9942a95cabcc",
+    "crates/slskr/src/app_state.rs": "221087b66e0b9b64a8847693cc28d4b777ec29bec14532c7ce23c6d416c60d5f",
+    "crates/slskr/src/daemon_serve.rs": "dfbbc69202e94ea7a4936efc316f4f31831782e342faef1f22363b9ec88ab2ce",
+    "crates/slskr/src/focused_controller_tests/relay_cleanup.rs": "5f4071ef47d364abe3ffb93ab233f7ae9802cef0de43667100f3c12b2a77bd40",
+    "crates/slskr/src/focused_controller_tests/websocket_ownership.rs": "f6d8ade8f7a7d76ea60c480b2cb8c0c923541ee9ac7b2ed8c3bba9253200320f",
+    "crates/slskr/src/focused_controller_tests/fixtures.rs": "ace37af7bc402ebf0965b5b2a20331416cc805af0cbe7cce0b57c9a01c745a95",
+    "crates/slskr/src/controller_tests/full_state_fixtures.rs": "997335c31a9b4ec84f87d20899b5b362676f1114236b4e1438687246db5877e0",
+    "crates/slskr/src/controller_tests/full_route_fixtures.rs": "d8bd78d5ef7b407c537557f5c9e2eda124a91cb887c9a5409c6d60e26821004c",
+    "scripts/check-runtime-boundary-hardening.sh": "a7e9eb58db066d8dbc33a5133bad90ad68ef0c6332658eff2daac69fc6d2dd56"
+  },
+  "logsSha256": {
+    "target/rf-relay-cleanup-daemon-tests.log": "c71ac2a1659b42cd403f5d0fb8b0369c5a03ba2ea5f813d214f49707a9820c9b",
+    "target/rf-relay-cleanup-clippy.log": "98d7c549876a52a0bdf4a07cd104aaba1f6413853b38b6aea1139f09336da109",
+    "target/rf-relay-cleanup-full-controller.log": "cdaf7fa7ab1080fc942bebbe0c684338ad7d86850e4ea87978e5cb5ceb8d79e5"
+  },
+  "limits": {
+    "perDaemonCleanupReservationsAndQueuedRequests": 256,
+    "workerOwnership": "managed registry, weak daemon reference"
+  },
+  "tests": {
+    "daemonPassed": 701,
+    "defaultIgnoredMountFixture": 1,
+    "focusedCleanupRegressionsPassed": 3,
+    "authenticatedAgentRemovedAfterContendedLockRelease": true,
+    "hubSenderRemovedSynchronously": true,
+    "fullCapacityAppliesBackpressure": true,
+    "shutdownWakesBlockedReservations": true,
+    "shutdownClearsActiveConnectionsAndRetainsCompletedUploads": true,
+    "eventSignalrAndRelayReadersDropOnParentCancellation": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  },
+  "limitations": [
+    "Already-started webhook outcome reconciliation remains open",
+    "Fresh hosted service proof and deployed relay interop remain separate"
+  ]
+}

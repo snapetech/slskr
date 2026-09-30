@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local daemon suite, SQLite reopen/query plan, and joined shutdown reconciliation",
+  "sourceSha": "ef7ff0505495547562a8f70d9253ff581cef3e21",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/app_state.rs": "a20c5f672e8aa5fd29ef1bb8f9767452c5602714b89505cc09619b781f0cdbb1",
+    "crates/slskr/src/daemon_serve.rs": "96bf4db22e35a81d73b2f2a45b3fb6c281b8cd7113c838e5f692a4a109775a92",
+    "crates/slskr/src/persistence.rs": "ae269b70926c5fa4cc4c3cc6bd00021eee39ea424ec0210a18f492f7e7904320",
+    "crates/slskr/src/persistence_webhooks.rs": "6ec58109566c79ee9358d1172858ed8d67a600698a3a24043909d03662d3795a",
+    "crates/slskr/src/persistence_tests.rs": "9de6f8892b91aaaa6edb986ade5d3a63728bfacaf6c400efef73b3343306de9b",
+    "crates/slskr/src/focused_controller_tests/webhook_reconciliation.rs": "3579c44197b19e0f0940714b7cc2387807ed92b80fe68710d4faa96010e6db90",
+    "scripts/check-runtime-boundary-hardening.sh": "d369c41453b7b0b2d094ebc662a9091bd8d10273f86374d1d8b4d9c3100724b6"
+  },
+  "logsSha256": {
+    "target/rf-webhook-reconciliation-daemon-tests.log": "3b58aed9004fe28976ed86181c4906660a8da41ff814ec6c4b79155e8f73da75",
+    "target/rf-webhook-reconciliation-clippy.log": "8c0a1b3be2ab38b07e322a3e21d89100ca02bccc1c8dbe97752a1cdd97d4b05f",
+    "target/rf-webhook-reconciliation-full-controller.log": "926b7cb48f2b293fae8048db342df33fb2efdbd7965e0df1eec4bb59fcdad72f"
+  },
+  "tests": {
+    "daemonPassed": 703,
+    "defaultIgnoredMountFixture": 1,
+    "focusedReconciliationTestsPassed": 2,
+    "sqliteReopenReconcilesOnlyQueuedRecords": true,
+    "queuedPartialIndexUsed": true,
+    "idempotentAndTerminalOutcomesPreserved": true,
+    "daemonReconciliationFollowsWorkerCancellation": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  },
+  "limitations": [
+    "Failed indicates no local confirmed outcome; remote delivery may already have occurred",
+    "Reconciliation does not send requests",
+    "Fresh hosted service evidence remains separate"
+  ]
+}

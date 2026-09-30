@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-001 shared obfuscation alias, RF-006 script wait ownership",
+  "baseCommit": "c3e33309d68817954c2360910f05c42922f0f352",
+  "sources": {
+    "crates/slskr/src/config_parts/peer_transport.rs": "0b97ce595dfd08c8d45dd7bae17e2e8fe2e89e59a6f663de13ad05e4692612a0",
+    "crates/slskr/src/config_tests/peer_transport.rs": "b9be16ecf4c0614f63746f3612058fbadd0f20321f6c2c9a81ee07dc02f128dd",
+    "crates/slskr/src/scripts.rs": "166a1be98cc09ebadb91c6bdd6e6c7838132c44724bd7d70ccf9fa5fcd614baa"
+  },
+  "logs": {
+    "target/rf-shared-alias-daemon-tests.log": "560a9645a6ae73560feee1599eb10bbc27aacbe3af5a7206cb4baa51ebececc4",
+    "target/rf-shared-alias-clippy.log": "a6ecdb008aa9ed6c517bc904181f481f7ce37f63f035e59f1a3b67b60f1fd6ba",
+    "target/rf-shared-alias-full-controller.log": "a22e1d67df92bd246a0433b7a6c11dac422181d71ab2ebf127e2a0f5a860c157",
+    "target/rf-shared-alias-debug-build.log": "3dac44420b84f6fec963b0cdd1ae53e5d7ddcf18017be1feb4c2061d43898d3b"
+  },
+  "validation": {
+    "daemonTestsPassed": 722,
+    "daemonTestsIgnored": 1,
+    "strictAllTargetsClippy": "passed",
+    "fullControllerLegacyAllTargetsCompile": "passed",
+    "mappedAliasRegression": "Physical obfuscation alias 50300 shares the regular socket, projects zero listen-port sentinel and advertises common public 52000 port"
+  },
+  "singlePeerPortProof": {
+    "schemaVersion": 1,
+    "evidenceMode": "live isolated daemon process; not deployed interop proof",
+    "sourceSha": "c3e33309d68817954c2360910f05c42922f0f352",
+    "dirtyWorktree": true,
+    "binarySha256": "10df61e7de8592a4acf354ac9a8f0187eeb9a06b2ea7b2e376f6bfc57d58adcb",
+    "harnessSha256": "3a71c2ca306c21940f0d5c00325ba10591e6dc1216dcb759b55f86706a523e73",
+    "transportSourceSha256": {
+      "crates/slskr/src/daemon_serve.rs": "ed758101dce191ac4bad40a076fa6295add3875536103f5fd24175645b88d019",
+      "crates/slskr/src/config_parts/startup.rs": "970ceef95d50e27570131a691a37b7073c38fd926b66384a7e757040b1def716",
+      "crates/slskr/src/config_parts/peer_transport.rs": "0b97ce595dfd08c8d45dd7bae17e2e8fe2e89e59a6f663de13ad05e4692612a0",
+      "crates/slskr/src/private_gateway.rs": "5eb5eb85721435c9c52f20efe671ee44b1469331010bbaf2aa242cf0d7e75965",
+      "crates/slskr/src/private_gateway_owners/gateway_models.rs": "089d52a73578e3755aa59aa915787999c97fb5237d739df0e7671204ae7344b4",
+      "crates/slskr/src/private_gateway_owners/gateway_transport.rs": "efed090c0b1dfd16aa34442e4b75a0bb01ee36e1f0eda015fdc161bc62901857",
+      "crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs": "14ecdf76930e64f1377fa68bd785f6dce54d3b0983da1c39a3b285b454f4b415",
+      "crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs": "fdbb525e3802594b5ae9dfa10aeab6bc1c24b4ffc9dcdfa4a3bc6d6b740c0c0f",
+      "crates/slskr/src/dht.rs": "2b9a142138f030967d2255a6bde2a4f84d46663c2b1d2e1d38d0e89de6ac0531",
+      "crates/slskr/src/quic_alpn.rs": "c47317878d04b21064fdd276c666b86c9cb9a518cdb1d3cbc12567aec654215b",
+      "crates/slskr-client/src/shared_udp.rs": "64734ea6cd527b3bccb16e0cfc4bc1560379c4f4527230643c297ffb25cc9c8e",
+      "crates/slskr-client/src/shared_quic_server.rs": "65adbef6487d7a732c9b1075542415023020f4c901ef11a7dce111a50c83f8f3",
+      "crates/slskr-client/src/quic_control.rs": "19b0d5a9c7dafe9f36eecf96a009fee242d456f2763b4ebbcac4b33d4c31cbb3",
+      "crates/slskr-client/src/quic_data.rs": "7bdf7f7f0b50460e062e14627784ececfc3b0f19d74b62c1bb15d891670c7d3c",
+      "vendor/mainline/src/lib.rs": "1b0bcff3ea9422244bfcd542a5ac98cbb6a401b4fc08f2b5df8321b51e5606fc",
+      "vendor/mainline/src/dht.rs": "bbe9dee9758387a8915d3baf002ccdd530d9327fd4e5423f0ff9a5b69a52e5e4",
+      "vendor/mainline/src/rpc/config.rs": "627cabe427b5a81dcd66ee78ac4edbb31ea6475ac9403c0e138dcde516fd6fe0",
+      "vendor/mainline/src/rpc/socket.rs": "21190713fdd70856f5d3f81b93924e9dbe1361bf36b00bcd53cea6ffdfc8f545"
+    },
+    "startedUtc": "2026-09-28T10:48:24.399482+00:00",
+    "dhtEnabled": true,
+    "meshDhtEnabled": true,
+    "quicEnabled": true,
+    "quicDataEnabled": true,
+    "productionPortsAdded": 0,
+    "cycles": [
+      {
+        "cycle": 1,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 1,
+        "perIpCapacityRejectedFourthClient": null,
+        "establishedTlsAwaitingOverlayInit": 1,
+        "certificateSha256": "67fe0710054f8f713006530d640d8b5ea12d92b06768c867968e3dbc78f90db0",
+        "exitCode": 0,
+        "udpTransportProbes": [
+          {
+            "command": "overlay-quic-control-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "overlay-quic-control",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:53273 envelope=probe certificate_pin=discovered-for-frozen-target"
+            },
+            "outputSha256": "396eb687e962e67432d4a017bc0f1f2f523acef9b6b8acfb9abd57c4514ab757"
+          },
+          {
+            "command": "quic-data-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "quic-data",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:53273 bytes=28 payload=raw",
+              "bytes": 28
+            },
+            "outputSha256": "46068bf86e060b781a806e885570c2e06492bbe61f0cd73a74212cc649d9d23c"
+          },
+          {
+            "command": "actual DHT ping/reply",
+            "publicSourcePort": true
+          }
+        ],
+        "shutdownSeconds": 0.113556,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      },
+      {
+        "cycle": 2,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 0,
+        "perIpCapacityRejectedFourthClient": true,
+        "establishedTlsAwaitingOverlayInit": 3,
+        "certificateSha256": "2e0dfefa67cb92b5118c7badd319aaa8b38ef15a8c023de313997c8e5f0b670e",
+        "exitCode": 0,
+        "udpTransportProbes": [
+          {
+            "command": "overlay-quic-control-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "overlay-quic-control",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:39043 envelope=probe certificate_pin=discovered-for-frozen-target"
+            },
+            "outputSha256": "acab73c32d9aeec09cd233b7425ee7888502bbf7e486be305ebf6940d5654d8f"
+          },
+          {
+            "command": "quic-data-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "quic-data",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:39043 bytes=28 payload=raw",
+              "bytes": 28
+            },
+            "outputSha256": "0fc1260d258dd3e3697289e7ac12e62419308773414c570136e341c1df9c8040"
+          },
+          {
+            "command": "actual DHT ping/reply",
+            "publicSourcePort": true
+          }
+        ],
+        "shutdownSeconds": 0.113588,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      },
+      {
+        "cycle": 3,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 1,
+        "perIpCapacityRejectedFourthClient": null,
+        "establishedTlsAwaitingOverlayInit": 1,
+        "certificateSha256": "51ea9fddc071ba96d092511699a6a0031651022e102e9a8b311fd04c806a4b5b",
+        "exitCode": 0,
+        "udpTransportProbes": [
+          {
+            "command": "overlay-quic-control-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "overlay-quic-control",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:56157 envelope=probe certificate_pin=discovered-for-frozen-target"
+            },
+            "outputSha256": "bf1ec3e180b2160a20e6261eecc733b9939f9b540d555741cad767d03f5c893f"
+          },
+          {
+            "command": "quic-data-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "quic-data",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:56157 bytes=28 payload=raw",
+              "bytes": 28
+            },
+            "outputSha256": "6332a26c1ecdda1fc02b0ee797007fb41ff7624c8a2791b6364b341c86e95db0"
+          },
+          {
+            "command": "actual DHT ping/reply",
+            "publicSourcePort": true
+          }
+        ],
+        "shutdownSeconds": 0.113498,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      }
+    ],
+    "success": true
+  },
+  "scope": "Native current accepted aliases preserve a single peer listener and common public port; this validates the projection consumed by VPN synchronization, not a deployed VPN lease. Script wait-error cleanup follows the existing ownership guard; suite includes actual script timeout/cancellation descendant tests, not an injected kernel wait failure. Recipient backfill and blocking-worker shutdown joins remain open."
+}

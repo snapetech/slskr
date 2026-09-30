@@ -553,6 +553,10 @@ async fn route_dispatch_group_4_notes_interests_grants(
                 return Ok(routing::not_found_response());
             }
             let previous = grants.clone();
+            let requested_limit = match crate::share_stream_limits::request_limit(body) {
+                Ok(limit) => limit,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
             let Some((record, created)) = grants.create_with_contract_and_permissions(
                 id,
                 collection_id,
@@ -562,6 +566,16 @@ async fn route_dispatch_group_4_notes_interests_grants(
                 return Ok(routing::service_unavailable_response(
                     "share grant capacity is full",
                 ));
+            };
+            let record = if created {
+                match requested_limit {
+                    Some(limit) => grants
+                        .set_stream_limit(&record.id, limit)
+                        .expect("created grant remains owned"),
+                    None => record,
+                }
+            } else {
+                record
             };
             let json = record.json();
             let mutated = grants.clone();

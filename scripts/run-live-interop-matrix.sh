@@ -40,10 +40,6 @@ elif [[ "$live_vpn_enabled" == "1" ]]; then
 else
   live_login_indexes="1 2 3 4"
 fi
-if [[ -z "$live_slsk_address" ]]; then
-  live_slsk_address="$(getent ahostsv4 vps.slsknet.org | awk 'NR == 1 { print $1 }' || true)"
-fi
-
 require_var() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
@@ -52,10 +48,43 @@ require_var() {
   fi
 }
 
-for i in $(seq 1 "${SLSKR_TEST_ACCOUNT_COUNT:-4}"); do
+account_count="${SLSKR_TEST_ACCOUNT_COUNT:-6}"
+if [[ ! "$account_count" =~ ^[1-9][0-9]*$ ]]; then
+  echo "invalid SLSKR_TEST_ACCOUNT_COUNT: $account_count" >&2
+  exit 2
+fi
+
+read -r -a live_login_indexes_array <<< "$live_login_indexes"
+required_account_indexes=()
+for i in $(seq 1 "$account_count"); do
+  required_account_indexes+=("$i")
+done
+required_account_indexes+=(
+  "${live_login_indexes_array[@]}"
+  "$local_peer_a_index"
+  "$local_peer_b_index"
+  "$private_message_sender_index"
+  "$private_message_receiver_index"
+  "$room_message_account_index"
+)
+
+declare -A checked_account_indexes=()
+for i in "${required_account_indexes[@]}"; do
+  if [[ ! "$i" =~ ^[1-9][0-9]*$ ]]; then
+    echo "invalid test account index: $i" >&2
+    exit 2
+  fi
+  if [[ -n "${checked_account_indexes[$i]:-}" ]]; then
+    continue
+  fi
+  checked_account_indexes[$i]=1
   require_var "SLSKR_TEST_${i}_USERNAME"
   require_var "SLSKR_TEST_${i}_PASSWORD"
 done
+
+if [[ -z "$live_slsk_address" ]]; then
+  live_slsk_address="$(getent ahostsv4 vps.slsknet.org | awk 'NR == 1 { print $1 }' || true)"
+fi
 
 slskr_binary="$repo_root/target/debug/slskr"
 if [[ ! -x "$slskr_binary" ]]; then

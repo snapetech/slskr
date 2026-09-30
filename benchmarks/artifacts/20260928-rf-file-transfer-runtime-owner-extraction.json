@@ -1,0 +1,615 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "78f3080a95fcfc49a43df5ce17f28a2e40e5345a",
+  "source": "crates/slskr/src/file_transfer_runtime.rs",
+  "originalBytes": 91238,
+  "originalLines": 2524,
+  "originalSha256": "ff6d6985b35490fd34aaf177400fb74b3ecb7491483e5d288a1ca062248a0926",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 56,
+  "parentScopedDeclarations": [
+    "apply_completed_download_permissions",
+    "configured_download_destination_path",
+    "download_capacity_available",
+    "download_file_transfer_with_connection",
+    "download_retry_delay",
+    "download_root",
+    "effective_download_pacing_limit",
+    "effective_transfer_group",
+    "effective_transfer_group_from",
+    "effective_upload_speed_limit",
+    "enforce_completed_download_content_safety",
+    "enrich_completed_audio_metadata",
+    "ensure_scoped_download_path",
+    "execute_accepted_file_transfer",
+    "fail_indirect_browse",
+    "fail_indirect_transfer",
+    "handle_inbound_file_transfer",
+    "inbound_upload_policy",
+    "mp3_technical_metadata",
+    "open_download_file",
+    "open_download_file_for_read",
+    "prepare_incomplete_download_file",
+    "prepare_transfer_local_path",
+    "probe_peer_capability",
+    "project_indirect_transfer_response",
+    "project_peer_transfer_response",
+    "render_completed_download_path",
+    "render_configured_completed_download_path",
+    "safe_download_path",
+    "schedule_queued_downloads",
+    "transfer_capacity_available",
+    "transfer_group_upload_settings",
+    "transfer_is_cancelled",
+    "update_transfer_progress",
+    "upload_file_transfer_with_connection",
+    "wav_technical_metadata",
+    "write_download_chunk_if_active"
+  ],
+  "registrySha256": "1b3b6ebf7a9d1dee930ec04326f0efcc33ead77ddb91c7a406d84a44405bd3b3",
+  "registryLines": 80,
+  "owners": {
+    "crates/slskr/src/file_transfer_runtime_owners/audio_metadata.rs": {
+      "lines": 331,
+      "sha256": "415e41e2493e89626d4d41df4aee9494c51502c5f1db73dffcbfd2188f9b224b"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/completed_permissions.rs": {
+      "lines": 47,
+      "sha256": "71aba68c5170159e1e33b8bfa750c3ab857e8e028376bff43ea63d36dad3e102"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/download_connection.rs": {
+      "lines": 207,
+      "sha256": "c4f0bd51c6bbf3978e2830f73f6e784a59b49372c1a1540de09fe99165792cf8"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/download_content_safety.rs": {
+      "lines": 118,
+      "sha256": "1f472b820991f950d33fa0345fd2c76a992c32bcb1320715597fa360f048aea1"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/download_paths.rs": {
+      "lines": 527,
+      "sha256": "1736d11269a0ae45ec500b6e502bd447ac654585a519d6cd3fb945adb250e5a5"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/download_progress.rs": {
+      "lines": 191,
+      "sha256": "e20ee16ea646b3102b88ca44a2fe1640e6ec9c8beae2baa10045cdaadd70509f"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/inbound_transfer.rs": {
+      "lines": 101,
+      "sha256": "19822ffbecf1940cea27839d09dad2555bf84732159b2ae517649f3db4e52536"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/indirect_transfer.rs": {
+      "lines": 68,
+      "sha256": "4634c3994dd036e82c8487c11edd2bee26ef99f467b923e37bac24d18b7d9cfc"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/peer_negotiation.rs": {
+      "lines": 424,
+      "sha256": "8bc354f2b50745ac98a6979b86fbb296f49ff40d787569d51a762b96ad509517"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/transfer_policy.rs": {
+      "lines": 331,
+      "sha256": "1b43dcf32272ac6006d48bc0fbe82a74277c98886bc56ed0d1905fdfa30fa64d"
+    },
+    "crates/slskr/src/file_transfer_runtime_owners/upload_streaming.rs": {
+      "lines": 193,
+      "sha256": "55def01c5591242c958272d8d9651d5eca6f76c46c4fdaa54c0af52a91b4e957"
+    }
+  },
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 50,
+      "originalSha256": "5fcf92f73dcc5704d5def9e2a9d8e8a45ee1c4117b17d1a06e8fcd71b3e87085",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 14,
+      "originalSha256": "9904094c9cf29d784d6a9acc899b600d28a884eeaa6dadde6ddcf407b54b8cff",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 19,
+      "originalSha256": "577a4b56f7fd11705d13f7f334b0fe64f27c7ed6b1fb9d580b628b24a37bba09",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "configured_download_destination_path",
+      "owner": "download_paths",
+      "originalBytes": 1608,
+      "originalSha256": "d6b3f4a2bab15346240160c3d184af6c21b7bd9f639505dfeb7bbe92cb58c67e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "prepare_transfer_local_path",
+      "owner": "download_paths",
+      "originalBytes": 1426,
+      "originalSha256": "c417c474a93a070d81c5852b0748da91b59a3b9166aa706246e30ba6f7484ac9",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "render_configured_completed_download_path",
+      "owner": "download_paths",
+      "originalBytes": 3386,
+      "originalSha256": "cf721e7251c263aaa4e7d0ed8c75b496a7bc4313aae3660038edbd4b5c70fe37",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "render_completed_download_path",
+      "owner": "download_paths",
+      "originalBytes": 4059,
+      "originalSha256": "309b19ca2574754787da3432360e183772d8db7be2ae633791bb8230705e7b84",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_root",
+      "owner": "download_paths",
+      "originalBytes": 166,
+      "originalSha256": "bbf0f16323f3ff9549cebc428e819b6425dc29f851b857ba5bd496cc0c451e2d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "safe_download_path",
+      "owner": "download_paths",
+      "originalBytes": 1378,
+      "originalSha256": "58d3d979ba473cee15de4f2d2dae502a7ed73134744074faf19e66dfa0838c7d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "ensure_scoped_download_path",
+      "owner": "download_paths",
+      "originalBytes": 1424,
+      "originalSha256": "ab9a2063eb26c3ad78342e015eb4dcdf8830fefe463ac0449b9ae8ab80637bc5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "ensure_scoped_download_parent_unix",
+      "owner": "download_paths",
+      "originalBytes": 1839,
+      "originalSha256": "4541e49c3f9d9a5b60267ed51b5b3e8255377dcb1c9648380b594ccd7f397fe0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "open_download_file",
+      "owner": "download_paths",
+      "originalBytes": 1455,
+      "originalSha256": "a686434b33a96bdc4c9f66dfc8139940905eb6bf217decd2d8b34b640b63b8cd",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "open_download_file",
+      "owner": "download_paths",
+      "originalBytes": 597,
+      "originalSha256": "84321720e1352eecf30cfdafb8a674e729b46bed878391b37559ba5fc79fc769",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "open_download_file_for_read",
+      "owner": "download_paths",
+      "originalBytes": 1445,
+      "originalSha256": "6a67e0631cebce6ebc24188f311306669ca698609a7da1721d8a1e8cb66cf432",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "open_download_file_for_read",
+      "owner": "download_paths",
+      "originalBytes": 676,
+      "originalSha256": "e3208f90a97c11c7327d1dc3c1cec0741830e53a62dc809f2d7d968f7d9a85f7",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_capacity_available",
+      "owner": "transfer_policy",
+      "originalBytes": 328,
+      "originalSha256": "6d724a9d8a716a4197b4d843a2be49ff2fc7df2749dbcb0a3d2bbcf3e8b709b7",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_capacity_available",
+      "owner": "transfer_policy",
+      "originalBytes": 625,
+      "originalSha256": "50858256656dcb653a6167736b63aece1103c8e5a1ea2fce26b26c97ae74bf41",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "effective_transfer_group_from",
+      "owner": "transfer_policy",
+      "originalBytes": 1945,
+      "originalSha256": "887d9ec47899ed80725dd9fbb1951a834f42fa09cf733901797a4f30480504ea",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "effective_transfer_group",
+      "owner": "transfer_policy",
+      "originalBytes": 263,
+      "originalSha256": "1080aaf11af50bc09d74320c23b1ffc255907da5549c10ddf8c5e65f8f20e145",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_group_upload_settings",
+      "owner": "transfer_policy",
+      "originalBytes": 427,
+      "originalSha256": "014c20bd230efc551722b141fa99c6e299c102d16d171f214c826a54489f1887",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "UserUploadLimitStatistics",
+      "owner": "transfer_policy",
+      "originalBytes": 292,
+      "originalSha256": "77ae97bbd8760fc2ac5b277c76699626d47c7343d171f3e674953a558ecc4b3e",
+      "relocations": 9
+    },
+    {
+      "kind": "fn",
+      "name": "user_upload_limit_statistics",
+      "owner": "transfer_policy",
+      "originalBytes": 1899,
+      "originalSha256": "9a6b9b5ebc122fe3288fe7c98b781ea823926106649d3fab2273324896da030a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "effective_limit_value",
+      "owner": "transfer_policy",
+      "originalBytes": 295,
+      "originalSha256": "a28e3e1a6614586c44c5dd8584236276c3efe691ef8d39a1e114531cfd31db19",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_window_limit_error",
+      "owner": "transfer_policy",
+      "originalBytes": 910,
+      "originalSha256": "a453f49e109dbb9f4908f0caa74e0b1a3eb223701c88b648662a5e4859ea353d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "inbound_upload_policy",
+      "owner": "transfer_policy",
+      "originalBytes": 4406,
+      "originalSha256": "3ecad4788dd79fbfb5a6a652fab071e919a7392ace608dd948229b278fc28b43",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "probe_peer_capability",
+      "owner": "peer_negotiation",
+      "originalBytes": 2277,
+      "originalSha256": "781d87b8bc679a847c313cbe1643f4be6ba8aec37440f3aeeb246689e760cb64",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "execute_accepted_file_transfer",
+      "owner": "peer_negotiation",
+      "originalBytes": 4196,
+      "originalSha256": "e155c8ec6cfe5e2d710992f473f82125044e0c8ee141f915ce00a81532a4a502",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "project_indirect_transfer_response",
+      "owner": "peer_negotiation",
+      "originalBytes": 2322,
+      "originalSha256": "a56d7d902801804c367f722ba13b6a349a206b98e460d28d2aeccb8ceaa723c4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "project_peer_transfer_response",
+      "owner": "peer_negotiation",
+      "originalBytes": 4896,
+      "originalSha256": "bd12558a71424782ad198fc88b424ca5883ca6ef46bfa60b1330bc5f91acb495",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "schedule_queued_downloads",
+      "owner": "peer_negotiation",
+      "originalBytes": 1776,
+      "originalSha256": "d10f2ad2b07587de66838c268e404385c027edde204951c634bb6d367518cf31",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "apply_completed_download_permissions",
+      "owner": "completed_permissions",
+      "originalBytes": 1644,
+      "originalSha256": "de32d19945ea5b4034ccb5342d911f8338723f38cebcd107bebe206bcf79b775",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "enrich_completed_audio_metadata",
+      "owner": "audio_metadata",
+      "originalBytes": 5602,
+      "originalSha256": "4370013df945500102094db2a815cd11a859bcd809ea6ce8f9fe97a3162fd53e",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "METADATA_HASH_CHUNK_SIZE",
+      "owner": "audio_metadata",
+      "originalBytes": 52,
+      "originalSha256": "9e4ab418d944159790c861adcfa0d96f63145ab26b2f96b738a6f4544de361ed",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "is_audio_hash_candidate",
+      "owner": "audio_metadata",
+      "originalBytes": 338,
+      "originalSha256": "7cf1428d94bc8258e83c239d641ffba81b5818b36f43d16793ac1b5f05db9c06",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_file_prefix_hash",
+      "owner": "audio_metadata",
+      "originalBytes": 310,
+      "originalSha256": "e1991e74267fa6463e53d62f1cabc28976622d225237e320f2769daac5a530a6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_audio_technical_metadata",
+      "owner": "audio_metadata",
+      "originalBytes": 786,
+      "originalSha256": "30d1e8ac34a200f086baf1f5e6424882e1bd9124c0dbb36d554d8993c3f7b829",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "flac_technical_metadata",
+      "owner": "audio_metadata",
+      "originalBytes": 1297,
+      "originalSha256": "f40df2e0fc53063cbb5c07bc6298ed10115ba9c777d69d1b38425efe8ad7f105",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mp3_technical_metadata",
+      "owner": "audio_metadata",
+      "originalBytes": 1602,
+      "originalSha256": "a9b04caeeb4f1deb5ed37957d4cd421117b67134b654a8bc523e7ba0556167ee",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "wav_technical_metadata",
+      "owner": "audio_metadata",
+      "originalBytes": 1695,
+      "originalSha256": "18c4e577e47a4fb41fd70be0f38db9590485a08cceb19b065b351f37882b3265",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "fail_indirect_transfer",
+      "owner": "indirect_transfer",
+      "originalBytes": 676,
+      "originalSha256": "75ce9676f940a5c0c6a4aa152457b34611ba96e3ca80506ae7b1820785ef8bf4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "fail_indirect_browse",
+      "owner": "indirect_transfer",
+      "originalBytes": 973,
+      "originalSha256": "f4c3ee78ca327d81cd9095b4e66459c7dfefb2af63aa830d2459b9de11606364",
+      "relocations": 2
+    },
+    {
+      "kind": "fn",
+      "name": "execute_indirect_file_transfer",
+      "owner": "indirect_transfer",
+      "originalBytes": 601,
+      "originalSha256": "cc5a4b2c3e338d90c156a939ce501f6621648d1af00b1fa71d56f079badfa04f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "upload_file_transfer",
+      "owner": "upload_streaming",
+      "originalBytes": 315,
+      "originalSha256": "f9cbc6041d26206111c106b2a06eda0f19d26b219cfea8f7b14b8ddd93a6f18e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "upload_file_transfer_with_connection",
+      "owner": "upload_streaming",
+      "originalBytes": 1505,
+      "originalSha256": "ccb7c483bdb34381e2f2fff1850e6be9f3bc67998119057b6feb3fc9bd35d3e3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "upload_file_with_progress",
+      "owner": "upload_streaming",
+      "originalBytes": 3501,
+      "originalSha256": "6409226b9ceddcd7b62e348ada994bb2c6e0ed166ba99fdcf21d4676ecdeb9f4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "effective_upload_speed_limit",
+      "owner": "upload_streaming",
+      "originalBytes": 552,
+      "originalSha256": "c662dde215090a2b5c5c117cc1d888f464b8419cd727fe76331b25ca2d673bed",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "effective_upload_pacing_limit",
+      "owner": "upload_streaming",
+      "originalBytes": 1512,
+      "originalSha256": "bbbda20a56f49dd1c3fee69128cd4513add5f41943fff6fbe9efc5ac6e7f439c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_file_transfer",
+      "owner": "download_connection",
+      "originalBytes": 313,
+      "originalSha256": "90f776c09c127ae5d66de8716b8657cee753b3723f1fb3ee25c34cb6e37d236e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_file_transfer_with_retry",
+      "owner": "download_connection",
+      "originalBytes": 2203,
+      "originalSha256": "7609204963649fceb58fcd627ddbf153d6ba8553550d7be906c43dd88c0f2a07",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_retry_delay",
+      "owner": "download_connection",
+      "originalBytes": 360,
+      "originalSha256": "436b13ef22ce3a3946c76e60d742c9d90d0967e132f7fcb942555ea6bd491eaf",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "prepare_incomplete_download_file",
+      "owner": "download_connection",
+      "originalBytes": 1186,
+      "originalSha256": "ebb34ccc4702f3674a6293213c9955e3f92ec6decc7cdcc57c9c465b250e814b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_file_transfer_with_connection",
+      "owner": "download_connection",
+      "originalBytes": 3635,
+      "originalSha256": "0121ed0afc422008fc12daaa07584ad64186b3725ba89938343ee9475bb4f71e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validate_configured_path_policy",
+      "owner": "download_content_safety",
+      "originalBytes": 925,
+      "originalSha256": "7e4d2e977675c9f04afcff056b8ebdefd28ad995c180be750115152960b73c75",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "enforce_completed_download_content_safety",
+      "owner": "download_content_safety",
+      "originalBytes": 2957,
+      "originalSha256": "31c5351e2bc6f1d61e62a6329199f99c69f17fca25763c2a06c46d9e904aaf58",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_file_with_progress",
+      "owner": "download_progress",
+      "originalBytes": 2713,
+      "originalSha256": "827ac7f565d42af41595eb3b11563b36a006c9f626f853c504af166d9e2a7728",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "effective_download_pacing_limit",
+      "owner": "download_progress",
+      "originalBytes": 621,
+      "originalSha256": "2c6453c451505662baa4dd4c41684078c441b2959b5f5cc5057a191ebc63dadc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "write_download_chunk_if_active",
+      "owner": "download_progress",
+      "originalBytes": 1118,
+      "originalSha256": "9ea84495174d8ce9b3cd88764700de8d3b81b6d9d1992b8abe154508dc41d45d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_transfer_progress",
+      "owner": "download_progress",
+      "originalBytes": 872,
+      "originalSha256": "501b1e4c1c05a273ea9ef20cd1cb012b10911a1f706a69b0b9d72aacdac7c177",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_transfer_progress_projection",
+      "owner": "download_progress",
+      "originalBytes": 846,
+      "originalSha256": "b5a23462ec23306160a9b2352ed7bc750849692ab7c411851fd1b928c7f70e2d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_is_cancelled",
+      "owner": "download_progress",
+      "originalBytes": 289,
+      "originalSha256": "2e40b7db21ac974c2b7b2c2e660031879ba1eafcc7eb50c7c88ed13f56fe1b68",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_inbound_file_transfer",
+      "owner": "inbound_transfer",
+      "originalBytes": 3839,
+      "originalSha256": "7a0a5175c47d8b02caff5093ec530628960f36e61249ba0a71b077a74a9915a5",
+      "relocations": 1
+    }
+  ],
+  "parentScopedBindingsMatchOriginal": true,
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "12f8466c9652bf8715a8b58b7733ceb3c9b8f23b0376812c0390fefca5f03b1f"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "4237325ae6d99adc07c17880b06384e8add564e89333ba1b1755b9c771534de0"
+    },
+    "features": {
+      "passed": true,
+      "sha256": "d51cb17ccf23582086d24aa43ff77625f7cf3c351496cface6110228e343bbb1"
+    }
+  },
+  "compatibilityImports": [
+    "mp3_technical_metadata",
+    "wav_technical_metadata",
+    "download_retry_delay",
+    "prepare_incomplete_download_file",
+    "render_completed_download_path",
+    "effective_download_pacing_limit",
+    "write_download_chunk_if_active",
+    "effective_upload_speed_limit",
+    "download_root"
+  ],
+  "compatibilityImportReason": "Narrow unused-import allowances retain original parent-scoped aliases; implementation bodies have no new allowances."
+}

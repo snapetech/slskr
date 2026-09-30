@@ -1,0 +1,85 @@
+{
+  "scope": "RF-071 hosted reproducibility evidence retention",
+  "schemaVersion": 2,
+  "localRegressions": 12,
+  "localGates": [
+    "validated collector with actual coverage and Web entry point",
+    "default reproducibility check",
+    "audit tooling",
+    "workflow release policy",
+    "package artifact matrix policy"
+  ],
+  "observedToolchain": {
+    "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+    "node": "v22.23.2",
+    "npm": "12.0.2",
+    "python3": "Python 3.14.7",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)"
+  },
+  "hashedInputs": [
+    {
+      "bytes": 90026,
+      "path": "Cargo.lock",
+      "present": true,
+      "sha256": "4db55d1c35e147765a1c39e2ebcd54e360ab12555fd61c3593eaa760b981bd73"
+    },
+    {
+      "bytes": 84,
+      "path": "package-lock.json",
+      "present": true,
+      "sha256": "eed7f7366eec98b69be22c11b44c44f5df2311b6424369263a103d63c2009208"
+    },
+    {
+      "bytes": 314611,
+      "path": "web/package-lock.json",
+      "present": true,
+      "sha256": "d813edf58e02a3e36d6798e720b061ae4071fb21dc2ed7dac382e554d2797e15"
+    },
+    {
+      "bytes": 202539,
+      "path": "dashboard/package-lock.json",
+      "present": true,
+      "sha256": "38dc7dd6d4e82bdbfb8b86753f00bdbf3bad5fa5f13d0bd98c57ff5ec8186781"
+    },
+    {
+      "bytes": 194522,
+      "path": "client-ts/package-lock.json",
+      "present": true,
+      "sha256": "9b00f1c5b4701cca1bffc69b929a9dfd2322b825099cfa628a39124d6ef6ad4a"
+    },
+    {
+      "bytes": 175,
+      "path": "client-go/go.sum",
+      "present": true,
+      "sha256": "1737d5523b7264df09b253e86e29f96af295a7bd18e0aaa4373c6099317e065f"
+    },
+    {
+      "bytes": 339,
+      "path": "client-python/pyproject.toml",
+      "present": true,
+      "sha256": "5b5bee712e5e18831b417ed987f81183f3148e77f6ea9abe7bffd1736505112b"
+    },
+    {
+      "bytes": 677,
+      "path": "Cargo.toml",
+      "present": true,
+      "sha256": "57b8884db70aa2d3e4c57b9700be868e72afc9e98a76344dd701b6d58a890eab"
+    },
+    {
+      "bytes": 123,
+      "path": "rust-toolchain.toml",
+      "present": true,
+      "sha256": "e313418f3d02f7e16b76a7b46bbe04a34673f72ef192abd17bc76c8f53a2f224"
+    },
+    {
+      "bytes": 856,
+      "path": ".cargo/config.toml",
+      "present": true,
+      "sha256": "10f33d7be09327efefe8c2dec7ff9737fb5a0990b9b50fa20234198fe14cd10f"
+    }
+  ],
+  "retentionDays": 30,
+  "artifactName": "ci-reproducibility-rust",
+  "hostedValidation": "pending exact pushed tip",
+  "productionPortsAdded": 0
+}

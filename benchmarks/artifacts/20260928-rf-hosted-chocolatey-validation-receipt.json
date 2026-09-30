@@ -1,0 +1,23 @@
+{
+  "scope": "RF028 actual release asset clean Windows package validation; publication disabled",
+  "runUrl": "https://github.com/snapetech/slskr/actions/runs/36383308751",
+  "artifactUrl": "https://github.com/snapetech/slskr/actions/runs/36383308751/artifacts/10952768950",
+  "downloadedPackageHashMatched": true,
+  "actualReleaseArchiveHashMatched": true,
+  "nupkgUrlChecksumAndVersionVerified": true,
+  "receipt": {
+    "schemaVersion": 1,
+    "evidenceMode": "actual release asset; clean Windows package runner",
+    "tag": "release-v0.2.40",
+    "sourceCommit": "9ef3f7defb381c4f34968dbc9913b225db8483c0",
+    "workflowSourceCommit": "23e53097ce1d9385717aed992e94066fb20a6eaa",
+    "runUrl": "https://github.com/snapetech/slskr/actions/runs/36383308751",
+    "assetName": "slskr-v0.2.40-x86_64-pc-windows-msvc.zip",
+    "assetSha256": "46bf8eae60d9e231ce959344848c1c32fd618e6af7703f554074e329d0853f3c",
+    "packageName": "slskr.0.2.40.nupkg",
+    "packageSha256": "f1ac326cb630d8a22cd08fdf9fa9e5c0e2d79afcb71168fd66c5486f5204416b",
+    "releaseAssetChecksumVerified": true,
+    "packageUrlAndChecksumSmokePassed": true,
+    "publishRequested": false
+  }
+}

@@ -1,0 +1,470 @@
+{
+  "schemaVersion": 1,
+  "sourceSha": "84e42960b8cb76b08fdbe96f43cb4780e96ba3a1",
+  "dirtyWorktree": false,
+  "startedUtc": "2026-09-28T00:19:52.463251+00:00",
+  "completedUtc": "2026-09-28T00:21:07.019247+00:00",
+  "command": [
+    "cargo",
+    "run",
+    "--locked",
+    "-p",
+    "slskr",
+    "--bin",
+    "slskr-bounded-differential",
+    "--no-default-features",
+    "--features",
+    "bounded-controller-api-tests-1"
+  ],
+  "binarySha256": "ef31ef0817f63b93643a324137d141e83c8b6bf8267805eb9d8c391dd67498b2",
+  "moduleSha256": "45fd8979e195533932f2a3338936dbec3e7f28b4efdad45c687788f46e624395",
+  "rustVersion": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "platform": "Linux",
+  "architecture": "x86_64",
+  "rowCount": 58,
+  "ledgers": [
+    {
+      "name": "mesh_stats_and_merge",
+      "sha256": "c6efe1b28804bc99bd07d7c24e7ef42505e575ca5216f135930fb2037c2b9f63",
+      "rows": [
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/stats",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/delta",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/stats",
+          "target": "slskdn"
+        }
+      ]
+    },
+    {
+      "name": "mesh_message_runtime",
+      "sha256": "8938c89cc656a64e59819c1935222d91a124e7b9ac5dc650a355220d37124748",
+      "rows": [
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/message",
+          "target": "slskdn"
+        }
+      ]
+    },
+    {
+      "name": "mesh_controller_edge_cases",
+      "sha256": "66a22224c29298fdcd595986c5fc823cf1535d273cfca17b9da5fc06ff066882",
+      "rows": [
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/delta",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/health",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/hello",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/peers",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/stats",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/transport",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/nat/detect",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/nat/detect",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/lookup/{flacKey}",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/lookup/{flacKey}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/health",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        },
+        {
+          "case": "nominal-status-headers-body",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/lookup/{flacKey}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/lookup/{flacKey}",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/health",
+          "target": "slskdn"
+        },
+        {
+          "case": "populated-dynamic-state",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/peers",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        },
+        {
+          "case": "malformed-path-query-or-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        }
+      ]
+    },
+    {
+      "name": "mesh_runtime_and_nat_lifecycle",
+      "sha256": "17fbedb191d0e8ba20583a3bea157bbabce7c54a19682926a78e2c438ffa6572",
+      "rows": [
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/delta",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/health",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/hello",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/lookup/{flacKey}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/peers",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/stats",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/api/v0/mesh/transport",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "GET",
+          "pass": true,
+          "route": "/mesh/http/services",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/nat/detect",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/nat/detect",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/nat/detect",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/nat/detect",
+          "target": "slskdn"
+        },
+        {
+          "case": "mutation-side-effects-and-readback",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/sync/{username}",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/sync/{username}",
+          "target": "slskdn"
+        }
+      ]
+    },
+    {
+      "name": "mesh_merge_publish_restart_concurrency",
+      "sha256": "f710c32b3a2ab7ae6106b717cb7c339799ae168dc2c1a56e33abf917085454da",
+      "rows": [
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/merge",
+          "target": "slskdn"
+        },
+        {
+          "case": "restart-persistence-or-reset",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/publish",
+          "target": "slskdn"
+        }
+      ]
+    },
+    {
+      "name": "mesh_sync_failure_and_concurrency",
+      "sha256": "b9eca3b25c2a8547bd5bccd08401e82c933d9ee4b4e5622da4c7f89a3be9a98f",
+      "rows": [
+        {
+          "case": "nominal-status-headers-body",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/sync/{username}",
+          "target": "slskdn"
+        },
+        {
+          "case": "missing-empty-or-conflict-state",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/sync/{username}",
+          "target": "slskdn"
+        },
+        {
+          "case": "runtime-failure-and-timeout",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/sync/{username}",
+          "target": "slskdn"
+        },
+        {
+          "case": "concurrency-and-idempotency",
+          "method": "POST",
+          "pass": true,
+          "route": "/api/v0/mesh/sync/{username}",
+          "target": "slskdn"
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-006 diagnostic child, cancellation admission and temporary stream ownership",
+  "baseCommit": "a3477e4ea5b9048c1d488fdfd6b7536bad9d807b",
+  "sources": {
+    "crates/slskr/src/lib.rs": "dc83375c8552c34f65c965805b87395718f6086248b2186d15a108c040aa8f2e",
+    "crates/slskr/src/core_dump_process.rs": "7aa68477e5e7879b42183ec60ac1e55c1898c92d6a8f7573bac54786047b3e4c",
+    "crates/slskr/src/local_stream_file.rs": "2a3a286175cca8bc0f45a3eda6e11d1346bdd1b5e62435c7e8ed2d3e471c7424",
+    "crates/slskr/src/preview_stream_controller.rs": "296f189872bcb002963b9a83aa8aa4a396e61304f4281b60f6c2cae434ec807a",
+    "crates/slskr/src/script_process_group.rs": "7b67b1c4af2b26b02d2c8771c05b6d49b5bb0513e0d0fe872ef70df102098075",
+    "crates/slskr/src/scripts.rs": "d07f462638724e19b617d1f8f84bee66c3c33288bfa7fa8c14c5308603e3fdc2",
+    "crates/slskr/src/versioned_relay_controller.rs": "721a6f6b4554337d6ec6171bd9ca53a56ff98134a831788124bdf7b21be3369d",
+    "scripts/check-runtime-boundary-hardening.sh": "c850a9a5ca92fbe1e6b544b249e08840e701f56890b3a7e75dac868d823e9139"
+  },
+  "logs": {
+    "target/rf-core-dump-owner-daemon-tests.log": "ca45794b4181584de1b36e9fd1d83b1dc0a11e34804a3787844a42e114f32d86",
+    "target/rf-core-dump-owner-clippy.log": "1d787efea8f35b7415ba8a33dd6c795d5eae75951b9e4654a1dab9a2b4a9599e",
+    "target/rf-core-dump-owner-full-controller.log": "83a3982ec0bb739871edcb731119997f963b8c0a0a64cd988e1f290282713833",
+    "target/rf-core-dump-owner-debug-build.log": "8d3725731662d4adceb2dce826eff2f49f4d291ba0d22f04d1757e68176d36f8"
+  },
+  "validation": {
+    "daemonTestsPassed": 722,
+    "daemonTestsIgnored": 1,
+    "strictAllTargetsClippy": "passed",
+    "fullControllerLegacyAllTargetsCompile": "passed",
+    "newRegressions": [
+      "Actual direct child timeout and early owner drop kill/reap and remove partial output",
+      "Reaped successful child preserves explicitly committed output; unsuccessful child removes it",
+      "Actual blocking worker retains single admission after requesting Tokio task is aborted, then frees it on completion",
+      "Unconsumed temporary stream closes file and removes output",
+      "Cloned temporary stream consumers retain output until final drop; explicit removal stays idempotent"
+    ]
+  },
+  "singlePeerPortProof": {
+    "schemaVersion": 1,
+    "evidenceMode": "live isolated daemon process; not deployed interop proof",
+    "sourceSha": "a3477e4ea5b9048c1d488fdfd6b7536bad9d807b",
+    "dirtyWorktree": true,
+    "binarySha256": "48b8f90131e7ad65c4ac74b0566da23e8db58ec3d6a3e6d82511ec99112f9a88",
+    "harnessSha256": "3a71c2ca306c21940f0d5c00325ba10591e6dc1216dcb759b55f86706a523e73",
+    "transportSourceSha256": {
+      "crates/slskr/src/daemon_serve.rs": "ed758101dce191ac4bad40a076fa6295add3875536103f5fd24175645b88d019",
+      "crates/slskr/src/config_parts/startup.rs": "970ceef95d50e27570131a691a37b7073c38fd926b66384a7e757040b1def716",
+      "crates/slskr/src/config_parts/peer_transport.rs": "ef820e911c6fd551d1457fdcd86ed46a624bd9fd2eca454fc80e214b02fd5410",
+      "crates/slskr/src/private_gateway.rs": "5eb5eb85721435c9c52f20efe671ee44b1469331010bbaf2aa242cf0d7e75965",
+      "crates/slskr/src/private_gateway_owners/gateway_models.rs": "089d52a73578e3755aa59aa915787999c97fb5237d739df0e7671204ae7344b4",
+      "crates/slskr/src/private_gateway_owners/gateway_transport.rs": "efed090c0b1dfd16aa34442e4b75a0bb01ee36e1f0eda015fdc161bc62901857",
+      "crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs": "14ecdf76930e64f1377fa68bd785f6dce54d3b0983da1c39a3b285b454f4b415",
+      "crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs": "fdbb525e3802594b5ae9dfa10aeab6bc1c24b4ffc9dcdfa4a3bc6d6b740c0c0f",
+      "crates/slskr/src/dht.rs": "2b9a142138f030967d2255a6bde2a4f84d46663c2b1d2e1d38d0e89de6ac0531",
+      "crates/slskr/src/quic_alpn.rs": "c47317878d04b21064fdd276c666b86c9cb9a518cdb1d3cbc12567aec654215b",
+      "crates/slskr-client/src/shared_udp.rs": "64734ea6cd527b3bccb16e0cfc4bc1560379c4f4527230643c297ffb25cc9c8e",
+      "crates/slskr-client/src/shared_quic_server.rs": "65adbef6487d7a732c9b1075542415023020f4c901ef11a7dce111a50c83f8f3",
+      "crates/slskr-client/src/quic_control.rs": "19b0d5a9c7dafe9f36eecf96a009fee242d456f2763b4ebbcac4b33d4c31cbb3",
+      "crates/slskr-client/src/quic_data.rs": "7bdf7f7f0b50460e062e14627784ececfc3b0f19d74b62c1bb15d891670c7d3c",
+      "vendor/mainline/src/lib.rs": "1b0bcff3ea9422244bfcd542a5ac98cbb6a401b4fc08f2b5df8321b51e5606fc",
+      "vendor/mainline/src/dht.rs": "bbe9dee9758387a8915d3baf002ccdd530d9327fd4e5423f0ff9a5b69a52e5e4",
+      "vendor/mainline/src/rpc/config.rs": "627cabe427b5a81dcd66ee78ac4edbb31ea6475ac9403c0e138dcde516fd6fe0",
+      "vendor/mainline/src/rpc/socket.rs": "21190713fdd70856f5d3f81b93924e9dbe1361bf36b00bcd53cea6ffdfc8f545"
+    },
+    "startedUtc": "2026-09-28T10:43:58.796837+00:00",
+    "dhtEnabled": true,
+    "meshDhtEnabled": true,
+    "quicEnabled": true,
+    "quicDataEnabled": true,
+    "productionPortsAdded": 0,
+    "cycles": [
+      {
+        "cycle": 1,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 1,
+        "perIpCapacityRejectedFourthClient": null,
+        "establishedTlsAwaitingOverlayInit": 1,
+        "certificateSha256": "e0d8e36faf1ffb8e1ea18c5f3c1698b2ac54c5b98f7b4961a43840df594c9277",
+        "exitCode": 0,
+        "udpTransportProbes": [
+          {
+            "command": "overlay-quic-control-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "overlay-quic-control",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:59951 envelope=probe certificate_pin=discovered-for-frozen-target"
+            },
+            "outputSha256": "7fc9280180422d16372cc8fd5171f7075cc34bd205a2e467acbfd36efae6cc76"
+          },
+          {
+            "command": "quic-data-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "quic-data",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:59951 bytes=28 payload=raw",
+              "bytes": 28
+            },
+            "outputSha256": "f8ce868d9351eb470da1718db9fa291263841362199fad6a8e79059841ed502c"
+          },
+          {
+            "command": "actual DHT ping/reply",
+            "publicSourcePort": true
+          }
+        ],
+        "shutdownSeconds": 0.113533,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      },
+      {
+        "cycle": 2,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 0,
+        "perIpCapacityRejectedFourthClient": true,
+        "establishedTlsAwaitingOverlayInit": 3,
+        "certificateSha256": "28cf448fa48e78cbfcb4401f73e59ec74ee928031d5a4dcf55f178b78d570175",
+        "exitCode": 0,
+        "udpTransportProbes": [
+          {
+            "command": "overlay-quic-control-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "overlay-quic-control",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:38783 envelope=probe certificate_pin=discovered-for-frozen-target"
+            },
+            "outputSha256": "aef0289408456033bb14be43353c460f3b0ebd12c57558560d8f4de2ebe3f4b9"
+          },
+          {
+            "command": "quic-data-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "quic-data",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:38783 bytes=28 payload=raw",
+              "bytes": 28
+            },
+            "outputSha256": "a1c31ef2dac00f0fca2c621611b80ddc94186b8f3d204e1e56b7a6e49a4b193e"
+          },
+          {
+            "command": "actual DHT ping/reply",
+            "publicSourcePort": true
+          }
+        ],
+        "shutdownSeconds": 0.11358,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      },
+      {
+        "cycle": 3,
+        "tcpListeners": 2,
+        "peerTcpListeners": 1,
+        "gatewayUdpListeners": 1,
+        "peerTcpAndUdpSamePort": true,
+        "stalledPartialTlsClients": 1,
+        "perIpCapacityRejectedFourthClient": null,
+        "establishedTlsAwaitingOverlayInit": 1,
+        "certificateSha256": "6da506a68b62a4d3ddf90bfba28fcee983e12d479666d42c1501dcb2cafb5375",
+        "exitCode": 0,
+        "udpTransportProbes": [
+          {
+            "command": "overlay-quic-control-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "overlay-quic-control",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:38475 envelope=probe certificate_pin=discovered-for-frozen-target"
+            },
+            "outputSha256": "43e20b311f6d79a78abc6d052526c17170b00ea25976dc463e6855b930327bec"
+          },
+          {
+            "command": "quic-data-probe",
+            "exitCode": 0,
+            "result": {
+              "probe": "quic-data",
+              "status": "ok",
+              "duration_ms": 0,
+              "detail": "endpoint=127.0.0.1:38475 bytes=28 payload=raw",
+              "bytes": 28
+            },
+            "outputSha256": "82b77db9734ec115ea135035a50060888c6bfa1c515e3cdf6a9bb5f29b0905a5"
+          },
+          {
+            "command": "actual DHT ping/reply",
+            "publicSourcePort": true
+          }
+        ],
+        "shutdownSeconds": 0.113403,
+        "allClientSocketsClosed": true,
+        "peerTcpAndUdpRebound": true
+      }
+    ],
+    "success": true
+  },
+  "scope": "Actual child and filesystem tests without invoking gcore or granting ptrace in the tests. Linux ptrace reset and process-group wiring are checked through the production owner source and compiled paths; these tests do not certify a real diagnostic dump. Blocking filesystem workers remain outside daemon registry shutdown joins, mounted I/O has no finite completion proof, and independently detached descendants are not claimed joined. Cleanup failures are logged."
+}

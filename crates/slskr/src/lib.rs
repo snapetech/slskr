@@ -31,8 +31,11 @@ mod controller_storage;
 mod controller_storage_preflight;
 mod controller_status;
 mod controller_yaml;
+#[cfg(target_os = "linux")]
+mod core_dump_process;
 mod credential_store;
 mod daemon_runtime_setup;
+mod daemon_runtime_shutdown;
 mod daemon_serve;
 mod database_maintenance;
 mod destination_state;
@@ -56,6 +59,9 @@ mod hash_db_store;
 mod http_connection;
 mod http_server;
 mod incoming_share_store;
+mod local_stream_file;
+use local_stream_file::LocalStreamFile;
+mod script_process_group;
 mod integration_runtime_state;
 mod integration_target;
 mod interest_store;
@@ -72,7 +78,10 @@ mod local_file_hash;
 )]
 mod logging;
 mod managed_blacklist_runtime;
+mod lifecycle_controller;
 mod managed_tasks;
+mod share_stream_limits;
+mod external_visualizer_processes;
 mod mediacore_controller;
 mod mesh_dht;
 mod mesh_dht_runtime;
@@ -185,6 +194,7 @@ mod security_state;
 mod session_runtime;
 mod session_state;
 mod share_grant_store;
+mod share_backfill_controller;
 mod share_group_store;
 mod share_index_runtime;
 mod share_index_state;
@@ -201,6 +211,14 @@ mod source_discovery_state;
     reason = "storage codecs are retained for cache and compatibility formats"
 )]
 mod storage;
+#[cfg(feature = "rf-benchmarks")]
+#[doc(hidden)]
+pub use storage::rf_benchmark_write_share_cache;
+#[cfg(feature = "rf-benchmarks")]
+#[doc(hidden)]
+pub use persistence::{
+    DatabaseManager, SearchRecord as RfBenchmarkSearchRecord, SearchResultRecord,
+};
 #[allow(
     dead_code,
     reason = "tracing context helpers are retained for optional instrumentation"
@@ -413,11 +431,6 @@ use self::collection_store::{
 use self::contact_state::{
     ContactStore, ContactUpdateError, persist_contact_checked, persist_contact_delete_checked,
 };
-#[cfg(any(
-    test,
-    feature = "full-controller-tests",
-))]
-use self::controller_capabilities::new_capability_signing_key;
 use self::controller_capabilities::{
     load_or_create_capability_signing_key, local_capability_descriptor,
     local_profile_peer_id, profile_friend_code,
@@ -620,11 +633,15 @@ use self::listening_party_stream_state::{
 };
 use self::local_file_hash::sha256_local_file_cached;
 use self::managed_blacklist_runtime::ManagedBlacklistRuntime;
+use self::lifecycle_controller::{
+    GRACEFUL_SHUTDOWN_DISCONNECT_TIMEOUT, LifecycleCommand, initiate_graceful_shutdown,
+    schedule_lifecycle_command,
+};
 use self::managed_tasks::ManagedTaskRegistry;
 use self::mediacore_controller::{mediacore_extended_response, mediacore_mutation_response};
 use self::mesh_dht_runtime::{detect_nat_type, spawn_mesh_dht_publisher, STUN_SERVERS};
 #[cfg(feature = "full-controller-tests")]
-use self::mesh_dht_runtime::{STUN_MAGIC_COOKIE, parse_stun_mapped_address, stun_probe};
+use self::mesh_dht_runtime::{parse_stun_mapped_address, stun_probe};
 use self::mesh_gateway_controller::{
     mesh_gateway_auth_failure, mesh_gateway_disabled_response, mesh_http_service_response,
     mesh_http_services_response,
@@ -731,8 +748,6 @@ pub(crate) use self::private_message_auto_responses::MAX_PRIVATE_MESSAGE_AUTO_RE
 use self::private_message_auto_responses::{
     PrivateMessageAutoResponseTracker, is_private_message_auto_response_candidate,
 };
-#[cfg(feature = "full-controller-tests")]
-use self::quarantine_controller::quarantine_verdict_payload_hash;
 use self::quarantine_controller::{
     quarantine_build_audit_entry, quarantine_dynamic_get_response, quarantine_mutation_response,
 };
@@ -811,7 +826,7 @@ use self::session_runtime::{
     bridge_soulseek_room_message_to_pods, handle_incoming_soulseek_pod_message,
 };
 #[cfg(feature = "full-controller-tests")]
-use self::session_runtime::{connect_session, handle_session_command, project_server_message};
+use self::session_runtime::{connect_session, handle_session_command};
 use self::session_runtime::{
     is_remote_queue_response, persist_room_join_checked, persist_room_leave_checked,
     record_pod_room_mirror_failure, record_room_dispatch_failure, send_active_interest_command,
@@ -1051,7 +1066,9 @@ pub fn run() {
         .thread_stack_size(8 * 1024 * 1024)
         .build()
         .expect("build slskr runtime");
-    if let Err(error) = runtime.block_on(run_daemon()) {
+    let result = runtime.block_on(run_daemon());
+    daemon_runtime_shutdown::shutdown(runtime);
+    if let Err(error) = result {
         eprintln!("{error}");
         std::process::exit(1);
     }
@@ -1450,7 +1467,10 @@ fn controller_transfer_state(status: &str) -> &str {
 }
 
 async fn content_discovery_error_response(state: &AppState, error: String) -> HttpResponse {
-    if error.starts_with("content discovery state ") {
+    if error.starts_with("content discovery state ")
+        || error.starts_with("hash database state unavailable:")
+        || error.starts_with("hash database storage unavailable:")
+    {
         update_session(state, |snapshot| {
             snapshot.last_error = Some(error);
         })
@@ -1902,42 +1922,6 @@ fn controller_options_validation_failure_response(state: &AppState) -> Option<Ht
 }
 
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LifecycleCommand {
-    Shutdown,
-    Restart,
-}
-
-const GRACEFUL_SHUTDOWN_DISCONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-
-fn schedule_lifecycle_command(state: &AppState, command: LifecycleCommand) {
-    let Some(sender) = state.lifecycle_commands.clone() else {
-        return;
-    };
-    tokio::spawn(async move {
-        // Let the HTTP response flush before the accept loop tears down the runtime.
-        time::sleep(Duration::from_millis(100)).await;
-        let _ = sender.send(command).await;
-    });
-}
-
-/// Disconnects from the Soulseek server (best-effort) before scheduling
-/// process shutdown, matching the oracle's `StopAsync` teardown
-/// (`Client.Disconnect("Shutting down", ...)`) rather than exiting with the
-/// session left connected.
-async fn initiate_graceful_shutdown(state: &AppState) {
-    cancel_active_share_scan(state);
-    // A full session command queue must not prevent the process from honoring
-    // SIGTERM/SIGINT. The lifecycle command still closes the listeners after
-    // the bounded best-effort disconnect window.
-    let _ = time::timeout(
-        GRACEFUL_SHUTDOWN_DISCONNECT_TIMEOUT,
-        send_session_command(state, SessionCommand::Disconnect),
-    )
-    .await;
-    schedule_lifecycle_command(state, LifecycleCommand::Shutdown);
-}
-
 #[cfg(any(test, feature = "bounded-differential"))]
 #[allow(dead_code)]
 fn public_lidarr_error(error: Option<&str>) -> Option<&'static str> {
@@ -2166,13 +2150,6 @@ fn conversation_messages_path(path: &str) -> Option<&str> {
     path.strip_prefix("/api/conversations/")?
         .strip_suffix("/messages")
         .filter(|username| !username.is_empty() && !username.contains('/'))
-}
-
-struct LocalStreamFile {
-    file: fs::File,
-    length: u64,
-    content_type: String,
-    cleanup_path: Option<PathBuf>,
 }
 
 fn search_target_static(target: &str) -> &'static str {

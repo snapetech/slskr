@@ -329,9 +329,13 @@ pub(super) async fn route_virtual_soulfind_v2(
                 let catalogue = virtual_soulfind_catalogue(state).await;
                 let intents = Arc::clone(&state.virtual_soulfind_v2);
                 let process_id = id.clone();
-                tokio::spawn(async move {
+                if !state.managed_background_tasks.try_spawn(async move {
                     intents.write().await.process_track(&process_id, &catalogue);
-                });
+                }) {
+                    return routing::service_unavailable_string_response(
+                        "Daemon task admission is closed",
+                    );
+                }
                 return routing::accepted_response(
                     serde_json::json!({
                         "message": "Processing started",

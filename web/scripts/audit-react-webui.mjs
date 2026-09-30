@@ -1,4 +1,5 @@
 import { chromium } from '@playwright/test';
+import { auditResponseContract } from './audit-response-contracts.mjs';
 import { createServer } from 'node:http';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -412,6 +413,9 @@ const fallback = (url, method = 'GET') => {
     if (pathname === '/searches') return json(searches[0], 201);
     return json({ accepted: true, ok: true });
   }
+
+  const contractResponse = auditResponseContract(pathname);
+  if (contractResponse !== undefined) return json(contractResponse);
 
   if (pathname === '/session/enabled') return json(true);
   if (pathname === '/session') return json({ username: 'local_operator' });
@@ -879,16 +883,14 @@ const { port } = server.address();
 // origin checks observe the same origin an operator uses. Mock audits retain
 // the isolated static server.
 const baseUrl = liveBackendUrl || `http://127.0.0.1:${port}`;
-const browser = await chromium.launch({
-  executablePath: browserExecutablePath,
-  headless: process.env.HEADLESS !== 'false',
-});
+let browser;
 const audit = {
   apiResponses: [],
   allowedLiveStatus: allowedLiveStatusRules.map((rule) => rule.join('|')),
   allowLiveErrors,
   baseUrl,
   evidenceMode: liveBackendUrl ? 'live' : 'mock',
+  endpointSweepCount: endpointSweep.length,
   errors: [],
   generatedAt: new Date().toISOString(),
   routes: [],
@@ -896,6 +898,10 @@ const audit = {
 };
 
 try {
+  browser = await chromium.launch({
+    executablePath: browserExecutablePath,
+    headless: process.env.HEADLESS !== 'false',
+  });
   if (!skipNavigation) {
     const navigationContext = await browser.newContext({
       serviceWorkers: 'block',
@@ -1102,8 +1108,11 @@ try {
     }
   }
 } finally {
-  await browser.close();
-  await stopStaticServer(server);
+  try {
+    await browser?.close();
+  } finally {
+    await stopStaticServer(server);
+  }
 }
 
 await fs.writeFile(path.join(outputDir, 'audit.json'), `${JSON.stringify(audit, null, 2)}\n`);

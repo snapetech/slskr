@@ -35,5 +35,9 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "rin
 name = "file_transfer_payload"
 harness = false
 
+[[bench]]
+name = "search_response_dedup"
+harness = false
+
 [lints]
 workspace = true

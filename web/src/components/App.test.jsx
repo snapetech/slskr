@@ -86,7 +86,6 @@ vi.mock('./Search/DiscoveryGraphAtlasPage', () => ({
 }));
 vi.mock('./LoginForm', () => ({ default: () => <div>Login Form</div> }));
 vi.mock('./Messaging/Messaging', () => ({ default: () => <div>Messages</div> }));
-vi.mock('./Pods/Pods', () => ({ default: () => <div>Pods</div> }));
 vi.mock('./PlaylistIntake/PlaylistIntake', () => ({
   default: () => <div>Playlist Intake</div>,
 }));

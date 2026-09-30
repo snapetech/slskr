@@ -1,12 +1,14 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { incomingMovieStream } from './fixtures/ticketed-share';
 import { NODES, shouldLaunchNodes } from './env';
-import { hasDownloadedMediaFixtures } from './fixtures/ensure-fixtures';
+import { hasMediaFixture } from './fixtures/ensure-fixtures';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
 import {
   announceShareGrant,
   clickNav,
   getAuthToken,
   login,
-  waitForDownloadInList,
   waitForHealth,
   waitForLibraryItem,
   waitForShareGrantById,
@@ -15,12 +17,12 @@ import { T } from './selectors';
 import { expect, test } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
-const hasDownloadedMedia = hasDownloadedMediaFixtures();
+const hasDownloadedMedia = hasMediaFixture('movie/sintel_512kb_stereo.mp4');
 
 test.describe('multi-peer sharing', () => {
   test.skip(
     !hasDownloadedMedia,
-    'Multi-peer sharing E2E requires downloaded media fixtures',
+    'Multi-peer sharing E2E requires the pinned Sintel movie fixture',
   );
 
   let harness: MultiPeerHarness | null = null;
@@ -53,9 +55,14 @@ test.describe('multi-peer sharing', () => {
           noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
         },
       );
-      // Node C: recipient-only (no shares)
+      // Node C: recipient-only (no shares) with A's existing single-port mesh
+      // endpoint pinned from its locally generated certificate.
+      const ownerMeshPeer = await harness
+        .getNode('A')
+        .trustedMeshPeerConfig();
       await harness.startNode('C', [], {
         noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
+        trustedMeshPeers: [ownerMeshPeer],
       });
     }
   });
@@ -94,6 +101,12 @@ test.describe('multi-peer sharing', () => {
     console.log('[Contacts Test] Navigating to contacts page...');
     const targetUrl = `${nodeA.baseUrl}/contacts`;
     console.log('[Contacts Test] Target URL:', targetUrl);
+    const contactsResponse = pageA.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/api/v0/contacts' && response.request().method() === 'GET',
+      { timeout: 10_000 },
+    );
+    // Attach a rejection handler immediately; the awaited assertion below owns failure.
+    void contactsResponse.catch(() => {});
     await pageA.goto(targetUrl, { timeout: 10_000, waitUntil: 'networkidle' });
     console.log('[Contacts Test] Navigation complete, URL:', pageA.url());
 
@@ -209,7 +222,7 @@ test.describe('multi-peer sharing', () => {
       console.error('[Contacts Test] ERROR: contacts-root not found!');
       // Dump all data-testid elements to see what's actually rendered
       const allTestIds = await pageA.evaluate(() => {
-        const elements = document.querySelectorAll('[data-testid]');
+        const elements = document.querySelectorAll<HTMLElement>('[data-testid]');
         return Array.from(elements).map((element) => ({
           tag: element.tagName,
           testid: element.dataset.testid,
@@ -223,40 +236,10 @@ test.describe('multi-peer sharing', () => {
       throw error;
     }
 
-    // Wait for contacts API call to complete and capture response body
-    console.log('[Contacts Test] Waiting for /api/v0/contacts response...');
-    let resp;
-    try {
-      resp = await pageA.waitForResponse(
-        (r) => r.url().includes('/api/v0/contacts') && r.status() === 200,
-        { timeout: 10_000 },
-      );
-
-      // Diagnostic: Verify response body
-      const text = await resp.text();
-      const contentType = resp.headers()['content-type'] || '';
-      console.log('[Contacts Test] API Response - Content-Type:', contentType);
-      console.log('[Contacts Test] API Response - Length:', text.length);
-      console.log(
-        '[Contacts Test] API Response - First 200 chars:',
-        text.slice(0, 200),
-      );
-
-      if (text.length === 0) {
-        console.error(
-          '[Contacts Test] ERROR: API returned 200 with empty body!',
-        );
-      }
-
-      if (text.startsWith('<html')) {
-        console.error(
-          '[Contacts Test] ERROR: API returned HTML instead of JSON!',
-        );
-      }
-    } catch (error) {
-      console.error('[Contacts Test] ERROR waiting for API response:', error);
-      // Continue with diagnostics even if API wait failed
-    }
+    const contacts = await contactsResponse;
+    expect(contacts.status()).toBe(200);
+    expect(contacts.headers()['content-type']).toContain('application/json');
+    expect(await contacts.json()).toBeInstanceOf(Array);
 
     // Diagnostic: Check current state
     const tid = T.contactsCreateInvite;
@@ -444,21 +427,44 @@ test.describe('multi-peer sharing', () => {
       });
     }
 
-    // Ensure nodeC is a member (recipient visibility depends on this)
-    const addMemberButton = pageA
-      .getByTestId(T.groupRow(groupName))
-      .locator(`[data-testid="${T.groupAddMember}"]`)
-      .first();
-    await expect(addMemberButton).toBeVisible({ timeout: 5_000 });
-    await addMemberButton.click();
-    const modalUserInput = pageA
-      .locator('.ui.modal')
-      .locator('input[placeholder*="username" i]')
-      .first();
-    if ((await modalUserInput.count()) > 0) {
-      await modalUserInput.fill('nodeC');
-      await pageA.getByTestId(T.groupMemberAddSubmit).click();
-      await expect(modalUserInput).not.toBeVisible({ timeout: 5_000 });
+    // The recipient must be a real share-group member before the authenticated
+    // mesh backfill can authorize the grant. Ensure this in both isolated and
+    // full serialized runs rather than relying on the earlier nodeB UI case.
+    const nodeC = harness ? harness.getNode('C').nodeCfg : NODES.C;
+    const ownerToken = await getAuthToken(pageA);
+    const ownerHeaders = { Authorization: `Bearer ${ownerToken}` };
+    const groupsResponse = await request.get(
+      `${nodeA.baseUrl}/api/v0/sharegroups`,
+      { headers: ownerHeaders },
+    );
+    expect(groupsResponse.status()).toBe(200);
+    const groups = await groupsResponse.json();
+    const recipientGroup = Array.isArray(groups)
+      ? groups.find((group: any) => group?.name === groupName)
+      : null;
+    expect(recipientGroup?.id).toBeTruthy();
+    const membersResponse = await request.get(
+      `${nodeA.baseUrl}/api/v0/sharegroups/${recipientGroup.id}/members`,
+      { headers: ownerHeaders },
+    );
+    expect(membersResponse.status()).toBe(200);
+    const members = await membersResponse.json();
+    if (
+      !Array.isArray(members) ||
+      !members.some(
+        (member: any) =>
+          member?.username?.toLowerCase() === nodeC.username.toLowerCase(),
+      )
+    ) {
+      const addRecipient = await request.post(
+        `${nodeA.baseUrl}/api/v0/sharegroups/${recipientGroup.id}/members`,
+        {
+          data: { username: nodeC.username },
+          headers: ownerHeaders,
+          failOnStatusCode: false,
+        },
+      );
+      expect([200, 201]).toContain(addRecipient.status());
     }
 
     // Navigate to collections page directly
@@ -595,7 +601,7 @@ test.describe('multi-peer sharing', () => {
     // Search for sintel (movie fixture) and add by contentId
     const searchInput = pageA.getByTestId('collection-item-search-input');
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
-    const sintelItem = await waitForLibraryItem(pageA, 'sintel');
+    const sintelItem = await waitForLibraryItem(pageA, 'sintel_512kb_stereo');
     await searchInput.locator('input').fill(sintelItem.contentId);
 
     // Add the item
@@ -660,13 +666,28 @@ test.describe('multi-peer sharing', () => {
       throw new Error('Create share response missing id.');
     }
 
-    sharedGrantId = createShareBody.id;
+    const collectionId =
+      createShareBody.collectionId || createShareBody.collection_id;
+    expect(collectionId).toBeTruthy();
+    const ownerSharesResponse = await request.get(
+      `${nodeA.baseUrl}/api/v0/share-grants`,
+      { headers: ownerHeaders },
+    );
+    expect(ownerSharesResponse.status()).toBe(200);
+    const ownerShares = await ownerSharesResponse.json();
+    const recipientGrant = Array.isArray(ownerShares)
+      ? ownerShares.find(
+          (grant: any) =>
+            (grant?.collectionId || grant?.collection_id) === collectionId &&
+            grant?.username?.toLowerCase() === nodeC.username.toLowerCase(),
+        )
+      : null;
+    expect(recipientGrant?.id).toBeTruthy();
+    sharedGrantId = recipientGrant.id;
 
-    const nodeC = harness ? harness.getNode('C').nodeCfg : NODES.C;
     const contextC = await browser.newContext();
     const pageC = await contextC.newPage();
     await login(pageC, nodeC);
-    const ownerToken = await getAuthToken(pageA);
     const recipientToken = await getAuthToken(pageC);
     await announceShareGrant({
       owner: nodeA,
@@ -674,8 +695,7 @@ test.describe('multi-peer sharing', () => {
       recipient: nodeC,
       recipientToken,
       request,
-      shareGrantId: createShareBody.id,
-      shareOverride: createShareBody,
+      shareGrantId: recipientGrant.id,
     });
     await contextC.close();
 
@@ -909,6 +929,7 @@ test.describe('multi-peer sharing', () => {
       shareOverride = share;
     }
 
+    if (!shareGrantId) throw new Error('Movie share grant is missing');
     // Announce share to nodeC
     await announceShareGrant({
       owner: nodeA,
@@ -958,86 +979,20 @@ test.describe('multi-peer sharing', () => {
       timeout: 15_000,
     });
 
-    // Resolve stream URL from manifest via API (more reliable than UI click)
-    const streamUrl = await pageC.evaluate(
-      async ({ expectedTitle, expectedOwnerBaseUrl }) => {
-        const token =
-          sessionStorage.getItem('slskr-token') ||
-          localStorage.getItem('slskr-token');
-        if (!token) return null;
+    const streamUrl = await incomingMovieStream({
+      request, recipient: nodeC, recipientToken, owner: nodeA, title: collectionTitle,
+    });
 
-        const sharesRes = await fetch('/api/v0/share-grants', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!sharesRes.ok) return null;
-        const sharesText = await sharesRes.text();
-        if (!sharesText) return null;
-        let shares;
-        try {
-          shares = JSON.parse(sharesText);
-        } catch {
-          return null;
-        }
-
-        if (!Array.isArray(shares) || shares.length === 0) return null;
-
-        for (const share of shares) {
-          if (!share?.id) continue;
-          const manifestRes = await fetch(
-            `/api/v0/share-grants/${share.id}/manifest`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            },
-          );
-          if (!manifestRes.ok) continue;
-          const manifestText = await manifestRes.text();
-          if (!manifestText) continue;
-          let manifest;
-          try {
-            manifest = JSON.parse(manifestText);
-          } catch {
-            continue;
-          }
-
-          if (manifest?.title !== expectedTitle) continue;
-
-          const items = Array.isArray(manifest?.items) ? manifest.items : [];
-          const getName = (x: any) =>
-            String(x?.filename || x?.path || x?.name || '');
-
-          // Prefer an actual video item; share manifests can be sorted differently than insertion order.
-          const item =
-            items.find((x: any) => /sintel/i.test(getName(x))) ||
-            items.find((x: any) =>
-              /\.(mp4|mkv|webm|avi|mov)$/i.test(getName(x)),
-            ) ||
-            items.find(
-              (x: any) =>
-                String(x?.mediaKind || '')
-                  .toLowerCase()
-                  .includes('video'),
-            ) ||
-            items.find((x: any) => Boolean(x?.streamUrl || x?.stream_url));
-
-          // API responses are typically snake_case, but some DTOs are camelCase.
-          const url = item?.streamUrl || item?.stream_url;
-          if (!url) continue;
-
-          if (url.startsWith(expectedOwnerBaseUrl)) return url;
-          if (url.startsWith('/')) return `${expectedOwnerBaseUrl}${url}`;
-        }
-
-        return null;
-      },
-      {
-        expectedOwnerBaseUrl: nodeA.baseUrl,
-        expectedTitle: collectionTitle,
-      },
-    );
-
-    if (!streamUrl) {
-      throw new Error('No streamUrl found in manifest for stream test.');
-    }
+    const popupPromise = pageC.waitForEvent('popup');
+    await pageC.getByTestId('incoming-stream-93df4e31').click();
+    const playback = await popupPromise;
+    await expect.poll(() => playback.evaluate(() => {
+      const video = document.querySelector('video');
+      return Boolean(video && video.readyState >= 2 && video.videoWidth > 0
+        && video.getVideoPlaybackQuality().totalVideoFrames > 0 && !video.error);
+    }), { timeout: 20_000 }).toBe(true);
+    expect(new URL(playback.url()).searchParams.has('ticket')).toBe(true);
+    expect(new URL(playback.url()).searchParams.has('token')).toBe(false);
 
     const normalized = streamUrl
       .replace('http://localhost:', 'http://127.0.0.1:')
@@ -1069,6 +1024,10 @@ test.describe('multi-peer sharing', () => {
     request,
   }) => {
     const nodeCInstance = harness ? harness.getNode('C') : null;
+    test.skip(
+      !nodeCInstance,
+      'Recipient backfill proof requires the locally launched pinned mesh peer',
+    );
     const nodeC = nodeCInstance ? nodeCInstance.nodeCfg : NODES.C;
     await waitForHealth(request, nodeC.baseUrl);
 
@@ -1076,12 +1035,118 @@ test.describe('multi-peer sharing', () => {
     const pageC = await contextC.newPage();
     await login(pageC, nodeC);
 
+    const nodeA = harness!.getNode('A').nodeCfg;
+    await waitForHealth(request, nodeA.baseUrl);
+    const contextA = await browser.newContext();
+    const pageA = await contextA.newPage();
+    await login(pageA, nodeA);
+    const ownerToken = await getAuthToken(pageA);
+    const ownerHeaders = { Authorization: `Bearer ${ownerToken}` };
+    const capabilityProbe = await request.post(
+      `${nodeA.baseUrl}/api/overlay/connect`,
+      {
+        data: { username: nodeC.username },
+        headers: ownerHeaders,
+        failOnStatusCode: false,
+      },
+    );
+    expect(capabilityProbe.status()).toBe(202);
+    await expect
+      .poll(
+        async () => {
+          const response = await request.get(
+            `${nodeA.baseUrl}/api/soulseek/peer-capabilities`,
+            { headers: ownerHeaders, failOnStatusCode: false },
+          );
+          if (!response.ok()) return false;
+          const records = await response.json();
+          return (
+            Array.isArray(records) &&
+            records.some((record) =>
+              record?.username?.toLowerCase() === nodeC.username.toLowerCase(),
+            )
+          );
+        },
+        { timeout: 30_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+
+    const backfillCollectionTitle = 'E2E Backfill Fixture';
+    const recipientToken = await getAuthToken(pageC);
+    const backfillCollectionResponse = await request.post(
+      `${nodeA.baseUrl}/api/v0/collections`,
+      {
+        data: { title: backfillCollectionTitle, type: 'Playlist' },
+        headers: ownerHeaders,
+      },
+    );
+    expect(backfillCollectionResponse.status()).toBe(201);
+    const backfillCollection = await backfillCollectionResponse.json();
+    const backfillLibraryResponse = await request.get(
+      `${nodeA.baseUrl}/api/v0/library/items?query=treasure_island_pg120.txt&limit=1`,
+      { headers: ownerHeaders },
+    );
+    expect(backfillLibraryResponse.status()).toBe(200);
+    const backfillLibraryPayload = await backfillLibraryResponse.json();
+    const backfillItem = backfillLibraryPayload?.items?.[0];
+    const backfillContentId =
+      backfillItem?.contentId || backfillItem?.content_id;
+    expect(backfillContentId).toBeTruthy();
+    const addBackfillItemResponse = await request.post(
+      `${nodeA.baseUrl}/api/v0/collections/${backfillCollection.id}/items`,
+      {
+        data: {
+          contentId: backfillContentId,
+          mediaKind: backfillItem?.mediaKind || backfillItem?.media_kind,
+        },
+        headers: ownerHeaders,
+      },
+    );
+    expect(addBackfillItemResponse.ok()).toBe(true);
+    const backfillGrantResponse = await request.post(
+      `${nodeA.baseUrl}/api/v0/share-grants`,
+      {
+        data: {
+          collectionId: backfillCollection.id,
+          username: nodeC.username,
+          allowDownload: true,
+          allowStream: true,
+          allowReshare: false,
+        },
+        headers: ownerHeaders,
+      },
+    );
+    expect(backfillGrantResponse.status()).toBe(201);
+    const backfillGrant = await backfillGrantResponse.json();
+    expect(backfillGrant?.id).toBeTruthy();
+    await announceShareGrant({
+      owner: nodeA,
+      ownerToken,
+      recipient: nodeC,
+      recipientToken,
+      request,
+      shareGrantId: backfillGrant.id,
+    });
+    await expect
+      .poll(
+        () =>
+          waitForShareGrantById({
+            baseUrl: nodeC.baseUrl,
+            request,
+            shareGrantId: backfillGrant.id,
+            timeoutMs: 1_000,
+            token: recipientToken,
+          }),
+        { timeout: 10_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+
     await clickNav(pageC, T.navSharedWithMe);
 
     let rowFound = false;
     for (let index = 0; index < 30; index += 1) {
       const row = pageC
-        .getByTestId(`incoming-share-row-${collectionTitle}`)
+        .getByTestId(`incoming-share-row-${backfillCollectionTitle}`)
         .first();
       if ((await row.count()) > 0) {
         rowFound = true;
@@ -1098,105 +1163,45 @@ test.describe('multi-peer sharing', () => {
       timeout: 15_000,
     });
 
-    // Click backfill button
     const backfillButton = pageC.getByTestId('incoming-backfill');
-    if ((await backfillButton.count()) > 0) {
-      await backfillButton.click();
+    await expect(backfillButton).toBeVisible();
+    const backfillResponsePromise = pageC.waitForResponse(
+      (response) =>
+        response.url().includes('/api/v0/share-grants/') &&
+        response.url().endsWith('/backfill') &&
+        response.request().method() === 'POST',
+      { timeout: 120_000 },
+    );
+    await backfillButton.click();
+    const backfillResponse = await backfillResponsePromise;
+    const backfillResponseBody = await backfillResponse.text();
+    expect(backfillResponse.status(), backfillResponseBody).toBe(200);
+    const backfillBody = JSON.parse(backfillResponseBody);
+    expect(backfillBody.backfilled).toBe(1);
+    expect(backfillBody.failed).toBe(0);
+    expect(backfillBody.files).toEqual([
+      expect.objectContaining({
+        size: 399_906,
+        sha256:
+          '2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b',
+      }),
+    ]);
 
-      // Wait for backfill to start (button shows loading state)
-      await pageC.waitForTimeout(1_000); // Reduced from 2000ms
-
-      // Poll downloads directory for file existence
-      // Note: This requires the harness to expose the app directory or we need a test endpoint
-      // For now, we'll verify the backfill API call succeeded
-      const backfillResponsePromise = pageC.waitForResponse(
-        (response) =>
-          response.url().includes('/api/v0/share-grants/') &&
-          response.url().includes('/backfill') &&
-          response.request().method() === 'POST',
-        { timeout: 10_000 },
+    if (nodeCInstance) {
+      const treasureFile = await nodeCInstance.waitForDownloadedFile(
+        'sha256_2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b',
+        5_000,
+        100,
       );
-
-      try {
-        const backfillResponse = await backfillResponsePromise;
-        expect([200, 201, 202]).toContain(backfillResponse.status());
-        console.log(
-          `[Backfill Test] Backfill started: ${backfillResponse.status()}`,
-        );
-      } catch (error) {
-        console.warn('[Backfill Test] Backfill response not captured:', error);
-      }
-
-      if (nodeCInstance) {
-        // Allow time for HTTP backfill to finish writing (controller is sync but fs may lag)
-        await pageC.waitForTimeout(2_000);
-
-        // Wait for files to appear. Backend writes contentId with ":"→"_" + extension (e.g. .bin).
-        // Match by full contentId-style name or by hash substring.
-        const fullId =
-          'sha256_2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b';
-        const hashPart = '2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b';
-        let treasureFile = await nodeCInstance.waitForDownloadedFile(
-          fullId,
-          35_000,
-        );
-        if (!treasureFile) {
-          treasureFile = await nodeCInstance.waitForDownloadedFile(
-            hashPart,
-            10_000,
-          );
-        }
-
-        // Verify the file was downloaded
-        if (!treasureFile) {
-          // List all files for debugging
-          const allFiles = await nodeCInstance.getDownloadedFiles();
-          console.error(
-            `[Backfill Test] No expected files found. All downloaded files:`,
-            allFiles.map((f) => `${f.name} (${f.size} bytes)`),
-          );
-          throw new Error(
-            'Backfill failed: expected treasure file not found in downloads',
-          );
-        }
-
-        // Verify file sizes are correct (non-zero and reasonable)
-        if (treasureFile) {
-          expect(treasureFile.size).toBeGreaterThan(0);
-          // treasure_island_pg120.txt should be ~400KB
-          expect(treasureFile.size).toBeGreaterThan(100_000); // At least 100KB
-          console.log(
-            `[Backfill Test] ✓ Found treasure file: ${treasureFile.name} (${treasureFile.size} bytes)`,
-          );
-        }
-
-        // List all downloaded files for completeness
-        const allFiles = await nodeCInstance.getDownloadedFiles();
-        console.log(
-          '[Backfill Test] Total files in downloads',
-          allFiles.length,
-          allFiles.map((f) => `${f.name} (${f.size} bytes)`),
-        );
-      } else {
-        const token = await getAuthToken(pageC);
-        const found = await waitForDownloadInList({
-          baseUrl: nodeC.baseUrl,
-          request,
-          searchTerms: [
-            'treasure',
-            '2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b',
-          ],
-          timeoutMs: 60_000,
-          token,
-        });
-        expect(found).toBe(true);
-      }
-    } else {
-      console.warn(
-        '[Backfill Test] No backfill button found (download not allowed?)',
+      expect(treasureFile).not.toBeNull();
+      expect(treasureFile?.size).toBe(399_906);
+      const content = await readFile(treasureFile!.path);
+      expect(createHash('sha256').update(content).digest('hex')).toBe(
+        '2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b',
       );
     }
 
     await contextC.close();
+    await contextA.close();
   });
 });

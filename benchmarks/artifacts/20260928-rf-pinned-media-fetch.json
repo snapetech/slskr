@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "RF-066 bounded pinned optional media fixture installation",
+  "date": "2026-09-28",
+  "sourceSha256": {
+    "test-data/slskr-test-fixtures/meta/fetch_media.py": "b7b5a103148df89a9b2bf9101277cd78e37e446b5e5e4a6881a845f9009121f9",
+    "test-data/slskr-test-fixtures/meta/fetch_media.sh": "16af39a5e22364180893e06b30e673f41d6d840fe036fa07288b600efd206594",
+    "test-data/slskr-test-fixtures/meta/manifest.json": "f9865ec73fb28f5a2429af01bfdd5086721745644e32874e7d42548700daf37f",
+    "scripts/test-fetch-media.py": "6f470b747595d8283b2808aa70ce7e2de769c8130a15f1164af2e57632858552",
+    "scripts/test-check-fixture-manifest.sh": "bccf3eb5c2ae0cb962cfba3c2160d42d9d6da4929ef75e1c04c1681b7274d4a2",
+    "web/e2e/fixtures/ensure-fixtures.ts": "99bb2e2d6e41dada7505a06274de3488014f7fc175dd1452136560c3c95230c8",
+    "web/e2e/streaming.spec.ts": "a35dc4c8eb8faf4cc38b1f7a313a3f9e3e69a7b405d5441aa99038c3626e62f7",
+    "web/e2e/multippeer-sharing.spec.ts": "3b6d0baac4b38144f43e4a7693d614f6c36989ffb83f9a16d24d5c752556b548"
+  },
+  "mediaPins": [
+    {
+      "path": "sintel_512kb_stereo.mp4",
+      "url": "https://archive.org/download/Sintel/sintel-2048-stereo_512kb.mp4",
+      "bytes": 77410288,
+      "publishedSha1Verified": "1918a22b3e9829605a3656949b0b5e2b96a4583b",
+      "sha256": "93df4e31869e879354a5055a8549fb9335df0f5f73f4963c9bf0db2c888bb704"
+    },
+    {
+      "path": "01_aria.ogg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/42/Goldberg_Variations_01_Aria.ogg",
+      "bytes": 9064070,
+      "publishedSha1Verified": "7955e74a97024b64c3ab2e4733e4d72db3654f4a",
+      "sha256": "70e465253efee94dada9e0f545b7eda68966d8744ba6d1bf64a2d081fc65a1f3"
+    }
+  ],
+  "validation": {
+    "offlineDownloaderTests": 8,
+    "playwrightUtilityTests": 6,
+    "staticManifestFiles": 7,
+    "corruptStaticFixtureRejected": true,
+    "auditTooling": "passed",
+    "actualHttpsFetch": "both assets installed after exact byte count and SHA-256 validation",
+    "encodedStreams": {
+      "Sintel": [
+        "h264 video",
+        "aac audio"
+      ],
+      "Aria": [
+        "vorbis audio"
+      ]
+    }
+  },
+  "scope": "Real movie sharing/streaming E2E acceptance remains pending. The static seven-file CI baseline is preserved. No Pioneer One media or fabricated fixture is installed."
+}

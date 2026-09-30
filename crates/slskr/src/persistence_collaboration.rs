@@ -57,14 +57,15 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let result = query(
             r#"
-            INSERT INTO share_grants (id, collection_id, username, shared_at, permissions)
-            SELECT ?, ?, ?, ?, ?
+            INSERT INTO share_grants (id, collection_id, username, shared_at, permissions, max_concurrent_streams)
+            SELECT ?, ?, ?, ?, ?, ?
             WHERE EXISTS (SELECT 1 FROM collections WHERE id = ?)
             ON CONFLICT(id) DO UPDATE SET
                 collection_id = excluded.collection_id,
                 username = excluded.username,
                 shared_at = excluded.shared_at,
-                permissions = excluded.permissions
+                permissions = excluded.permissions,
+                max_concurrent_streams = excluded.max_concurrent_streams
             "#,
         )
         .bind(&record.id)
@@ -72,6 +73,7 @@ impl DatabaseManager {
         .bind(&record.username)
         .bind(record.shared_at)
         .bind(&record.permissions)
+        .bind(record.max_concurrent_streams)
         .bind(&record.collection_id)
         .execute(&self.pool)
         .await?;
@@ -107,7 +109,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<ShareGrantRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, ShareGrantRecord>(
-            "SELECT id, collection_id, username, shared_at, permissions FROM share_grants ORDER BY shared_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, collection_id, username, shared_at, permissions, max_concurrent_streams FROM share_grants ORDER BY shared_at DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)

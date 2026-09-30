@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "workload": "10,000-result search projection",
+  "results": 10000,
+  "batch_size": 200,
+  "batches": 50,
+  "trials": 3,
+  "current_delta_median_ns": 31468345,
+  "legacy_full_rewrite_median_ns": 799819218,
+  "current_result_rows_inserted": 10000,
+  "legacy_result_rows_reinserted": 255000,
+  "crash_restart_rows_verified": 10000,
+  "notes": "Synthetic in-memory SQLite diagnostic; timings have no CI threshold."
+}

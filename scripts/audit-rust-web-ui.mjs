@@ -46,14 +46,14 @@ const apiRequestCountBudgets = new Map([
   ['/searches', 14],
   ['/discovery-graph', 13],
   ['/playlist-intake', 19],
-  ['/wishlist', 10],
+  ['/wishlist', 11], // Includes the search action and its follow-up list refresh.
   ['/downloads', 14],
   ['/uploads', 14],
   ['/messages', 13],
   ['/users', 16],
   ['/contacts', 15],
   ['/solid', 20],
-  ['/collections', 21],
+  ['/collections', 21], // Successful GET actions display their response without reloading route data.
   ['/sharegroups', 20],
   ['/shared', 20],
   ['/browse', 8],

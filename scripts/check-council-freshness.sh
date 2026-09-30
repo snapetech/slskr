@@ -10,12 +10,12 @@ fail() {
   failed=1
 }
 
-if [[ -n "${SLSKR_COUNCIL_EXPECTED_COMMIT:-}" ]]; then
-  expected_commit="$SLSKR_COUNCIL_EXPECTED_COMMIT"
+if [[ -n "${SLSKR_COUNCIL_EXPECTED_DIGEST:-}" ]]; then
+  expected_digest="$SLSKR_COUNCIL_EXPECTED_DIGEST"
 else
-  if ! expected_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null)"; then
-    fail "unable to determine the source commit for $repo_root"
-    expected_commit=""
+  if ! expected_digest="$(python3 "$repo_root/scripts/council-source-digest.py" 2>/dev/null)"; then
+    fail "unable to determine the source digest for $repo_root"
+    expected_digest=""
   fi
 fi
 
@@ -37,15 +37,15 @@ for file in "${files[@]}"; do
     fail "${file#"$repo_root/"} is not stamped with scan date $expected_date"
   fi
 
-  if [[ -n "$expected_commit" ]] && rg -n "^Source commit: ${expected_commit}$" "$file" >/dev/null; then
-    printf 'PASS source commit: %s (%s)\n' "$expected_commit" "${file#"$repo_root/"}"
-  elif [[ -n "$expected_commit" ]]; then
-    fail "${file#"$repo_root/"} is not stamped with source commit $expected_commit"
+  if [[ -n "$expected_digest" ]] && rg -n "^Source digest: ${expected_digest}$" "$file" >/dev/null; then
+    printf 'PASS source digest: %s (%s)\n' "$expected_digest" "${file#"$repo_root/"}"
+  elif [[ -n "$expected_digest" ]]; then
+    fail "${file#"$repo_root/"} is not stamped with source digest $expected_digest"
   fi
 done
 
-if [[ -n "$expected_commit" ]] && ! [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]; then
-  fail "source commit is not a full hexadecimal Git object id: $expected_commit"
+if [[ -n "$expected_digest" ]] && ! [[ "$expected_digest" =~ ^[0-9a-f]{64}$ ]]; then
+  fail "source digest is not a SHA-256 value: $expected_digest"
 fi
 
 if [[ "$failed" -ne 0 ]]; then

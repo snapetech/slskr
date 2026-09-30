@@ -535,6 +535,7 @@ pub(super) async fn legacy_route_dispatch_group_01(
             }
             drop(_event_persistence);
             scripts::dispatch(
+        &state.managed_background_tasks,
                 state.integration_settings.read().await.scripts.clone(),
                 state.config.state_dir.join("scripts"),
                 state.config.controller_profile,

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "actual local Cargo suite and real TCP listener cancellation; broader RF-006 remains open",
+  "sourceSha": "59ddda1744af756dbe65bc19faed7474fbcb99d8",
+  "dirtyWorktree": true,
+  "sourcesSha256": {
+    "crates/slskr/src/cli_smoke_soak.rs": "6329832f4720e34c6cf76827b468ef746b9783daaf9c482920f80b8e1aaa24e5",
+    "crates/slskr/src/cli_smoke_soak_owners/probe_task.rs": "4f774c942a32f9ac72a5d5d9ddc0b947d4d9927b35a123da08e17005ce62f210",
+    "crates/slskr/src/cli_smoke_soak_owners/fixture_transfers.rs": "cde6d5614e9347bbaab5e50306a01f876e30541b3f19071170bae9bc695f9ca4",
+    "crates/slskr/src/cli_smoke_soak_owners/peer_probe_operations.rs": "eb2c003072e5abca0ab4bd7c5866c82a63177cbd79155d1a9e6707bc018a202a",
+    "crates/slskr/src/cli_smoke_soak_owners/peer_smoke_scenarios.rs": "e53b84e478275e7371f298665636edec5c9c22bfc1639822738bf20a5cc7bc2f",
+    "crates/slskr/src/cli_smoke_soak_owners/server_smoke_scenarios.rs": "356668caf98d1c5c7afaf5ed61b07cd3da0243eb27f38dcb2a1a1921a8542f85",
+    "crates/slskr/src/cli_smoke_soak_owners/transfer_smoke_scenarios.rs": "5b1747e043190e8cb3c1099190e297cd3fa87d9998b0b325cba20d2e845fddd2",
+    "scripts/check-runtime-boundary-hardening.sh": "a41dea0e710dd42770da12bdbc7984aa3f6311448ccbed687f77f1aed1852a3f"
+  },
+  "logsSha256": {
+    "target/rf-cli-probe-owner-daemon-tests.log": "ec40489a602ab3946f4e9a70205c9a33a0c30f60f9be3b237bbdf7d7eb933c90",
+    "target/rf-cli-probe-owner-clippy.log": "1e016b88baf4501bddb52c91e996a2454b6ced88a7be7bdae15fd57452f5f462",
+    "target/rf-cli-probe-owner-full-controller.log": "2ced089f339a9128cd4d8498d2618296c7518130ffb9125c819695e85be01fd7"
+  },
+  "tests": {
+    "daemonPassed": 691,
+    "defaultIgnoredMountFixture": 1,
+    "probeOwnerRegressionsPassed": 3,
+    "dropTimeoutAndParentCancellationReleaseListeners": true,
+    "normalAndPanicResultsPreserved": true
+  },
+  "checks": {
+    "daemonStrictClippy": true,
+    "fullControllerAndLegacyAllTargetsCompile": true
+  },
+  "limitations": [
+    "Drop requests abortion; normal awaits join and cancellation tests await child resource release",
+    "This does not close the broader daemon service inventory"
+  ]
+}

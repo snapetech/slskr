@@ -1,0 +1,378 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #080b0c;
+  color: #f4efe7;
+}
+
+body {
+  margin: 0;
+  padding-bottom: 108px;
+}
+
+.slskr-shell {
+  min-height: 100vh;
+  background: #080b0c;
+}
+
+.slskr-nav {
+  align-items: center;
+  background: #1b1512;
+  border-bottom: 1px solid #5f4229;
+  display: flex;
+  gap: 2px;
+  min-height: 58px;
+  overflow-x: auto;
+  padding: 0 12px;
+}
+
+.slskr-nav-item {
+  align-items: center;
+  color: #f4efe7;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 4px;
+  min-width: 78px;
+  padding: 8px 10px;
+  text-decoration: none;
+}
+
+.slskr-nav-item:hover {
+  background: #33261f;
+}
+
+.slskr-nav-item[aria-current="page"] {
+  background: #33261f;
+  box-shadow: inset 0 -3px 0 #ffd166;
+}
+
+.slskr-nav-icon {
+  color: #ffd166;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.slskr-main {
+  margin: 0 auto;
+  max-width: 1480px;
+  padding: 16px 22px 132px;
+}
+
+.slskr-appbar {
+  align-items: center;
+  background: #101314;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.4fr);
+  margin-bottom: 16px;
+  padding: 12px 16px;
+}
+
+.slskr-appbar strong {
+  color: #f4efe7;
+  display: block;
+  font-size: 20px;
+}
+
+.slskr-appbar span {
+  color: #c6d0ca;
+  font-size: 13px;
+}
+
+.slskr-appbar .slskr-appbar-support {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.slskr-appbar-support b {
+  color: #82908a;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slskr-appbar-support a {
+  background: #111a1b;
+  border: 1px solid #36504d;
+  border-radius: 999px;
+  color: #9fd8ff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  text-decoration: none;
+}
+
+.slskr-appbar-support a:last-child {
+  color: #ff9ab8;
+}
+
+.slskr-appbar-support a:hover,
+.slskr-appbar-support a:focus-visible {
+  border-color: currentColor;
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.slskr-appbar ul {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-appbar li {
+  background: #0f1112;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 2px;
+  min-height: 42px;
+  padding: 7px 8px;
+}
+
+.slskr-appbar li strong {
+  color: #ffd166;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.slskr-appbar li code {
+  display: none;
+}
+
+.slskr-appbar li span {
+  color: #f4efe7;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slskr-hero {
+  border: 1px solid #5f4229;
+  padding: 24px;
+}
+
+.slskr-hero h1 {
+  font-size: 38px;
+  font-weight: 700;
+  margin: 4px 0 8px;
+}
+
+.slskr-hero p {
+  color: #cdbfab;
+  margin: 0 0 14px;
+}
+
+.slskr-hero code {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  color: #9fd8ff;
+  display: inline-block;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.slskr-kicker {
+  color: #ffd166;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.slskr-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 18px;
+}
+
+.slskr-panel {
+  background: #131617;
+  border: 1px solid #34403f;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: space-between;
+  min-height: 136px;
+  padding: 18px;
+}
+
+.slskr-panel h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.slskr-panel p {
+  color: #c6d0ca;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.slskr-panel code {
+  color: #9fd8ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.slskr-contract {
+  border: 1px solid #34403f;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.slskr-contract h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+
+.slskr-contract ul {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-contract li {
+  align-items: center;
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.slskr-contract strong {
+  color: #ffd166;
+  font-size: 11px;
+}
+
+.slskr-contract span {
+  color: #c6d0ca;
+  font-size: 12px;
+}
+
+.slskr-route-page {
+  background: #101314;
+  border: 1px solid #5f4229;
+  margin-top: 0;
+  padding: 18px;
+}
+
+.slskr-page-header {
+  align-items: start;
+  border-bottom: 1px solid #263130;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.slskr-page-chip {
+  background: #1b1512;
+  border: 1px solid #5f4229;
+  color: #ffd166;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.slskr-page-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.slskr-status-chip {
+  align-items: center;
+  background: #12201e;
+  border: 1px solid #3d5c55;
+  color: #dce8e3;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.slskr-status-chip strong {
+  color: #8dd7c8;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.slskr-toolbar {
+  align-items: center;
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+}
+
+.slskr-toolbar input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 34px;
+  min-width: 220px;
+  padding: 0 10px;
+}
+
+.slskr-toolbar button,
+.slskr-player button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.slskr-toolbar select,
+.slskr-toolbar label {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.slskr-toolbar label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.slskr-toolbar-command.primary,
+.slskr-action-button.primary {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #15100d;
+  font-weight: 800;
+}
+
+.slskr-toolbar button:first-of-type {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #17120d;
+}
+

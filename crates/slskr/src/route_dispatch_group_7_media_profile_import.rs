@@ -304,13 +304,9 @@ async fn route_dispatch_group_7_media_profile_import(
                     Ok(descriptor) => descriptor,
                     Err(error) => return Ok(routing::bad_request_response(&error)),
                 };
-                let session = state.session.read().await;
-                let display_name = session
-                    .username
-                    .clone()
-                    .or_else(|| state.config.username.clone())
+                let display_name = pod_request_peer_id(state)
+                    .await
                     .unwrap_or_else(|| "local".to_owned());
-                drop(session);
                 let expires_at =
                     chrono::Utc::now() + chrono::Duration::hours(i64::from(expires_in_hours));
                 let profile_peer_id = local_profile_peer_id(state);
@@ -759,6 +755,47 @@ async fn route_dispatch_group_7_media_profile_import(
             let grant_id =
                 share_grant_helper_id(path, "backfill").expect("guarded share-grant backfill path");
             let versioned = route.path.starts_with("/api/v0/");
+            if versioned
+                && state
+                    .incoming_shares
+                    .read()
+                    .await
+                    .list()
+                    .iter()
+                    .any(|record| record.id == grant_id)
+            {
+                let Some(local_username) = pod_request_peer_id(state).await else {
+                    return Ok(routing::forbidden_response(
+                        "Authenticated recipient identity is required",
+                    ));
+                };
+                return Ok(
+                    match share_backfill_controller::backfill_incoming_share(
+                        state,
+                        grant_id,
+                        &local_username,
+                    )
+                    .await
+                    {
+                        Ok(files) => {
+                            let backfilled = files.len();
+                            routing::ok_response(
+                                serde_json::json!({
+                                    "grant_id": grant_id,
+                                    "backfilled": backfilled,
+                                    "failed": 0,
+                                    "total": backfilled,
+                                    "files": files,
+                                    "status": "downloaded",
+                                    "message": format!("Backfilled {backfilled} items"),
+                                })
+                                .to_string(),
+                            )
+                        }
+                        Err(error) => routing::service_unavailable_response(&error),
+                    },
+                );
+            }
             if versioned {
                 let delegated_authorized = if let Some(token) =
                     request_share_token(authorization, headers)

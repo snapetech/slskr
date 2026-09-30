@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -20,7 +20,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{watch, Mutex, OwnedSemaphorePermit, RwLock, Semaphore},
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
     time::{sleep, timeout},
 };
 
@@ -51,6 +51,7 @@ pub struct StartRequest {
 pub struct Manager {
     rules: RwLock<BTreeMap<u16, Arc<Rule>>>,
     connection_permits: Arc<Semaphore>,
+    closed: AtomicBool,
 }
 
 impl Default for Manager {
@@ -58,6 +59,7 @@ impl Default for Manager {
         Self {
             rules: RwLock::new(BTreeMap::new()),
             connection_permits: Arc::new(Semaphore::new(MAX_FORWARDING_CONNECTIONS)),
+            closed: AtomicBool::new(false),
         }
     }
 }
@@ -66,6 +68,11 @@ impl Drop for Manager {
     fn drop(&mut self) {
         for rule in self.rules.get_mut().values() {
             let _ = rule.cancel_tx.send(true);
+            if let Ok(mut task) = rule.listener_task.try_lock() {
+                if let Some(task) = task.as_mut() {
+                    task.0.abort();
+                }
+            }
         }
     }
 }
@@ -79,6 +86,9 @@ impl Manager {
     pub async fn start(&self, request: StartRequest) -> Result<Status, String> {
         validate_start_request(&request)?;
         let mut rules = self.rules.write().await;
+        if self.closed.load(Ordering::Acquire) {
+            return Err("Port forwarding manager is shut down".to_owned());
+        }
         if rules.contains_key(&request.local_port) {
             return Err(format!(
                 "Port {} is already being forwarded",
@@ -110,7 +120,7 @@ impl Manager {
         let task = tokio::spawn(async move {
             task_rule.run(listener, cancel_rx).await;
         });
-        *rule.listener_task.lock().await = Some(task);
+        *rule.listener_task.lock().await = Some(ListenerTask(task));
         let status = rule.status();
         rules.insert(rule.request.local_port, rule);
         Ok(status)
@@ -121,14 +131,24 @@ impl Manager {
         let Some(rule) = rule else {
             return false;
         };
-        let _ = rule.cancel_tx.send(true);
-        if let Some(mut task) = rule.listener_task.lock().await.take() {
-            if timeout(Duration::from_secs(5), &mut task).await.is_err() {
-                task.abort();
-                let _ = task.await;
-            }
-        }
+        stop_rule(rule).await;
         true
+    }
+
+    pub(crate) async fn shutdown(&self) {
+        let rules = {
+            let mut rules = self.rules.write().await;
+            self.closed.store(true, Ordering::Release);
+            std::mem::take(&mut *rules)
+        };
+        for rule in rules.values() {
+            let _ = rule.cancel_tx.send(true);
+        }
+        let mut stops = FuturesUnordered::new();
+        for rule in rules.into_values() {
+            stops.push(stop_rule(rule));
+        }
+        while stops.next().await.is_some() {}
     }
 
     pub async fn statuses(&self) -> Vec<Status> {
@@ -154,6 +174,32 @@ impl Manager {
 }
 
 #[derive(Debug)]
+struct ListenerTask(JoinHandle<()>);
+impl Drop for ListenerTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn stop_rule(rule: Arc<Rule>) {
+    let _ = rule.cancel_tx.send(true);
+    let task = rule.listener_task.lock().await.take();
+    if let Some(mut task) = task {
+        if timeout(Duration::from_secs(5), &mut task.0).await.is_err() {
+            task.0.abort();
+            let _ = (&mut task.0).await;
+        }
+    }
+}
+
+struct ActiveConnection<'a>(&'a AtomicUsize);
+impl Drop for ActiveConnection<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug)]
 struct Rule {
     request: StartRequest,
     active_connections: AtomicUsize,
@@ -162,7 +208,7 @@ struct Rule {
     bytes_forwarded: Arc<AtomicU64>,
     cancel_tx: watch::Sender<bool>,
     connection_permits: Arc<Semaphore>,
-    listener_task: Mutex<Option<JoinHandle<()>>>,
+    listener_task: Mutex<Option<ListenerTask>>,
     last_error: Mutex<Option<String>>,
     started_at_ms: u64,
     last_activity_ms: Arc<AtomicU64>,
@@ -170,6 +216,7 @@ struct Rule {
 
 impl Rule {
     async fn run(self: Arc<Self>, listener: TcpListener, mut cancel: watch::Receiver<bool>) {
+        let mut connections = JoinSet::new();
         loop {
             tokio::select! {
                 changed = cancel.changed() => {
@@ -177,6 +224,7 @@ impl Rule {
                         break;
                     }
                 }
+                _ = connections.join_next(), if !connections.is_empty() => {}
                 accepted = listener.accept() => {
                     match accepted {
                         Ok((stream, _)) => {
@@ -188,9 +236,10 @@ impl Rule {
                                 );
                                 continue;
                             };
+                            while connections.try_join_next().is_some() {}
                             let rule = Arc::clone(&self);
                             let connection_cancel = cancel.clone();
-                            tokio::spawn(async move {
+                            connections.spawn(async move {
                                 rule.handle_connection(
                                     stream,
                                     connection_cancel,
@@ -207,6 +256,17 @@ impl Rule {
                 }
             }
         }
+        let _ = self.cancel_tx.send(true);
+        // Give cancelled connections time to close their remote tunnels;
+        // forced parent cancellation still drops this set and aborts children.
+        if timeout(Duration::from_secs(3), async {
+            while connections.join_next().await.is_some() {}
+        })
+        .await
+        .is_err()
+        {
+            connections.shutdown().await;
+        }
     }
 
     async fn handle_connection(
@@ -216,8 +276,8 @@ impl Rule {
         _connection_permit: OwnedSemaphorePermit,
     ) {
         self.active_connections.fetch_add(1, Ordering::Relaxed);
+        let _active = ActiveConnection(&self.active_connections);
         let result = self.forward_connection(local, cancel).await;
-        self.active_connections.fetch_sub(1, Ordering::Relaxed);
         if let Err(error) = result {
             *self.last_error.lock().await = Some(error);
         }
@@ -289,58 +349,58 @@ impl Rule {
         let send_bytes = Arc::clone(&self.bytes_forwarded);
         let send_bytes_out = Arc::clone(&self.bytes_out);
         let send_last_activity = Arc::clone(&self.last_activity_ms);
-        let mut send = tokio::spawn(async move {
-            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-            loop {
-                let read = local_read
-                    .read(&mut buffer)
-                    .await
-                    .map_err(|error| format!("Local forwarding read failed: {error}"))?;
-                if read == 0 {
-                    return Ok::<(), String>(());
+        let result = {
+            let send = async move {
+                let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+                loop {
+                    let read = local_read
+                        .read(&mut buffer)
+                        .await
+                        .map_err(|error| format!("Local forwarding read failed: {error}"))?;
+                    if read == 0 {
+                        return Ok::<(), String>(());
+                    }
+                    send_tunnel_data(&send_client, &send_tunnel, &buffer[..read]).await?;
+                    send_bytes.fetch_add(read as u64, Ordering::Relaxed);
+                    send_bytes_out.fetch_add(read as u64, Ordering::Relaxed);
+                    send_last_activity
+                        .store(crate::utils::unix_timestamp_millis(), Ordering::Relaxed);
                 }
-                send_tunnel_data(&send_client, &send_tunnel, &buffer[..read]).await?;
-                send_bytes.fetch_add(read as u64, Ordering::Relaxed);
-                send_bytes_out.fetch_add(read as u64, Ordering::Relaxed);
-                send_last_activity.store(crate::utils::unix_timestamp_millis(), Ordering::Relaxed);
-            }
-        });
-        let receive_client = Arc::clone(&client);
-        let receive_tunnel = tunnel_id.clone();
-        let receive_bytes = Arc::clone(&self.bytes_forwarded);
-        let receive_bytes_in = Arc::clone(&self.bytes_in);
-        let receive_last_activity = Arc::clone(&self.last_activity_ms);
-        let mut receive = tokio::spawn(async move {
-            loop {
-                let data = receive_tunnel_data(&receive_client, &receive_tunnel).await?;
-                if data.is_empty() {
-                    sleep(EMPTY_POLL_DELAY).await;
-                    continue;
+            };
+            let receive_client = Arc::clone(&client);
+            let receive_tunnel = tunnel_id.clone();
+            let receive_bytes = Arc::clone(&self.bytes_forwarded);
+            let receive_bytes_in = Arc::clone(&self.bytes_in);
+            let receive_last_activity = Arc::clone(&self.last_activity_ms);
+            let receive = async move {
+                loop {
+                    let data = receive_tunnel_data(&receive_client, &receive_tunnel).await?;
+                    if data.is_empty() {
+                        sleep(EMPTY_POLL_DELAY).await;
+                        continue;
+                    }
+                    local_write
+                        .write_all(&data)
+                        .await
+                        .map_err(|error| format!("Local forwarding write failed: {error}"))?;
+                    receive_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
+                    receive_bytes_in.fetch_add(data.len() as u64, Ordering::Relaxed);
+                    receive_last_activity
+                        .store(crate::utils::unix_timestamp_millis(), Ordering::Relaxed);
                 }
-                local_write
-                    .write_all(&data)
-                    .await
-                    .map_err(|error| format!("Local forwarding write failed: {error}"))?;
-                receive_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
-                receive_bytes_in.fetch_add(data.len() as u64, Ordering::Relaxed);
-                receive_last_activity
-                    .store(crate::utils::unix_timestamp_millis(), Ordering::Relaxed);
+                #[allow(unreachable_code)]
+                Ok::<(), String>(())
+            };
+            tokio::pin!(send, receive);
+            tokio::select! {
+                changed = cancel.changed() => {
+                    let _ = changed;
+                    Ok(())
+                }
+                result = &mut send => result,
+                result = &mut receive => result,
             }
-            #[allow(unreachable_code)]
-            Ok::<(), String>(())
-        });
-        let result = tokio::select! {
-            changed = cancel.changed() => {
-                let _ = changed;
-                Ok(())
-            }
-            result = &mut send => result.map_err(|error| format!("Tunnel send task failed: {error}"))?,
-            result = &mut receive => result.map_err(|error| format!("Tunnel receive task failed: {error}"))?,
         };
-        send.abort();
-        receive.abort();
-        let _ = send.await;
-        let _ = receive.await;
         let close_result =
             match timeout(TUNNEL_CLOSE_TIMEOUT, close_tunnel(&client, &tunnel_id)).await {
                 Ok(result) => result,
@@ -594,336 +654,5 @@ impl Performance {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use rcgen::generate_simple_self_signed;
-    use sha2::{Digest, Sha256};
-    use slskr_client::overlay::{
-        MeshHelloAck, MeshServiceReply, OverlayFramer, OVERLAY_MAGIC, OVERLAY_VERSION,
-    };
-    use tokio_rustls::{
-        rustls::{pki_types::PrivatePkcs8KeyDer, ServerConfig},
-        TlsAcceptor,
-    };
-
-    fn request(port: u16) -> StartRequest {
-        StartRequest {
-            local_port: port,
-            pod_id: "pod:test".to_owned(),
-            destination_host: "service".to_owned(),
-            destination_port: 80,
-            service_name: None,
-            gateway_username: "gateway".to_owned(),
-            gateway_endpoints: vec!["127.0.0.1:50305".parse().unwrap()],
-            gateway_certificate_sha256: [7; 32],
-            local_username: "local".to_owned(),
-            authentication_key: Arc::new(SigningKey::from_bytes(&[9; 32])),
-        }
-    }
-
-    #[test]
-    fn performance_computes_real_oracle_derived_metrics() {
-        let idle = Performance::new(0, 0);
-        assert_eq!(idle.average_bytes_per_connection, 0);
-        assert!(!idle.is_high_throughput);
-        assert_eq!(idle.efficiency_rating, 0.0);
-
-        let active = Performance::new(4, 8_000);
-        assert_eq!(active.average_bytes_per_connection, 2_000);
-        assert!(!active.is_high_throughput);
-        assert_eq!(active.efficiency_rating, 2.0);
-
-        let high_throughput = Performance::new(2, 2 * 1024 * 1024);
-        assert!(high_throughput.is_high_throughput);
-    }
-
-    #[tokio::test]
-    async fn manager_binds_reports_and_stops_local_listener() {
-        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-        let manager = Manager::new();
-
-        let status = manager.start(request(port)).await.unwrap();
-        assert_eq!(status.local_port, port);
-        assert!(status.is_active);
-        assert!(status.started_at > 0);
-        assert_eq!(status.last_activity, status.started_at);
-        assert!(TcpStream::connect(("127.0.0.1", port)).await.is_ok());
-        assert_eq!(manager.statuses().await.len(), 1);
-        assert!(manager.stop(port).await);
-        assert!(!manager.stop(port).await);
-        assert!(manager.statuses().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn dropping_manager_releases_local_listener() {
-        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-        let manager = Manager::new();
-        manager.start(request(port)).await.unwrap();
-
-        drop(manager);
-
-        timeout(Duration::from_secs(1), async {
-            loop {
-                if TcpListener::bind(("127.0.0.1", port)).await.is_ok() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("dropping the manager must release its listeners");
-    }
-
-    #[tokio::test]
-    async fn invalid_overlay_fields_are_rejected_before_binding() {
-        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-        let manager = Manager::new();
-
-        for mutate in [
-            |request: &mut StartRequest| request.local_username = "bad username".to_owned(),
-            |request: &mut StartRequest| request.gateway_username = "x".repeat(65),
-            |request: &mut StartRequest| request.pod_id = "x".repeat(513),
-            |request: &mut StartRequest| request.destination_host = "x".repeat(256),
-            |request: &mut StartRequest| request.service_name = Some("x".repeat(129)),
-        ] {
-            let mut invalid = request(port);
-            mutate(&mut invalid);
-            assert!(manager.start(invalid).await.is_err());
-            let listener = TcpListener::bind(("127.0.0.1", port))
-                .await
-                .expect("invalid rule must not bind its local port");
-            drop(listener);
-        }
-    }
-
-    #[tokio::test]
-    async fn manager_rejects_duplicate_and_occupied_ports() {
-        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        let manager = Manager::new();
-        assert!(manager.start(request(port)).await.is_err());
-        drop(probe);
-        manager.start(request(port)).await.unwrap();
-        assert!(manager.start(request(port)).await.is_err());
-        assert!(manager.stop(port).await);
-    }
-
-    #[tokio::test]
-    async fn stopping_rule_cancels_stalled_gateway_handshake_and_releases_permit() {
-        let gateway_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let gateway_endpoint = gateway_listener.local_addr().unwrap();
-        let stalled_gateway = tokio::spawn(async move {
-            let (_stream, _) = gateway_listener.accept().await.unwrap();
-            std::future::pending::<()>().await;
-        });
-        let local_probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_port = local_probe.local_addr().unwrap().port();
-        drop(local_probe);
-        let manager = Manager::new();
-        let mut request = request(local_port);
-        request.gateway_endpoints = vec![gateway_endpoint];
-        manager.start(request).await.unwrap();
-        let rule = Arc::clone(manager.rules.read().await.get(&local_port).unwrap());
-        let local = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
-
-        timeout(Duration::from_secs(2), async {
-            while rule.active_connections.load(Ordering::Relaxed) == 0 {
-                sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(
-            manager.connection_permits.available_permits(),
-            MAX_FORWARDING_CONNECTIONS - 1
-        );
-
-        assert!(manager.stop(local_port).await);
-        timeout(Duration::from_secs(2), async {
-            while rule.active_connections.load(Ordering::Relaxed) != 0 {
-                sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("stalled gateway setup should be cancelled promptly");
-        assert_eq!(
-            manager.connection_permits.available_permits(),
-            MAX_FORWARDING_CONNECTIONS
-        );
-        drop(local);
-        stalled_gateway.abort();
-    }
-
-    #[test]
-    fn gateway_tunnel_responses_enforce_integrity_and_size_contracts() {
-        let accepted = serde_json::to_vec(&OpenTunnelResponse {
-            tunnel_id: "tunnel-1".to_owned(),
-            accepted: true,
-        })
-        .unwrap();
-        assert_eq!(parse_open_tunnel_response(&accepted).unwrap(), "tunnel-1");
-
-        let oversized_id = serde_json::to_vec(&OpenTunnelResponse {
-            tunnel_id: "x".repeat(MAX_TUNNEL_ID_BYTES + 1),
-            accepted: true,
-        })
-        .unwrap();
-        assert!(parse_open_tunnel_response(&oversized_id).is_err());
-
-        validate_tunnel_data_acknowledgement(br#"{"Sent":5}"#, 5).unwrap();
-        assert!(validate_tunnel_data_acknowledgement(br#"{"Sent":4}"#, 5).is_err());
-        assert!(validate_tunnel_data_acknowledgement(br#"{}"#, 5).is_err());
-
-        let valid_data = serde_json::to_vec(&TunnelDataResponse {
-            data: vec![7; TUNNEL_CHUNK_BYTES],
-            bytes_received: TUNNEL_CHUNK_BYTES,
-        })
-        .unwrap();
-        assert_eq!(
-            parse_tunnel_data_response(&valid_data).unwrap().len(),
-            TUNNEL_CHUNK_BYTES
-        );
-
-        let oversized_data = serde_json::to_vec(&TunnelDataResponse {
-            data: vec![7; TUNNEL_CHUNK_BYTES + 1],
-            bytes_received: TUNNEL_CHUNK_BYTES + 1,
-        })
-        .unwrap();
-        assert!(parse_tunnel_data_response(&oversized_data).is_err());
-    }
-
-    #[tokio::test]
-    async fn manager_forwards_bytes_through_tls_private_gateway_calls() {
-        let certified = generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
-        let certificate = certified.cert.der().clone();
-        let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
-        let private_key = PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
-        let config =
-            ServerConfig::builder_with_protocol_versions(&[&tokio_rustls::rustls::version::TLS13])
-                .with_no_client_auth()
-                .with_single_cert(vec![certificate], private_key.into())
-                .unwrap();
-        let acceptor = TlsAcceptor::from(Arc::new(config));
-        let gateway_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let gateway_endpoint = gateway_listener.local_addr().unwrap();
-        let gateway = tokio::spawn(async move {
-            let (tcp, _) = gateway_listener.accept().await.unwrap();
-            let tls = acceptor.accept(tcp).await.unwrap();
-            let mut framer = OverlayFramer::new(tls);
-            let hello: slskr_client::overlay::MeshHello = framer.read().await.unwrap();
-            framer
-                .write(&MeshHelloAck {
-                    magic: OVERLAY_MAGIC.to_owned(),
-                    message_type: "mesh_hello_ack".to_owned(),
-                    version: OVERLAY_VERSION,
-                    username: "gateway".to_owned(),
-                    features: vec![FEATURE_MESH_SERVICE.to_owned()],
-                    soulseek_ports: None,
-                    overlay_port: Some(gateway_endpoint.port()),
-                    nonce_echo: hello.nonce,
-                })
-                .await
-                .unwrap();
-            let mut buffered = Vec::new();
-            loop {
-                let call: MeshServiceCall = framer.read().await.unwrap();
-                let (status_code, payload, done) = match call.method.as_str() {
-                    "OpenTunnel" => {
-                        let request: OpenTunnelRequest =
-                            serde_json::from_slice(&call.payload).unwrap();
-                        assert_eq!(request.pod_id, "pod:test");
-                        (
-                            0,
-                            serde_json::to_vec(&OpenTunnelResponse {
-                                tunnel_id: "tunnel-1".to_owned(),
-                                accepted: true,
-                            })
-                            .unwrap(),
-                            false,
-                        )
-                    }
-                    "TunnelData" => {
-                        let request: TunnelDataRequest =
-                            serde_json::from_slice(&call.payload).unwrap();
-                        buffered.extend_from_slice(&request.data);
-                        (0, br#"{"Sent":5}"#.to_vec(), false)
-                    }
-                    "GetTunnelData" => {
-                        let data = std::mem::take(&mut buffered);
-                        (
-                            0,
-                            serde_json::to_vec(&TunnelDataResponse {
-                                bytes_received: data.len(),
-                                data,
-                            })
-                            .unwrap(),
-                            false,
-                        )
-                    }
-                    "CloseTunnel" => (0, br#"{"Closed":true}"#.to_vec(), true),
-                    other => panic!("unexpected gateway method {other}"),
-                };
-                framer
-                    .write(&MeshServiceReply {
-                        magic: OVERLAY_MAGIC.to_owned(),
-                        message_type: "mesh_service_reply".to_owned(),
-                        version: OVERLAY_VERSION,
-                        correlation_id: call.correlation_id,
-                        status_code,
-                        payload,
-                        error_message: None,
-                    })
-                    .await
-                    .unwrap();
-                if done {
-                    break;
-                }
-            }
-        });
-
-        let local_probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_port = local_probe.local_addr().unwrap().port();
-        drop(local_probe);
-        let unavailable_probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let unavailable_endpoint = unavailable_probe.local_addr().unwrap();
-        drop(unavailable_probe);
-        let manager = Manager::new();
-        let mut request = request(local_port);
-        request.gateway_endpoints = vec![unavailable_endpoint, gateway_endpoint];
-        request.gateway_certificate_sha256 = certificate_sha256;
-        manager.start(request).await.unwrap();
-        let mut local = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
-        local.write_all(b"hello").await.unwrap();
-        let mut echoed = [0_u8; 5];
-        timeout(Duration::from_secs(5), local.read_exact(&mut echoed))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(&echoed, b"hello");
-        timeout(Duration::from_secs(2), async {
-            loop {
-                let status = manager.status(local_port).await.unwrap();
-                if status.bytes_forwarded == 10 {
-                    assert_eq!(status.bytes_in, 5);
-                    assert_eq!(status.bytes_out, 5);
-                    assert!(status.last_activity >= status.started_at);
-                    break;
-                }
-                sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("forwarding totals should update while the connection remains active");
-        assert!(manager.stop(local_port).await);
-        timeout(Duration::from_secs(5), gateway)
-            .await
-            .unwrap()
-            .unwrap();
-    }
-}
+#[path = "port_forwarding_tests.rs"]
+mod tests;

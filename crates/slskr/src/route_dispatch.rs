@@ -25,6 +25,7 @@ pub(super) fn share_grant_store_matches(
                     && current.username == expected.username
                     && current.shared_at == expected.shared_at
                     && current.permissions == expected.permissions
+                    && current.max_concurrent_streams == expected.max_concurrent_streams
             })
 }
 
@@ -318,7 +319,7 @@ fn versioned_share_rescan_response(state: &AppState, state_arc: Arc<AppState>) -
             };
         }
     };
-    tokio::spawn(async move {
+    state.spawn_managed_task(async move {
         match rebuild_share_index_with_permit(&state_arc, permit).await {
             Ok(snapshot) => {
                 record_event(

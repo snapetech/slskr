@@ -18,6 +18,12 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
+## [0.2.41] — 2026-09-29
+
+- Added Rust-specific getting-started, feature, status, configuration,
+  architecture, and troubleshooting guides, and corrected the native/current
+  shared peer-port documentation.
+
 ## [0.2.39] — 2026-09-04
 
 - Expanded required CI to build and verify every supported Linux, macOS, and

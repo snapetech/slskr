@@ -9,6 +9,44 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(test)]
+struct EventSyncPause {
+    started: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+static EVENT_SYNC_PAUSES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, EventSyncPause>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+pub(super) fn pause_transfer_event_sync(
+    path: PathBuf,
+    started: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+) {
+    EVENT_SYNC_PAUSES
+        .lock()
+        .expect("event sync pause lock")
+        .insert(path, EventSyncPause { started, release });
+}
+
+#[cfg(test)]
+fn wait_for_transfer_event_sync(path: &Path) {
+    let pause = EVENT_SYNC_PAUSES
+        .lock()
+        .expect("event sync pause lock")
+        .remove(path);
+    if let Some(pause) = pause {
+        pause.started.send(()).expect("announce event sync pause");
+        pause
+            .release
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("release event sync pause");
+    }
+}
+
 pub(super) fn transfer_events_path(state_dir: &Path) -> PathBuf {
     state_dir.join("transfer-events.tsv")
 }
@@ -220,6 +258,8 @@ pub(super) fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Resul
     .map_err(|error| format!("transfer event append failed: {error}"))?;
     file.flush()
         .map_err(|error| format!("transfer event flush failed: {error}"))?;
+    #[cfg(test)]
+    wait_for_transfer_event_sync(path);
     file.sync_all()
         .map_err(|error| format!("transfer event sync failed: {error}"))
 }

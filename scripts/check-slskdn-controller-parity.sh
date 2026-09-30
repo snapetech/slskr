@@ -53,7 +53,8 @@ git -C "$upstream_repo" archive "$slskd_ref" src/slskd | tar -x -C "$slskd_root"
 git -C "$upstream_repo" archive "$slskdn_ref" src/slskd | tar -x -C "$slskdn_root"
 http_port="${SLSKR_CONTROLLER_AUDIT_PORT:-$(pick_free_port)}"
 base_url="http://127.0.0.1:$http_port"
-overlay_bind="${SLSKR_CONTROLLER_AUDIT_OVERLAY_BIND:-127.0.0.1:$(pick_free_port)}"
+peer_bind="${SLSKR_CONTROLLER_AUDIT_PEER_BIND:-127.0.0.1:$(pick_free_port)}"
+peer_port="${peer_bind##*:}"
 
 node scripts/check-slskdn-controller-auth-registry.mjs \
   --target slskd \
@@ -68,9 +69,11 @@ node scripts/check-slskdn-controller-auth-registry.mjs \
   export SLSKR_AUTO_CONNECT=false
   export SLSKR_RECONNECT=false
   # Route materialization does not exercise DHT I/O. Keep this gate isolated
-  # from another slskdN-compatible process using the frozen default port 50305.
+  # from other processes while honoring the shared native peer port.
   export SLSKR_DHT_ENABLED=false
-  export SLSKR_OVERLAY_BIND="$overlay_bind"
+  export SLSKR_LISTENER_BIND="$peer_bind"
+  export SLSK_LISTEN_PORT="$peer_port"
+  export SLSKR_OVERLAY_BIND="$peer_bind"
   export SLSKD_NO_HTTPS=true
   export SLSKR_API_RATE_LIMIT_ANONYMOUS=10000
   export SLSKR_CONTROLLER_AUDIT_MODE=1

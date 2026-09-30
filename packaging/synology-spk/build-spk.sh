@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 PACKAGE_DIR="${BUILD_DIR}/package"
-VERSION="${SLSKR_VERSION:-0.2.40}"
+VERSION="${SLSKR_VERSION:-0.2.41}"
 ARCH="${SLSKR_SPK_ARCH:-x86_64}"
 
 case "$ARCH" in

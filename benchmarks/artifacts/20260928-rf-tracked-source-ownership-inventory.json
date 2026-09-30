@@ -1,0 +1,5805 @@
+{
+  "schemaVersion": 1,
+  "scopeSuffixes": [
+    ".astro",
+    ".c",
+    ".cjs",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".go",
+    ".h",
+    ".hpp",
+    ".html",
+    ".js",
+    ".jsx",
+    ".lua",
+    ".mjs",
+    ".nix",
+    ".proto",
+    ".ps1",
+    ".py",
+    ".pyi",
+    ".rb",
+    ".rs",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".svelte",
+    ".ts",
+    ".tsx",
+    ".vue"
+  ],
+  "thresholdLines": 2500,
+  "violations": [],
+  "files": [
+    {
+      "path": "crates/slskr/src/controller_tests/full_integrations_differential.rs",
+      "lines": 2408
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_security_differential.rs",
+      "lines": 2399
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_integrations_contracts.rs",
+      "lines": 2380
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_versioned_api_differential.rs",
+      "lines": 2368
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential_03.rs",
+      "lines": 2367
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_persistence_differential_02.rs",
+      "lines": 2356
+    },
+    {
+      "path": "crates/slskr/src/security_controls.rs",
+      "lines": 2356
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_mesh_differential.rs",
+      "lines": 2349
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_media_differential.rs",
+      "lines": 2348
+    },
+    {
+      "path": "crates/slskr/src/cli.rs",
+      "lines": 2346
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_native_api_differential_03.rs",
+      "lines": 2337
+    },
+    {
+      "path": "scripts/parity_not_applicable.py",
+      "lines": 2336
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential_06.rs",
+      "lines": 2329
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_search_contracts.rs",
+      "lines": 2327
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_media_differential_02.rs",
+      "lines": 2325
+    },
+    {
+      "path": "crates/slskr/src/persistence.rs",
+      "lines": 2313
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_transfers_contracts.rs",
+      "lines": 2310
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_native_api_differential.rs",
+      "lines": 2309
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_contracts.rs",
+      "lines": 2309
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_content_discovery_differential.rs",
+      "lines": 2306
+    },
+    {
+      "path": "crates/slskr/src/lib.rs",
+      "lines": 2301
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_peer_network_differential.rs",
+      "lines": 2297
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential_02.rs",
+      "lines": 2288
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_messaging_contracts.rs",
+      "lines": 2287
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_bridge_differential.rs",
+      "lines": 2282
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential_05.rs",
+      "lines": 2274
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_search_differential.rs",
+      "lines": 2271
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_messaging_differential.rs",
+      "lines": 2256
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential_04.rs",
+      "lines": 2227
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_security_differential_02.rs",
+      "lines": 2227
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_library_differential_02.rs",
+      "lines": 2224
+    },
+    {
+      "path": "crates/slskr/src/relay.rs",
+      "lines": 2224
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_persistence_differential.rs",
+      "lines": 2214
+    },
+    {
+      "path": "crates/slskr/src/mesh_security.rs",
+      "lines": 2183
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_native_api_differential_02.rs",
+      "lines": 2179
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential.rs",
+      "lines": 2178
+    },
+    {
+      "path": "crates/slskr-protocol/src/server.rs",
+      "lines": 2170
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential_05.rs",
+      "lines": 2170
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_library_differential.rs",
+      "lines": 2165
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential.rs",
+      "lines": 2164
+    },
+    {
+      "path": "scripts/run-slskdn-cross-client-interop.sh",
+      "lines": 2149
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential_03.rs",
+      "lines": 2145
+    },
+    {
+      "path": "crates/slskr/src/webhooks.rs",
+      "lines": 2140
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential_fixtures.rs",
+      "lines": 2083
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential_02.rs",
+      "lines": 2071
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_07.rs",
+      "lines": 2019
+    },
+    {
+      "path": "crates/slskr/src/pods.rs",
+      "lines": 2000
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_differential_04.rs",
+      "lines": 1993
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_messaging_differential_02.rs",
+      "lines": 1970
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_storage_differential.rs",
+      "lines": 1915
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_02.rs",
+      "lines": 1885
+    },
+    {
+      "path": "crates/slskr/src/http_server.rs",
+      "lines": 1877
+    },
+    {
+      "path": "crates/slskr-client/tests/protocol_behaviors_differential.rs",
+      "lines": 1865
+    },
+    {
+      "path": "scripts/options_differential/part_03.sh",
+      "lines": 1858
+    },
+    {
+      "path": "scripts/audit-upstream-config-surface.py",
+      "lines": 1837
+    },
+    {
+      "path": "scripts/options_differential/part_05.sh",
+      "lines": 1828
+    },
+    {
+      "path": "web/src/components/Player/Player.css",
+      "lines": 1818
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_transfers_differential.rs",
+      "lines": 1817
+    },
+    {
+      "path": "crates/slskr-web/src/route_catalog.rs",
+      "lines": 1816
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_05.rs",
+      "lines": 1802
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_01.rs",
+      "lines": 1797
+    },
+    {
+      "path": "scripts/options_differential/part_02.sh",
+      "lines": 1792
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_automation_differential.rs",
+      "lines": 1781
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_shares_differential.rs",
+      "lines": 1780
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_transfers_contracts_02.rs",
+      "lines": 1777
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_integrations_differential_02.rs",
+      "lines": 1757
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_native_api_differential_04.rs",
+      "lines": 1757
+    },
+    {
+      "path": "crates/slskr/src/podcore_mutations.rs",
+      "lines": 1750
+    },
+    {
+      "path": "scripts/options_differential/part_04.sh",
+      "lines": 1746
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_peer_network_contracts.rs",
+      "lines": 1743
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_security_contracts.rs",
+      "lines": 1741
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_shares_differential_02.rs",
+      "lines": 1739
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_00.rs",
+      "lines": 1732
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_shares_contracts.rs",
+      "lines": 1704
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_route_fixtures.rs",
+      "lines": 1703
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_04.rs",
+      "lines": 1692
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_06.rs",
+      "lines": 1690
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_09.rs",
+      "lines": 1689
+    },
+    {
+      "path": "web/src/semantic-ui-react/index.jsx",
+      "lines": 1689
+    },
+    {
+      "path": "crates/slskr/src/utils.rs",
+      "lines": 1685
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/mesh_contracts.rs",
+      "lines": 1667
+    },
+    {
+      "path": "crates/slskr/src/controller_yaml_validation.rs",
+      "lines": 1625
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_security_differential_03.rs",
+      "lines": 1600
+    },
+    {
+      "path": "scripts/run-certification.sh",
+      "lines": 1593
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_versioned_api_contracts.rs",
+      "lines": 1590
+    },
+    {
+      "path": "crates/slskr/src/persistence_tests.rs",
+      "lines": 1576
+    },
+    {
+      "path": "crates/slskr/src/config_integrations.rs",
+      "lines": 1568
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/collaboration.rs",
+      "lines": 1562
+    },
+    {
+      "path": "crates/slskr/src/feature_mutation_controller.rs",
+      "lines": 1558
+    },
+    {
+      "path": "web/src/components/System/MediaCore/index.test.jsx",
+      "lines": 1515
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_contracts.rs",
+      "lines": 1502
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_08.rs",
+      "lines": 1485
+    },
+    {
+      "path": "crates/slskr/src/multisource.rs",
+      "lines": 1478
+    },
+    {
+      "path": "scripts/options_differential/part_01.sh",
+      "lines": 1470
+    },
+    {
+      "path": "crates/slskr/src/discovery_graph.rs",
+      "lines": 1451
+    },
+    {
+      "path": "crates/slskr/src/web_static.rs",
+      "lines": 1436
+    },
+    {
+      "path": "crates/slskr/src/content_discovery.rs",
+      "lines": 1433
+    },
+    {
+      "path": "crates/slskr-client/src/capabilities.rs",
+      "lines": 1430
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_compatibility_contracts.rs",
+      "lines": 1425
+    },
+    {
+      "path": "crates/slskr-web/src/route_controls.rs",
+      "lines": 1414
+    },
+    {
+      "path": "crates/slskr/src/realm_subject_index.rs",
+      "lines": 1414
+    },
+    {
+      "path": "web/src/components/Player/Visualizer.test.jsx",
+      "lines": 1405
+    },
+    {
+      "path": "crates/slskr/src/musicbrainz_controller.rs",
+      "lines": 1381
+    },
+    {
+      "path": "vendor/mainline/src/dht.rs",
+      "lines": 1376
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_protocol_differential.rs",
+      "lines": 1365
+    },
+    {
+      "path": "crates/slskr/src/wishlist_store.rs",
+      "lines": 1346
+    },
+    {
+      "path": "crates/slskr/src/relay_agent.rs",
+      "lines": 1341
+    },
+    {
+      "path": "crates/slskr-web/src/native_workspace_panels.rs",
+      "lines": 1339
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_03.rs",
+      "lines": 1339
+    },
+    {
+      "path": "crates/slskr/src/search_store.rs",
+      "lines": 1294
+    },
+    {
+      "path": "crates/slskr/src/controller_options_projection.rs",
+      "lines": 1293
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_quarantine_differential.rs",
+      "lines": 1283
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_storage_differential_02.rs",
+      "lines": 1278
+    },
+    {
+      "path": "web/src/components/Pods/Pods.jsx",
+      "lines": 1267
+    },
+    {
+      "path": "web/src/lib/mediacore.js",
+      "lines": 1266
+    },
+    {
+      "path": "vendor/mainline/src/rpc.rs",
+      "lines": 1261
+    },
+    {
+      "path": "vendor/mainline/src/common/messages.rs",
+      "lines": 1255
+    },
+    {
+      "path": "web/src/components/System/Integrations/index.test.jsx",
+      "lines": 1255
+    },
+    {
+      "path": "crates/slskr/src/mediacore_mutations.rs",
+      "lines": 1233
+    },
+    {
+      "path": "crates/slskr/src/peer_transport.rs",
+      "lines": 1232
+    },
+    {
+      "path": "crates/slskr-client/src/overlay/client.rs",
+      "lines": 1212
+    },
+    {
+      "path": "crates/slskr/src/http_connection.rs",
+      "lines": 1202
+    },
+    {
+      "path": "web/e2e/multippeer-sharing.spec.ts",
+      "lines": 1202
+    },
+    {
+      "path": "crates/slskr/src/transfer_controller.rs",
+      "lines": 1198
+    },
+    {
+      "path": "crates/slskr/src/extended_controller_mutations.rs",
+      "lines": 1195
+    },
+    {
+      "path": "crates/slskr/src/mesh_dht.rs",
+      "lines": 1194
+    },
+    {
+      "path": "crates/slskr/src/rate_limit.rs",
+      "lines": 1194
+    },
+    {
+      "path": "crates/slskr/src/config_yaml.rs",
+      "lines": 1183
+    },
+    {
+      "path": "crates/slskr-client/src/mesh_sync.rs",
+      "lines": 1182
+    },
+    {
+      "path": "crates/slskr/src/preview_stream_controller.rs",
+      "lines": 1171
+    },
+    {
+      "path": "crates/slskr/src/dotnet_regex.rs",
+      "lines": 1151
+    },
+    {
+      "path": "client-python/tests/test_client.py",
+      "lines": 1144
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_configuration_contracts.rs",
+      "lines": 1143
+    },
+    {
+      "path": "crates/slskr/src/daemon_serve.rs",
+      "lines": 1141
+    },
+    {
+      "path": "web/src/components/Pods/PortForwarding.jsx",
+      "lines": 1140
+    },
+    {
+      "path": "crates/slskr/src/signalr_ws.rs",
+      "lines": 1126
+    },
+    {
+      "path": "web/scripts/audit-react-webui.mjs",
+      "lines": 1118
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_bridge_differential_02.rs",
+      "lines": 1114
+    },
+    {
+      "path": "web/src/components/App.css",
+      "lines": 1105
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_versioned_api_differential_02.rs",
+      "lines": 1098
+    },
+    {
+      "path": "crates/slskr-client/src/quic_data.rs",
+      "lines": 1094
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_configuration_differential.rs",
+      "lines": 1072
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/content_persistence.rs",
+      "lines": 1061
+    },
+    {
+      "path": "crates/slskr/src/transfer_queue.rs",
+      "lines": 1057
+    },
+    {
+      "path": "web/src/components/System/AdminPolicies/AdminPoliciesForm.jsx",
+      "lines": 1054
+    },
+    {
+      "path": "web/src/components/System/Security/AdversarialSettingsView.jsx",
+      "lines": 1054
+    },
+    {
+      "path": "crates/slskr-client/tests/search.rs",
+      "lines": 1049
+    },
+    {
+      "path": "crates/slskr/src/podcore_controller.rs",
+      "lines": 1042
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_library_contracts.rs",
+      "lines": 1040
+    },
+    {
+      "path": "vendor/mainline/src/async_dht.rs",
+      "lines": 1031
+    },
+    {
+      "path": "client-ts/src/client.ts",
+      "lines": 1030
+    },
+    {
+      "path": "client-go/client.go",
+      "lines": 1029
+    },
+    {
+      "path": "crates/slskr/src/extended_controller.rs",
+      "lines": 1028
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_application_differential.rs",
+      "lines": 1016
+    },
+    {
+      "path": "crates/slskr/src/quarantine_controller.rs",
+      "lines": 1001
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/gateway_transport.rs",
+      "lines": 999
+    },
+    {
+      "path": "web/src/components/Search/Response.jsx",
+      "lines": 999
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_federation_differential.rs",
+      "lines": 995
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/native_route_contracts.rs",
+      "lines": 995
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_integrations_differential_03.rs",
+      "lines": 992
+    },
+    {
+      "path": "web/src/components/System/LibraryHealth/index.jsx",
+      "lines": 990
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential_fixtures.rs",
+      "lines": 984
+    },
+    {
+      "path": "crates/slskr/src/extended_controller_get.rs",
+      "lines": 978
+    },
+    {
+      "path": "crates/slskr/src/library_store.rs",
+      "lines": 976
+    },
+    {
+      "path": "web/e2e/helpers.ts",
+      "lines": 967
+    },
+    {
+      "path": "web/src/components/Messaging/Messaging.jsx",
+      "lines": 964
+    },
+    {
+      "path": "crates/slskr/src/events_ws.rs",
+      "lines": 957
+    },
+    {
+      "path": "web/e2e/harness/SlskrNode.ts",
+      "lines": 951
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_2_session_search.rs",
+      "lines": 945
+    },
+    {
+      "path": "crates/slskr-web/src/native_tab_rendering.rs",
+      "lines": 939
+    },
+    {
+      "path": "crates/slskr-client/tests/transfer.rs",
+      "lines": 938
+    },
+    {
+      "path": "web/e2e/streaming.spec.ts",
+      "lines": 938
+    },
+    {
+      "path": "web/src/components/App.jsx",
+      "lines": 938
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/controller_routes.rs",
+      "lines": 935
+    },
+    {
+      "path": "scripts/audit-operator-packaging.py",
+      "lines": 933
+    },
+    {
+      "path": "crates/slskr/src/port_forwarding.rs",
+      "lines": 929
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_7_media_profile_import.rs",
+      "lines": 929
+    },
+    {
+      "path": "web/src/components/Collections/Collections.jsx",
+      "lines": 925
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_security_differential_04.rs",
+      "lines": 923
+    },
+    {
+      "path": "crates/slskr/src/controller_options_controller.rs",
+      "lines": 919
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/controller_contracts.rs",
+      "lines": 919
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch_group_10.rs",
+      "lines": 918
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_integrations_contracts_02.rs",
+      "lines": 916
+    },
+    {
+      "path": "crates/slskr-protocol/tests/server.rs",
+      "lines": 914
+    },
+    {
+      "path": "crates/slskr-client/tests/listener.rs",
+      "lines": 911
+    },
+    {
+      "path": "web/src/lib/playlistIntake.js",
+      "lines": 911
+    },
+    {
+      "path": "crates/slskr-client/tests/distributed_tree.rs",
+      "lines": 907
+    },
+    {
+      "path": "crates/slskr/src/ftp.rs",
+      "lines": 901
+    },
+    {
+      "path": "web/src/components/Player/PlayerBar.jsx",
+      "lines": 897
+    },
+    {
+      "path": "crates/slskr/src/config_parts/startup.rs",
+      "lines": 891
+    },
+    {
+      "path": "crates/slskr/src/share_scanner.rs",
+      "lines": 888
+    },
+    {
+      "path": "web/src/components/Browse/BrowseSession.jsx",
+      "lines": 885
+    },
+    {
+      "path": "web/src/components/System/QuarantineJury/index.jsx",
+      "lines": 884
+    },
+    {
+      "path": "crates/slskr/src/podcore_queries.rs",
+      "lines": 883
+    },
+    {
+      "path": "web/src/components/Player/Visualizer.jsx",
+      "lines": 883
+    },
+    {
+      "path": "crates/slskr/src/config_tests/peer_transport.rs",
+      "lines": 872
+    },
+    {
+      "path": "web/src/components/CompatibilityDashboard.jsx",
+      "lines": 870
+    },
+    {
+      "path": "web/src/components/Pods/VpnGatewayConfig.jsx",
+      "lines": 870
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodOpinionsPanel.jsx",
+      "lines": 868
+    },
+    {
+      "path": "crates/slskr-client/src/search.rs",
+      "lines": 867
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/network_security.rs",
+      "lines": 863
+    },
+    {
+      "path": "client-python/slskr/client.py",
+      "lines": 859
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_relay_differential_fixtures.rs",
+      "lines": 858
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/input_bounds.rs",
+      "lines": 850
+    },
+    {
+      "path": "web/src/components/Search/Detail/SearchDetail.jsx",
+      "lines": 850
+    },
+    {
+      "path": "crates/slskr/src/config_tests/web_security.rs",
+      "lines": 845
+    },
+    {
+      "path": "crates/slskr-protocol/tests/protocol_behaviors_server_family.rs",
+      "lines": 844
+    },
+    {
+      "path": "web/src/components/Player/PlayerBar.test.jsx",
+      "lines": 839
+    },
+    {
+      "path": "crates/slskr/src/config_parts/transfer_policy.rs",
+      "lines": 838
+    },
+    {
+      "path": "crates/slskr-client/src/overlay/messages.rs",
+      "lines": 832
+    },
+    {
+      "path": "web/src/components/System/Integrations/MetadataSettingsPanel.jsx",
+      "lines": 829
+    },
+    {
+      "path": "web/src/components/System/Network/index.jsx",
+      "lines": 827
+    },
+    {
+      "path": "client-ts/dist/client.js",
+      "lines": 823
+    },
+    {
+      "path": "crates/slskr/src/songid_runtime.rs",
+      "lines": 821
+    },
+    {
+      "path": "crates/slskr/src/config_parts/peer_transport.rs",
+      "lines": 819
+    },
+    {
+      "path": "crates/slskr/src/mediacore_extended.rs",
+      "lines": 819
+    },
+    {
+      "path": "crates/slskr/src/controller_storage.rs",
+      "lines": 818
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreStatisticsDashboardPanel.jsx",
+      "lines": 818
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/lifecycle.rs",
+      "lines": 816
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_media_jobs.rs",
+      "lines": 815
+    },
+    {
+      "path": "crates/slskr/src/spotify_integration.rs",
+      "lines": 810
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_2_transfer_status.rs",
+      "lines": 800
+    },
+    {
+      "path": "web/src/components/Transfers/Transfers.jsx",
+      "lines": 792
+    },
+    {
+      "path": "web/src/components/Player/VisualizerOverlayControls.jsx",
+      "lines": 790
+    },
+    {
+      "path": "crates/slskr/src/config_settings.rs",
+      "lines": 788
+    },
+    {
+      "path": "crates/slskr/src/database_maintenance.rs",
+      "lines": 785
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_session_differential.rs",
+      "lines": 784
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/gateway_services.rs",
+      "lines": 784
+    },
+    {
+      "path": "web/src/components/Contacts/Contacts.jsx",
+      "lines": 784
+    },
+    {
+      "path": "crates/slskr/src/transfer_recovery_runtime.rs",
+      "lines": 783
+    },
+    {
+      "path": "web/src/components/Search/SongIDEvidenceDetails.jsx",
+      "lines": 780
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_relay_controller.rs",
+      "lines": 775
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/workflow_rendering.rs",
+      "lines": 766
+    },
+    {
+      "path": "crates/slskr-protocol/src/peer.rs",
+      "lines": 764
+    },
+    {
+      "path": "web/src/components/Player/visualizerPresetLibrary.js",
+      "lines": 759
+    },
+    {
+      "path": "client-go/client_test.go",
+      "lines": 751
+    },
+    {
+      "path": "crates/slskr/src/distributed_runtime.rs",
+      "lines": 750
+    },
+    {
+      "path": "crates/slskr/src/peer_message_runtime.rs",
+      "lines": 749
+    },
+    {
+      "path": "crates/slskr/src/activitypub_controller.rs",
+      "lines": 746
+    },
+    {
+      "path": "crates/slskr/src/credential_store.rs",
+      "lines": 742
+    },
+    {
+      "path": "web/src/components/Search/Searches.jsx",
+      "lines": 733
+    },
+    {
+      "path": "scripts/run-universal-lifecycle-case.py",
+      "lines": 732
+    },
+    {
+      "path": "web/src/components/System/Mesh/index.jsx",
+      "lines": 732
+    },
+    {
+      "path": "crates/slskr/src/source_feed_ingest.rs",
+      "lines": 731
+    },
+    {
+      "path": "crates/slskr/src/versioned_relay_controller.rs",
+      "lines": 730
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_pods.rs",
+      "lines": 729
+    },
+    {
+      "path": "crates/slskr/src/pod_channels.rs",
+      "lines": 727
+    },
+    {
+      "path": "crates/slskr/src/config_parts/web_security.rs",
+      "lines": 725
+    },
+    {
+      "path": "web/e2e/policy.spec.ts",
+      "lines": 725
+    },
+    {
+      "path": "client-go/websocket.go",
+      "lines": 720
+    },
+    {
+      "path": "crates/slskr-web/src/route_data_projection.rs",
+      "lines": 718
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_messaging_differential_03.rs",
+      "lines": 717
+    },
+    {
+      "path": "scripts/compare-frozen-target-ui.mjs",
+      "lines": 716
+    },
+    {
+      "path": "crates/slskr-client/src/io.rs",
+      "lines": 712
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/transfer_policy.rs",
+      "lines": 711
+    },
+    {
+      "path": "crates/slskr/src/legacy_route_dispatch.rs",
+      "lines": 710
+    },
+    {
+      "path": "crates/slskr/src/controller_reload.rs",
+      "lines": 702
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_mesh_contracts.rs",
+      "lines": 701
+    },
+    {
+      "path": "crates/slskr/src/pod_membership_workflow.rs",
+      "lines": 701
+    },
+    {
+      "path": "crates/slskr/src/batch.rs",
+      "lines": 696
+    },
+    {
+      "path": "crates/slskr/src/collection_store.rs",
+      "lines": 695
+    },
+    {
+      "path": "crates/slskr/src/misc_controller_mutations.rs",
+      "lines": 694
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_request_flow.rs",
+      "lines": 694
+    },
+    {
+      "path": "crates/slskr/src/mesh_services.rs",
+      "lines": 692
+    },
+    {
+      "path": "scripts/run-slskd-cross-client-interop.sh",
+      "lines": 691
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_0_mesh_data.rs",
+      "lines": 688
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_lifecycle_differential.rs",
+      "lines": 687
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/transfers.rs",
+      "lines": 684
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_2_search_rooms.rs",
+      "lines": 676
+    },
+    {
+      "path": "crates/slskr/src/controller_capabilities.rs",
+      "lines": 674
+    },
+    {
+      "path": "web/src/components/PlaylistIntake/PlaylistIntake.jsx",
+      "lines": 674
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_storage_contracts.rs",
+      "lines": 669
+    },
+    {
+      "path": "crates/slskr-web/src/native_transfer_controls.rs",
+      "lines": 665
+    },
+    {
+      "path": "crates/slskr/src/room_store.rs",
+      "lines": 665
+    },
+    {
+      "path": "web/src/components/System/Integrations/NotificationIntegrationsPanel.jsx",
+      "lines": 662
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_5_conversations_jobs.rs",
+      "lines": 660
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_native_api_contracts.rs",
+      "lines": 654
+    },
+    {
+      "path": "crates/slskr/src/runtime_compat_state.rs",
+      "lines": 654
+    },
+    {
+      "path": "crates/slskr/src/songid_controller.rs",
+      "lines": 653
+    },
+    {
+      "path": "crates/slskr/src/listener_runtime.rs",
+      "lines": 652
+    },
+    {
+      "path": "client-ts/src/client.test.ts",
+      "lines": 649
+    },
+    {
+      "path": "vendor/mainline/src/common/routing_table.rs",
+      "lines": 649
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_5_mutations.rs",
+      "lines": 648
+    },
+    {
+      "path": "crates/slskr/src/security_controller.rs",
+      "lines": 647
+    },
+    {
+      "path": "scripts/run-slskd-api-compat-smoke.sh",
+      "lines": 647
+    },
+    {
+      "path": "crates/slskr-client/tests/phase7.rs",
+      "lines": 646
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_4_notes_interests_grants.rs",
+      "lines": 646
+    },
+    {
+      "path": "web/src/components/Search/SongIDPanel.jsx",
+      "lines": 646
+    },
+    {
+      "path": "crates/slskr/src/relay_ws.rs",
+      "lines": 645
+    },
+    {
+      "path": "web/src/components/Search/DiscoveryGraphAtlasPanel.jsx",
+      "lines": 645
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_content_discovery_differential_02.rs",
+      "lines": 643
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_3_people_browse.rs",
+      "lines": 642
+    },
+    {
+      "path": "crates/slskr-web/src/native_row_rendering.rs",
+      "lines": 639
+    },
+    {
+      "path": "crates/slskr/src/extended_controller_dynamic_get.rs",
+      "lines": 639
+    },
+    {
+      "path": "web/src/components/App.test.jsx",
+      "lines": 634
+    },
+    {
+      "path": "crates/slskr/src/controller_yaml_projection.rs",
+      "lines": 633
+    },
+    {
+      "path": "web/src/components/System/Bridge/index.jsx",
+      "lines": 632
+    },
+    {
+      "path": "crates/slskr/src/browse_store.rs",
+      "lines": 631
+    },
+    {
+      "path": "web/src/components/Player/PlayerLauncher.jsx",
+      "lines": 631
+    },
+    {
+      "path": "web/src/lib/searches.js",
+      "lines": 629
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_telemetry_differential.rs",
+      "lines": 626
+    },
+    {
+      "path": "crates/slskr/src/soulfind_bridge_runtime.rs",
+      "lines": 622
+    },
+    {
+      "path": "web/src/components/Messaging/Messaging.test.jsx",
+      "lines": 622
+    },
+    {
+      "path": "crates/slskr/src/source_feed_preview_controller.rs",
+      "lines": 621
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/media_contracts.rs",
+      "lines": 619
+    },
+    {
+      "path": "web/src/components/System/System.css",
+      "lines": 616
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/tests.rs",
+      "lines": 612
+    },
+    {
+      "path": "crates/slskr/src/virtual_soulfind_v2.rs",
+      "lines": 612
+    },
+    {
+      "path": "crates/slskr-web/src/route_workflow_rendering.rs",
+      "lines": 611
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodDiscoveryPanel.jsx",
+      "lines": 611
+    },
+    {
+      "path": "crates/slskr-client/tests/soulfind_contract.rs",
+      "lines": 609
+    },
+    {
+      "path": "crates/slskr/src/openapi.rs",
+      "lines": 609
+    },
+    {
+      "path": "web/src/components/System/Security/AdversarialSettings.jsx",
+      "lines": 606
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_compatibility_differential.rs",
+      "lines": 605
+    },
+    {
+      "path": "scripts/audit-parity-manifest.py",
+      "lines": 605
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/native_actions.rs",
+      "lines": 604
+    },
+    {
+      "path": "crates/slskr-client/src/listener.rs",
+      "lines": 599
+    },
+    {
+      "path": "crates/slskr/src/musicbrainz_targets.rs",
+      "lines": 599
+    },
+    {
+      "path": "web/src/components/Wishlist/Wishlist.jsx",
+      "lines": 599
+    },
+    {
+      "path": "web/src/components/Search/SoulseekDiscoveryPanel.jsx",
+      "lines": 592
+    },
+    {
+      "path": "crates/slskr-client/src/transfer.rs",
+      "lines": 591
+    },
+    {
+      "path": "scripts/run-cross-client-validation.sh",
+      "lines": 590
+    },
+    {
+      "path": "web/src/components/System/MediaCore/ContentDescriptorRetrievalPanel.jsx",
+      "lines": 588
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_4_collections.rs",
+      "lines": 584
+    },
+    {
+      "path": "web/src/components/System/Jobs/index.jsx",
+      "lines": 584
+    },
+    {
+      "path": "scripts/derive-universal-transport-evidence.py",
+      "lines": 580
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_lifecycle_contracts.rs",
+      "lines": 579
+    },
+    {
+      "path": "web/src/components/Search/Search.css",
+      "lines": 579
+    },
+    {
+      "path": "crates/slskr-client/src/distributed_tree.rs",
+      "lines": 578
+    },
+    {
+      "path": "crates/slskr/src/security_state.rs",
+      "lines": 574
+    },
+    {
+      "path": "web/src/components/System/AdminPolicies/index.jsx",
+      "lines": 573
+    },
+    {
+      "path": "crates/slskr/src/vpn.rs",
+      "lines": 572
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMembershipManagementPanel.jsx",
+      "lines": 572
+    },
+    {
+      "path": "crates/slskr/src/mesh_sync.rs",
+      "lines": 570
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_2_transfer_files.rs",
+      "lines": 569
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_7_podcore.rs",
+      "lines": 568
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_action_execution.rs",
+      "lines": 567
+    },
+    {
+      "path": "web/src/components/Rooms/RoomSession.jsx",
+      "lines": 567
+    },
+    {
+      "path": "scripts/check-runtime-boundary-hardening.sh",
+      "lines": 564
+    },
+    {
+      "path": "web/src/components/ShareGroups/ShareGroups.jsx",
+      "lines": 563
+    },
+    {
+      "path": "crates/slskr/src/persistence_collaboration.rs",
+      "lines": 562
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_7_network_admin.rs",
+      "lines": 560
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_media_contracts.rs",
+      "lines": 559
+    },
+    {
+      "path": "crates/slskr/src/lidarr_wishlist_sync.rs",
+      "lines": 557
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_1_events.rs",
+      "lines": 557
+    },
+    {
+      "path": "web/src/components/Shared/Footer.css",
+      "lines": 557
+    },
+    {
+      "path": "web/src/components/Shared/Footer.jsx",
+      "lines": 557
+    },
+    {
+      "path": "crates/slskr/src/controller_tests.rs",
+      "lines": 555
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_1_discovery.rs",
+      "lines": 551
+    },
+    {
+      "path": "client-go/websocket_test.go",
+      "lines": 550
+    },
+    {
+      "path": "web/src/components/System/SwarmVisualization/index.jsx",
+      "lines": 543
+    },
+    {
+      "path": "scripts/check-web-auth-credentials-differential.sh",
+      "lines": 541
+    },
+    {
+      "path": "crates/slskr-client/src/overlay_control.rs",
+      "lines": 540
+    },
+    {
+      "path": "crates/slskr-client/tests/manager.rs",
+      "lines": 540
+    },
+    {
+      "path": "scripts/check-controller-options-differential.sh",
+      "lines": 539
+    },
+    {
+      "path": "web/src/components/System/System.jsx",
+      "lines": 536
+    },
+    {
+      "path": "web/src/components/Shared/UserCard.jsx",
+      "lines": 534
+    },
+    {
+      "path": "web/src/components/Search/SongIDAnalysisResults.jsx",
+      "lines": 532
+    },
+    {
+      "path": "web/src/components/System/Network/NetworkDetails.jsx",
+      "lines": 530
+    },
+    {
+      "path": "crates/slskr/src/transfer_durability.rs",
+      "lines": 529
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/download_paths.rs",
+      "lines": 527
+    },
+    {
+      "path": "crates/slskr/src/config_tests/transfer_policy.rs",
+      "lines": 523
+    },
+    {
+      "path": "crates/slskr/src/lidarr_import.rs",
+      "lines": 523
+    },
+    {
+      "path": "web/src/components/System/MediaCore/ContentDescriptorPublishingPanel.jsx",
+      "lines": 523
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_4_contacts_sharegroups.rs",
+      "lines": 522
+    },
+    {
+      "path": "crates/slskr/src/share_index_state.rs",
+      "lines": 522
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_library_differential_03.rs",
+      "lines": 521
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/browser_local_preferences.rs",
+      "lines": 520
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_mesh_differential_02.rs",
+      "lines": 520
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_0_control_plane.rs",
+      "lines": 519
+    },
+    {
+      "path": "web/src/components/Rooms/Rooms.jsx",
+      "lines": 519
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_form_values.rs",
+      "lines": 518
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_bounded_runners.rs",
+      "lines": 518
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_media_differential_fixtures.rs",
+      "lines": 518
+    },
+    {
+      "path": "crates/slskr/src/message_store.rs",
+      "lines": 517
+    },
+    {
+      "path": "crates/slskr/src/versioned_get_contract.rs",
+      "lines": 517
+    },
+    {
+      "path": "crates/slskr-client/src/quic_control.rs",
+      "lines": 512
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_security_shares.rs",
+      "lines": 511
+    },
+    {
+      "path": "web/src/components/Player/PlayerStatsModal.jsx",
+      "lines": 511
+    },
+    {
+      "path": "crates/slskr/src/config_tests/file_layers.rs",
+      "lines": 510
+    },
+    {
+      "path": "web/src/components/Player/PodListenAlongPanel.jsx",
+      "lines": 510
+    },
+    {
+      "path": "crates/slskr/src/persistence_search.rs",
+      "lines": 505
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_5_configuration_bridge.rs",
+      "lines": 505
+    },
+    {
+      "path": "crates/slskr/src/mediacore_controller.rs",
+      "lines": 503
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_7_stream_services.rs",
+      "lines": 502
+    },
+    {
+      "path": "crates/slskr/src/persistence_library_runtime.rs",
+      "lines": 499
+    },
+    {
+      "path": "web/src/components/Chat/ChatSession.jsx",
+      "lines": 496
+    },
+    {
+      "path": "web/src/lib/playlistIntake.test.js",
+      "lines": 493
+    },
+    {
+      "path": "benchmarks/benchmark-sqlite-cardinality.py",
+      "lines": 491
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_integrations.rs",
+      "lines": 488
+    },
+    {
+      "path": "web/src/components/Shares/SharedWithMe.jsx",
+      "lines": 486
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_media_differential_03.rs",
+      "lines": 485
+    },
+    {
+      "path": "crates/slskr/src/musicbrainz_lookup.rs",
+      "lines": 485
+    },
+    {
+      "path": "web/src/components/System/Integrations/SourceFeedIntegrationsPanel.jsx",
+      "lines": 485
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/listening_party_contracts.rs",
+      "lines": 483
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_federation_contracts.rs",
+      "lines": 480
+    },
+    {
+      "path": "crates/slskr/src/persistence_transfers.rs",
+      "lines": 478
+    },
+    {
+      "path": "crates/slskr/src/transfer_batch_controller.rs",
+      "lines": 478
+    },
+    {
+      "path": "crates/slskr-client/src/social.rs",
+      "lines": 476
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/rustymilk_presets.rs",
+      "lines": 475
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_5_library_profile.rs",
+      "lines": 474
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/server_projection.rs",
+      "lines": 474
+    },
+    {
+      "path": "web/src/lib/searches.test.js",
+      "lines": 474
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/songid_contracts.rs",
+      "lines": 473
+    },
+    {
+      "path": "crates/slskr/src/dht.rs",
+      "lines": 473
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_1_telemetry.rs",
+      "lines": 471
+    },
+    {
+      "path": "crates/slskr/src/controller_feature_state.rs",
+      "lines": 469
+    },
+    {
+      "path": "web/src/components/System/AutomationCenter/index.jsx",
+      "lines": 469
+    },
+    {
+      "path": "web/src/lib/listeningHistory.js",
+      "lines": 468
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_federation_fixtures.rs",
+      "lines": 467
+    },
+    {
+      "path": "crates/slskr/src/storage.rs",
+      "lines": 465
+    },
+    {
+      "path": "scripts/fixture-soulseek-listener.py",
+      "lines": 465
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_capabilities_differential.rs",
+      "lines": 464
+    },
+    {
+      "path": "web/src/components/System/ExperienceSettings/index.jsx",
+      "lines": 464
+    },
+    {
+      "path": "web/src/components/System/SwarmAnalytics/index.jsx",
+      "lines": 464
+    },
+    {
+      "path": "crates/slskr/src/podcore_stats_controller.rs",
+      "lines": 463
+    },
+    {
+      "path": "scripts/check-slskdn-safe-mutation-contracts.mjs",
+      "lines": 462
+    },
+    {
+      "path": "web/src/components/System/Integrations/MediaServerPanel.jsx",
+      "lines": 461
+    },
+    {
+      "path": "crates/slskr/src/transfer_entry.rs",
+      "lines": 457
+    },
+    {
+      "path": "web/src/components/Search/DiscoveryGraphModal.jsx",
+      "lines": 457
+    },
+    {
+      "path": "vendor/mainline/src/rpc/socket.rs",
+      "lines": 455
+    },
+    {
+      "path": "scripts/audit-rust-web-ui.mjs",
+      "lines": 454
+    },
+    {
+      "path": "web/src/components/Chat/Chat.jsx",
+      "lines": 454
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_search_contracts_02.rs",
+      "lines": 453
+    },
+    {
+      "path": "scripts/check-web-cors-differential.sh",
+      "lines": 453
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMessageRoutingPanel.jsx",
+      "lines": 452
+    },
+    {
+      "path": "crates/slskr/src/config_tests/runtime_policy.rs",
+      "lines": 449
+    },
+    {
+      "path": "scripts/benchmark-http.py",
+      "lines": 449
+    },
+    {
+      "path": "crates/slskr/src/logging.rs",
+      "lines": 447
+    },
+    {
+      "path": "scripts/run-proton-public-matrix.sh",
+      "lines": 447
+    },
+    {
+      "path": "crates/slskr-protocol/tests/peer.rs",
+      "lines": 445
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_capabilities_contracts.rs",
+      "lines": 444
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/identity_integrations.rs",
+      "lines": 435
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch.rs",
+      "lines": 435
+    },
+    {
+      "path": "web/src/components/System/Integrations/FtpIntegrationPanel.jsx",
+      "lines": 435
+    },
+    {
+      "path": "crates/slskr/src/virtual_soulfind_v2_controller.rs",
+      "lines": 432
+    },
+    {
+      "path": "client-ts/src/websocket-client.test.ts",
+      "lines": 431
+    },
+    {
+      "path": "scripts/release_notes.py",
+      "lines": 430
+    },
+    {
+      "path": "crates/slskr/src/library_controller.rs",
+      "lines": 428
+    },
+    {
+      "path": "scripts/check-web-rate-limiting-differential.sh",
+      "lines": 426
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodJoinLeavePanel.jsx",
+      "lines": 425
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/peer_negotiation.rs",
+      "lines": 424
+    },
+    {
+      "path": "vendor/mainline/src/rpc/server.rs",
+      "lines": 421
+    },
+    {
+      "path": "scripts/run-live-http-transfer-smoke.sh",
+      "lines": 419
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMembershipVerificationPanel.jsx",
+      "lines": 419
+    },
+    {
+      "path": "crates/slskr/src/hash_backfill_runtime.rs",
+      "lines": 418
+    },
+    {
+      "path": "crates/slskr/src/share_grant_store.rs",
+      "lines": 418
+    },
+    {
+      "path": "web/src/components/Search/SearchesListView.jsx",
+      "lines": 418
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_file_imports.rs",
+      "lines": 417
+    },
+    {
+      "path": "crates/slskr/src/controller_route_inputs.rs",
+      "lines": 417
+    },
+    {
+      "path": "crates/slskr/src/share_group_store.rs",
+      "lines": 415
+    },
+    {
+      "path": "scripts/parity_audit_transport.py",
+      "lines": 415
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/rustymilk_runtime.rs",
+      "lines": 413
+    },
+    {
+      "path": "web/src/lib/automationRecipes.js",
+      "lines": 413
+    },
+    {
+      "path": "crates/slskr/src/config_tests/media_integrations.rs",
+      "lines": 412
+    },
+    {
+      "path": "web/src/components/Search/FederatedTasteRecommendationsPanel.jsx",
+      "lines": 410
+    },
+    {
+      "path": "crates/slskr/src/mesh_state.rs",
+      "lines": 408
+    },
+    {
+      "path": "scripts/run-universal-lifecycle-matrix.py",
+      "lines": 407
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_reference_controls.rs",
+      "lines": 405
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_2_downloads.rs",
+      "lines": 405
+    },
+    {
+      "path": "scripts/parity_audit_shared.py",
+      "lines": 405
+    },
+    {
+      "path": "web/src/components/Search/Detail/SearchResultControls.jsx",
+      "lines": 405
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_1_shares.rs",
+      "lines": 404
+    },
+    {
+      "path": "web/e2e/core-pages.spec.ts",
+      "lines": 404
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/workspace_tables.css",
+      "lines": 403
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_browse_contracts.rs",
+      "lines": 403
+    },
+    {
+      "path": "web/src/components/AppRouteTable.jsx",
+      "lines": 402
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/search_ranking.rs",
+      "lines": 401
+    },
+    {
+      "path": "crates/slskr/src/config_parts/network_security.rs",
+      "lines": 401
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodDhtPublishingPanel.jsx",
+      "lines": 400
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_wishlist_actions.rs",
+      "lines": 399
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/wishlist_dispatch.rs",
+      "lines": 398
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/peer_message_dispatch.rs",
+      "lines": 397
+    },
+    {
+      "path": "crates/slskr/src/controller_debug_view.rs",
+      "lines": 396
+    },
+    {
+      "path": "client-python/slskr/websocket.py",
+      "lines": 393
+    },
+    {
+      "path": "web/src/lib/jobs.test.js",
+      "lines": 393
+    },
+    {
+      "path": "crates/slskr/src/scripts.rs",
+      "lines": 392
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodChannelManagementPanel.jsx",
+      "lines": 391
+    },
+    {
+      "path": "crates/slskr-web/src/route_shell_runtime.rs",
+      "lines": 390
+    },
+    {
+      "path": "web/src/components/System/Files/Explorer.jsx",
+      "lines": 390
+    },
+    {
+      "path": "scripts/audit-rust-web-ui-exhaustive.mjs",
+      "lines": 387
+    },
+    {
+      "path": "web/scripts/capture-readme-screenshots.mjs",
+      "lines": 386
+    },
+    {
+      "path": "web/src/components/Search/MusicBrainzLookup.jsx",
+      "lines": 383
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/command_dispatch.rs",
+      "lines": 382
+    },
+    {
+      "path": "crates/slskr/src/transfer_recovery.rs",
+      "lines": 382
+    },
+    {
+      "path": "web/src/lib/hubFactory.js",
+      "lines": 382
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_persistence_differential_03.rs",
+      "lines": 379
+    },
+    {
+      "path": "scripts/parity_audit_frozen_transport.py",
+      "lines": 379
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/shell_base.css",
+      "lines": 378
+    },
+    {
+      "path": "web/src/components/System/Integrations/LidarrPanel.jsx",
+      "lines": 377
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_table_projection.css",
+      "lines": 376
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_4_wishlist.rs",
+      "lines": 376
+    },
+    {
+      "path": "web/src/components/Search/ArtistReleaseRadarPanel.jsx",
+      "lines": 376
+    },
+    {
+      "path": "crates/slskr-client/tests/peer_cache.rs",
+      "lines": 374
+    },
+    {
+      "path": "crates/slskr/src/app_state.rs",
+      "lines": 374
+    },
+    {
+      "path": "crates/slskr/src/request_security.rs",
+      "lines": 373
+    },
+    {
+      "path": "web/src/components/System/Network/index.test.jsx",
+      "lines": 373
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_3_room_membership.rs",
+      "lines": 372
+    },
+    {
+      "path": "web/src/lib/transfers.js",
+      "lines": 371
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_library_actions.rs",
+      "lines": 370
+    },
+    {
+      "path": "crates/slskr/src/podcore_runtime_stats.rs",
+      "lines": 370
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreMetadataPortabilityPanel.jsx",
+      "lines": 370
+    },
+    {
+      "path": "web/src/components/System/MediaCore/index.jsx",
+      "lines": 369
+    },
+    {
+      "path": "web/src/lib/acquisitionPlans.js",
+      "lines": 369
+    },
+    {
+      "path": "crates/slskr/src/integration_runtime_state.rs",
+      "lines": 367
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/collection_authorization_contracts.rs",
+      "lines": 363
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_domain_workflows.css",
+      "lines": 362
+    },
+    {
+      "path": "web/src/components/Search/DiscographyCoveragePanel.jsx",
+      "lines": 362
+    },
+    {
+      "path": "web/src/components/System/Mesh/MeshEvidencePolicy.jsx",
+      "lines": 362
+    },
+    {
+      "path": "crates/slskr/src/persistence_wishlist.rs",
+      "lines": 361
+    },
+    {
+      "path": "scripts/check-web-enforce-security-differential.sh",
+      "lines": 361
+    },
+    {
+      "path": "client-go/batch.go",
+      "lines": 360
+    },
+    {
+      "path": "web/src/components/NetworkEndpointNotice.jsx",
+      "lines": 360
+    },
+    {
+      "path": "client-go/examples/integration_example.go",
+      "lines": 359
+    },
+    {
+      "path": "crates/slskr/src/native_compat_controller.rs",
+      "lines": 358
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_federation_security.rs",
+      "lines": 358
+    },
+    {
+      "path": "client-ts/src/websocket-client.ts",
+      "lines": 357
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/server_probe_helpers.rs",
+      "lines": 357
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_session_contracts.rs",
+      "lines": 357
+    },
+    {
+      "path": "crates/slskr/src/search_persistence.rs",
+      "lines": 356
+    },
+    {
+      "path": "web/src/lib/setupHealthCheck.js",
+      "lines": 356
+    },
+    {
+      "path": "web/src/components/Browse/DirectoryTree.jsx",
+      "lines": 355
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreContentGraphPanel.jsx",
+      "lines": 355
+    },
+    {
+      "path": "vendor/mainline/src/common/id.rs",
+      "lines": 354
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodContentLinkingPanel.jsx",
+      "lines": 354
+    },
+    {
+      "path": "crates/slskr/src/wishlist_auto_download.rs",
+      "lines": 353
+    },
+    {
+      "path": "scripts/compare-benchmark.py",
+      "lines": 353
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreContentRegistryPanel.jsx",
+      "lines": 353
+    },
+    {
+      "path": "web/src/components/System/Logs/index.jsx",
+      "lines": 352
+    },
+    {
+      "path": "web/src/lib/security.js",
+      "lines": 352
+    },
+    {
+      "path": "crates/slskr/src/user_store.rs",
+      "lines": 351
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/media_services.rs",
+      "lines": 350
+    },
+    {
+      "path": "web/src/lib/searchCandidateRanking.js",
+      "lines": 350
+    },
+    {
+      "path": "web/src/components/Transfers/Transfers.test.jsx",
+      "lines": 347
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/player_search.rs",
+      "lines": 346
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_bridge_pod_fixtures.rs",
+      "lines": 345
+    },
+    {
+      "path": "web/src/components/Messaging/Messaging.css",
+      "lines": 345
+    },
+    {
+      "path": "web/src/components/Search/Searches.test.jsx",
+      "lines": 345
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/peer_transport.rs",
+      "lines": 344
+    },
+    {
+      "path": "crates/slskr/src/tracing.rs",
+      "lines": 344
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_state_fixtures.rs",
+      "lines": 343
+    },
+    {
+      "path": "crates/slskr/src/interest_store.rs",
+      "lines": 343
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMessageSigningPanel.jsx",
+      "lines": 343
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests/fixtures.rs",
+      "lines": 342
+    },
+    {
+      "path": "web/src/components/Messaging/PodChannelSession.jsx",
+      "lines": 340
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/live_server_runtime.rs",
+      "lines": 339
+    },
+    {
+      "path": "web/src/components/Player/PlayerQueueModal.jsx",
+      "lines": 338
+    },
+    {
+      "path": "crates/slskr/src/quic_alpn.rs",
+      "lines": 337
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_web_routes_contracts.rs",
+      "lines": 335
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/rustymilk_gpu.rs",
+      "lines": 334
+    },
+    {
+      "path": "crates/slskr-web/src/native_table_navigation.rs",
+      "lines": 333
+    },
+    {
+      "path": "vendor/mainline/src/common/messages/internal.rs",
+      "lines": 333
+    },
+    {
+      "path": "web/src/lib/albumCandidatePicker.js",
+      "lines": 333
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_browser_controls.rs",
+      "lines": 332
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/audio_metadata.rs",
+      "lines": 331
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/transfer_policy.rs",
+      "lines": 331
+    },
+    {
+      "path": "web/src/components/Search/Detail/SearchFilterModal.jsx",
+      "lines": 331
+    },
+    {
+      "path": "crates/slskr/src/controller_cli.rs",
+      "lines": 330
+    },
+    {
+      "path": "web/src/lib/watchlists.js",
+      "lines": 330
+    },
+    {
+      "path": "client-ts/dist/websocket-client.js",
+      "lines": 329
+    },
+    {
+      "path": "crates/slskr/src/event_store.rs",
+      "lines": 328
+    },
+    {
+      "path": "client-ts/src/types.ts",
+      "lines": 327
+    },
+    {
+      "path": "crates/slskr-protocol/src/primitives.rs",
+      "lines": 327
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_share_access.rs",
+      "lines": 326
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/session_supervision.rs",
+      "lines": 325
+    },
+    {
+      "path": "scripts/check-web-no-auth-passthrough-differential.sh",
+      "lines": 325
+    },
+    {
+      "path": "scripts/check-web-request-body-limit-differential.sh",
+      "lines": 325
+    },
+    {
+      "path": "scripts/check-diagnostics-memory-dump-differential.sh",
+      "lines": 324
+    },
+    {
+      "path": "crates/slskr-client/src/peer_connect.rs",
+      "lines": 323
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_telemetry_contracts.rs",
+      "lines": 323
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_library_storage.rs",
+      "lines": 322
+    },
+    {
+      "path": "crates/slskr/src/persistence_people.rs",
+      "lines": 320
+    },
+    {
+      "path": "web/src/components/AppNavigationPrimary.jsx",
+      "lines": 320
+    },
+    {
+      "path": "web/src/lib/mediaServerIntegrations.js",
+      "lines": 320
+    },
+    {
+      "path": "dashboard/src/hooks/useFetch.test.tsx",
+      "lines": 319
+    },
+    {
+      "path": "web/src/components/System/Mesh/RealmSubjectIndexConflicts.jsx",
+      "lines": 317
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_table_selection.rs",
+      "lines": 315
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMessageBackfillPanel.jsx",
+      "lines": 315
+    },
+    {
+      "path": "web/src/lib/meshEvidencePolicy.js",
+      "lines": 315
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/rustymilk_geometry.rs",
+      "lines": 314
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_events_contracts.rs",
+      "lines": 312
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_persistence_contracts.rs",
+      "lines": 311
+    },
+    {
+      "path": "vendor/mainline/src/rpc/iterative_query.rs",
+      "lines": 310
+    },
+    {
+      "path": "crates/slskr/src/persistence_activity.rs",
+      "lines": 309
+    },
+    {
+      "path": "vendor/mainline/src/rpc/put_query.rs",
+      "lines": 309
+    },
+    {
+      "path": "crates/slskr-client/src/stream.rs",
+      "lines": 308
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/live_peer_runtime.rs",
+      "lines": 307
+    },
+    {
+      "path": "scripts/check-package-artifact-matrix.sh",
+      "lines": 307
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/peer_probe_operations.rs",
+      "lines": 306
+    },
+    {
+      "path": "crates/slskr/src/browse_wire.rs",
+      "lines": 305
+    },
+    {
+      "path": "web/src/components/System/SourceProviders/index.jsx",
+      "lines": 305
+    },
+    {
+      "path": "packaging/scripts/update-release-metadata.sh",
+      "lines": 304
+    },
+    {
+      "path": "scripts/check-web-auth-disabled-differential.sh",
+      "lines": 304
+    },
+    {
+      "path": "crates/slskr/src/contact_state.rs",
+      "lines": 301
+    },
+    {
+      "path": "crates/slskr/src/lidarr_api.rs",
+      "lines": 300
+    },
+    {
+      "path": "crates/slskr-client/src/peer_cache.rs",
+      "lines": 299
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/server_smoke_scenarios.rs",
+      "lines": 299
+    },
+    {
+      "path": "web/e2e/fixtures/live-subscription-fixture.py",
+      "lines": 299
+    },
+    {
+      "path": "web/src/lib/runtimeCapabilities.js",
+      "lines": 299
+    },
+    {
+      "path": "web/src/components/System/Jobs/index.test.jsx",
+      "lines": 298
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/workspace_action_mounting.rs",
+      "lines": 297
+    },
+    {
+      "path": "vendor/mainline/src/rpc/closest_nodes.rs",
+      "lines": 297
+    },
+    {
+      "path": "web/src/lib/communityQualitySignals.js",
+      "lines": 296
+    },
+    {
+      "path": "crates/slskr-client/benches/file_transfer_payload.rs",
+      "lines": 295
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_preset_editor.rs",
+      "lines": 295
+    },
+    {
+      "path": "web/src/components/System/AutomationCenter/index.test.jsx",
+      "lines": 295
+    },
+    {
+      "path": "crates/slskr/src/daemon_runtime_setup.rs",
+      "lines": 292
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_admin_routes.rs",
+      "lines": 292
+    },
+    {
+      "path": "crates/slskr/src/solid.rs",
+      "lines": 291
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreContentHashingPanel.jsx",
+      "lines": 291
+    },
+    {
+      "path": "crates/slskr/src/config.rs",
+      "lines": 290
+    },
+    {
+      "path": "crates/slskr/src/wishlist_csv_import.rs",
+      "lines": 290
+    },
+    {
+      "path": "web/src/lib/libraryHealthReport.js",
+      "lines": 290
+    },
+    {
+      "path": "crates/slskr-web/src/route_reference_panels.rs",
+      "lines": 288
+    },
+    {
+      "path": "crates/slskr/src/application_state.rs",
+      "lines": 288
+    },
+    {
+      "path": "web/src/lib/slskr.js",
+      "lines": 287
+    },
+    {
+      "path": "crates/slskr-protocol/tests/protocol_behaviors_peer_family.rs",
+      "lines": 286
+    },
+    {
+      "path": "vendor/mainline/src/common/mutable.rs",
+      "lines": 286
+    },
+    {
+      "path": "web/src/components/Search/Detail/SearchDetail.test.jsx",
+      "lines": 286
+    },
+    {
+      "path": "crates/slskr/src/transfer_state_io.rs",
+      "lines": 285
+    },
+    {
+      "path": "web/src/components/System/Security/index.jsx",
+      "lines": 285
+    },
+    {
+      "path": "scripts/audit-slskdn-controller-routes.mjs",
+      "lines": 284
+    },
+    {
+      "path": "web/src/components/Rooms/Rooms.css",
+      "lines": 284
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/search_previews.rs",
+      "lines": 282
+    },
+    {
+      "path": "crates/slskr-client/tests/peer_connect.rs",
+      "lines": 281
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_content_discovery_contracts.rs",
+      "lines": 281
+    },
+    {
+      "path": "crates/slskr/src/transfer_completion.rs",
+      "lines": 281
+    },
+    {
+      "path": "client-ts/src/batch-client.ts",
+      "lines": 280
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_bridge_contracts.rs",
+      "lines": 280
+    },
+    {
+      "path": "web/src/components/Messaging/MessagingSidebar.jsx",
+      "lines": 280
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/player_browser_controls.rs",
+      "lines": 279
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/visualizer_startup.rs",
+      "lines": 279
+    },
+    {
+      "path": "dashboard/src/pages/Webhooks.tsx",
+      "lines": 279
+    },
+    {
+      "path": "web/src/lib/discoveryShelf.js",
+      "lines": 279
+    },
+    {
+      "path": "crates/slskr/src/config_parts/environment_layers.rs",
+      "lines": 277
+    },
+    {
+      "path": "crates/slskr/src/hash_db_store.rs",
+      "lines": 277
+    },
+    {
+      "path": "web/src/lib/discoveryGraph.js",
+      "lines": 277
+    },
+    {
+      "path": "crates/slskr/src/ranking_controller.rs",
+      "lines": 276
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/login_replay.rs",
+      "lines": 276
+    },
+    {
+      "path": "crates/slskr-client/src/manager.rs",
+      "lines": 275
+    },
+    {
+      "path": "crates/slskr-client/tests/io.rs",
+      "lines": 275
+    },
+    {
+      "path": "scripts/check-workflow-release-policy.sh",
+      "lines": 275
+    },
+    {
+      "path": "web/src/components/Rooms/RoomJoinModal.jsx",
+      "lines": 275
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/session_connection.rs",
+      "lines": 274
+    },
+    {
+      "path": "web/src/components/System/Metrics/index.jsx",
+      "lines": 273
+    },
+    {
+      "path": "client-ts/examples/basic-usage.ts",
+      "lines": 272
+    },
+    {
+      "path": "web/src/components/System/SwarmAnalytics/index.test.jsx",
+      "lines": 271
+    },
+    {
+      "path": "dashboard/src/pages/Configuration.tsx",
+      "lines": 270
+    },
+    {
+      "path": "scripts/run-rf-shutdown-overlap.py",
+      "lines": 269
+    },
+    {
+      "path": "client-python/examples/integration_example.py",
+      "lines": 268
+    },
+    {
+      "path": "crates/slskr/src/routing.rs",
+      "lines": 268
+    },
+    {
+      "path": "web/src/lib/audioVerification.js",
+      "lines": 268
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/fixture_transfers.rs",
+      "lines": 267
+    },
+    {
+      "path": "crates/slskr/src/mesh_gateway_controller.rs",
+      "lines": 266
+    },
+    {
+      "path": "crates/slskr/src/persistence_webhooks.rs",
+      "lines": 266
+    },
+    {
+      "path": "crates/slskr/src/swarm_analytics.rs",
+      "lines": 266
+    },
+    {
+      "path": "crates/slskr/src/user_note_store.rs",
+      "lines": 266
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_catalog.rs",
+      "lines": 265
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_activity_differential.rs",
+      "lines": 264
+    },
+    {
+      "path": "web/src/lib/collections.js",
+      "lines": 264
+    },
+    {
+      "path": "scripts/check-upstream-parity-classification.sh",
+      "lines": 263
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/quarantine_contracts.rs",
+      "lines": 261
+    },
+    {
+      "path": "crates/slskr/src/controller_storage_preflight.rs",
+      "lines": 260
+    },
+    {
+      "path": "src/slskdN.VpnAgent/relay-api.py",
+      "lines": 260
+    },
+    {
+      "path": "web/src/components/Shared/UserCard.css",
+      "lines": 258
+    },
+    {
+      "path": "web/src/components/System/Info/SetupHealthCheckModal.jsx",
+      "lines": 258
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_table_filters.rs",
+      "lines": 257
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_3_options_diagnostics.rs",
+      "lines": 257
+    },
+    {
+      "path": "web/src/components/Player/PlayerDiscoveryShelfModal.jsx",
+      "lines": 257
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_relay_contracts.rs",
+      "lines": 256
+    },
+    {
+      "path": "scripts/parity_audit_webui.py",
+      "lines": 256
+    },
+    {
+      "path": "web/src/components/Player/PlayerVisualTiles.jsx",
+      "lines": 255
+    },
+    {
+      "path": "scripts/options_differential/part_06.sh",
+      "lines": 254
+    },
+    {
+      "path": "web/src/components/System/Options/EditModal.jsx",
+      "lines": 254
+    },
+    {
+      "path": "crates/slskr-client/tests/server_session.rs",
+      "lines": 253
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/wishlist_rules.css",
+      "lines": 252
+    },
+    {
+      "path": "scripts/test-universal-transport-evidence.py",
+      "lines": 252
+    },
+    {
+      "path": "web/src/components/System/Events/index.jsx",
+      "lines": 252
+    },
+    {
+      "path": "web/src/components/Wishlist/WishlistModal.jsx",
+      "lines": 252
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/transfer_policies.css",
+      "lines": 251
+    },
+    {
+      "path": "scripts/parity_audit_api.py",
+      "lines": 251
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/live_route_refresh.rs",
+      "lines": 250
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/transfer_smoke_scenarios.rs",
+      "lines": 250
+    },
+    {
+      "path": "web/src/lib/pods.js",
+      "lines": 250
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_row_context.rs",
+      "lines": 249
+    },
+    {
+      "path": "crates/slskr/src/now_playing_store.rs",
+      "lines": 248
+    },
+    {
+      "path": "web/src/components/Player/PlayerRadioModal.jsx",
+      "lines": 248
+    },
+    {
+      "path": "web/src/components/System/Integrations/ServarrReadinessPanel.jsx",
+      "lines": 247
+    },
+    {
+      "path": "crates/slskr/src/browse_runtime.rs",
+      "lines": 246
+    },
+    {
+      "path": "scripts/check-web-bundle-budget.py",
+      "lines": 246
+    },
+    {
+      "path": "web/src/lib/metadataMatcher.js",
+      "lines": 246
+    },
+    {
+      "path": "web/src/components/Users/UserNoteModal.jsx",
+      "lines": 245
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/experience_action_models.rs",
+      "lines": 244
+    },
+    {
+      "path": "crates/slskr/tests/api_smoke.rs",
+      "lines": 244
+    },
+    {
+      "path": "scripts/audit-rust-web-ui-semantic.mjs",
+      "lines": 244
+    },
+    {
+      "path": "scripts/run-live-interop-matrix.sh",
+      "lines": 243
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_controller_api_differential_06.rs",
+      "lines": 242
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_native_api_differential_fixtures.rs",
+      "lines": 242
+    },
+    {
+      "path": "crates/slskr/src/notification_runtime.rs",
+      "lines": 240
+    },
+    {
+      "path": "web/src/components/System/AdminPolicies/index.test.jsx",
+      "lines": 240
+    },
+    {
+      "path": "client-ts/dist/batch-client.js",
+      "lines": 239
+    },
+    {
+      "path": "crates/slskr-client/src/file_transfer.rs",
+      "lines": 239
+    },
+    {
+      "path": "crates/slskr/src/config_tests/federation_membership.rs",
+      "lines": 239
+    },
+    {
+      "path": "scripts/parity_audit_completeness.py",
+      "lines": 239
+    },
+    {
+      "path": "crates/slskr/src/bloom_filter.rs",
+      "lines": 238
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_federation_differential_fixtures.rs",
+      "lines": 237
+    },
+    {
+      "path": "crates/slskr/src/controller_release_check.rs",
+      "lines": 235
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_quarantine_contracts.rs",
+      "lines": 235
+    },
+    {
+      "path": "web/src/lib/searchCandidateRanking.test.js",
+      "lines": 235
+    },
+    {
+      "path": "web/src/lib/listeningHistory.test.js",
+      "lines": 234
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/route_inventory.rs",
+      "lines": 233
+    },
+    {
+      "path": "crates/slskr/src/controller_status.rs",
+      "lines": 231
+    },
+    {
+      "path": "crates/slskr/src/songid_scoring.rs",
+      "lines": 231
+    },
+    {
+      "path": "web/src/components/Player/useVisualizerPresetFileOperations.js",
+      "lines": 231
+    },
+    {
+      "path": "web/src/components/Users/Users.jsx",
+      "lines": 230
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/route_reference_workflows.css",
+      "lines": 228
+    },
+    {
+      "path": "web/src/components/Transfers/TransferList.jsx",
+      "lines": 228
+    },
+    {
+      "path": "web/src/lib/api.test.js",
+      "lines": 228
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/federation_membership.rs",
+      "lines": 227
+    },
+    {
+      "path": "web/src/lib/libraryHealthReport.test.js",
+      "lines": 227
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_editors_messaging.css",
+      "lines": 226
+    },
+    {
+      "path": "scripts/parity_audit_live_catalog.py",
+      "lines": 225
+    },
+    {
+      "path": "crates/slskr-client/src/server.rs",
+      "lines": 224
+    },
+    {
+      "path": "web/src/components/Search/AlbumCompletionPanel.jsx",
+      "lines": 224
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_library_projection.rs",
+      "lines": 223
+    },
+    {
+      "path": "scripts/test_release_notes.py",
+      "lines": 223
+    },
+    {
+      "path": "web/src/components/TrafficTicker/TrafficTicker.jsx",
+      "lines": 223
+    },
+    {
+      "path": "crates/slskr/src/hash_backfill_state.rs",
+      "lines": 222
+    },
+    {
+      "path": "crates/slskr/src/source_provider_catalog.rs",
+      "lines": 222
+    },
+    {
+      "path": "web/src/components/Browse/Browse.jsx",
+      "lines": 222
+    },
+    {
+      "path": "web/src/components/Transfers/TransfersHeader.jsx",
+      "lines": 222
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_route_validation_differential.rs",
+      "lines": 221
+    },
+    {
+      "path": "scripts/audit-upstream-webui-endpoints.mjs",
+      "lines": 221
+    },
+    {
+      "path": "web/src/components/Player/audioGraph.js",
+      "lines": 221
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/quic_proxy.rs",
+      "lines": 220
+    },
+    {
+      "path": "crates/slskr/src/persistence_distributed.rs",
+      "lines": 219
+    },
+    {
+      "path": "web/src/components/Player/visualizers/rustyMilkEngine.test.js",
+      "lines": 219
+    },
+    {
+      "path": "web/src/components/Search/List/SearchListRow.jsx",
+      "lines": 219
+    },
+    {
+      "path": "crates/slskr/src/persistence_hashdb.rs",
+      "lines": 218
+    },
+    {
+      "path": "web/src/components/Player/PlayerContext.jsx",
+      "lines": 218
+    },
+    {
+      "path": "scripts/build-release-archive.sh",
+      "lines": 217
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/player_radio_planning.rs",
+      "lines": 216
+    },
+    {
+      "path": "crates/slskr/src/config_parts/federation_membership.rs",
+      "lines": 216
+    },
+    {
+      "path": "web/src/components/System/Integrations/integrationsShared.jsx",
+      "lines": 216
+    },
+    {
+      "path": "crates/slskr-web/src/lib.rs",
+      "lines": 215
+    },
+    {
+      "path": "crates/slskr/src/mesh_dht_runtime.rs",
+      "lines": 215
+    },
+    {
+      "path": "web/src/components/Chat/Chat.css",
+      "lines": 215
+    },
+    {
+      "path": "web/src/components/Player/SpectrumAnalyzer.jsx",
+      "lines": 214
+    },
+    {
+      "path": "web/src/components/Player/useVisualizerEngineLifecycle.js",
+      "lines": 214
+    },
+    {
+      "path": "web/src/lib/discoveryInbox.js",
+      "lines": 214
+    },
+    {
+      "path": "web/e2e/fixtures/ensure-fixtures.ts",
+      "lines": 213
+    },
+    {
+      "path": "web/src/components/Wishlist/Wishlist.test.jsx",
+      "lines": 213
+    },
+    {
+      "path": "client-ts/dist/types.d.ts",
+      "lines": 212
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_workspace.css",
+      "lines": 212
+    },
+    {
+      "path": "web/src/components/Search/Detail/SearchDetailHeader.jsx",
+      "lines": 212
+    },
+    {
+      "path": "crates/slskr/src/event_runtime.rs",
+      "lines": 211
+    },
+    {
+      "path": "crates/slskr/src/share_index_runtime.rs",
+      "lines": 211
+    },
+    {
+      "path": "web/src/lib/acquisitionPlans.test.js",
+      "lines": 211
+    },
+    {
+      "path": "crates/slskr/src/config_file.rs",
+      "lines": 210
+    },
+    {
+      "path": "dashboard/src/pages/ApiKeys.tsx",
+      "lines": 210
+    },
+    {
+      "path": "web/src/components/Browse/Directory.jsx",
+      "lines": 209
+    },
+    {
+      "path": "web/src/components/Player/useVisualizerPresetEditorActions.js",
+      "lines": 209
+    },
+    {
+      "path": "crates/slskr/src/config_parts/file_loading.rs",
+      "lines": 208
+    },
+    {
+      "path": "web/src/components/System/SwarmVisualization/index.test.jsx",
+      "lines": 208
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/download_connection.rs",
+      "lines": 207
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_3_admin_controls.rs",
+      "lines": 207
+    },
+    {
+      "path": "scripts/profile-sqlite.py",
+      "lines": 207
+    },
+    {
+      "path": "web/src/lib/acquisitionRequests.js",
+      "lines": 207
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_pods_contracts_02.rs",
+      "lines": 206
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_route_validation_contracts.rs",
+      "lines": 206
+    },
+    {
+      "path": "crates/slskr/src/destination_state.rs",
+      "lines": 206
+    },
+    {
+      "path": "dashboard/src/pages/Dashboard.tsx",
+      "lines": 206
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/response_projection.rs",
+      "lines": 205
+    },
+    {
+      "path": "web/src/components/Search/songIdPanelHelpers.js",
+      "lines": 205
+    },
+    {
+      "path": "web/src/components/System/Shares/index.jsx",
+      "lines": 205
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_table_sorting.rs",
+      "lines": 204
+    },
+    {
+      "path": "scripts/check-slskdn-get-contract-shapes.mjs",
+      "lines": 204
+    },
+    {
+      "path": "crates/slskr/src/request_input.rs",
+      "lines": 203
+    },
+    {
+      "path": "web/src/components/PlaylistIntake/PlaylistIntake.test.jsx",
+      "lines": 202
+    },
+    {
+      "path": "web/src/lib/watchlists.test.js",
+      "lines": 202
+    },
+    {
+      "path": "scripts/submit-winget-release.ps1",
+      "lines": 201
+    },
+    {
+      "path": "web/src/components/Transfers/TransferGroup.jsx",
+      "lines": 200
+    },
+    {
+      "path": "web/src/components/System/Integrations/VpnPanel.jsx",
+      "lines": 199
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/signal_policy.rs",
+      "lines": 198
+    },
+    {
+      "path": "scripts/verify-release-artifacts.sh",
+      "lines": 198
+    },
+    {
+      "path": "scripts/parity_audit_ui_evidence.py",
+      "lines": 197
+    },
+    {
+      "path": "web/src/components/CompatibilityGraph.jsx",
+      "lines": 197
+    },
+    {
+      "path": "client-go/examples/advanced_usage.go",
+      "lines": 195
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/workspace_table_controls.rs",
+      "lines": 195
+    },
+    {
+      "path": "scripts/run-live-soak-proton-natpmp.sh",
+      "lines": 195
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/integrations.rs",
+      "lines": 194
+    },
+    {
+      "path": "crates/slskr/src/oauth_state.rs",
+      "lines": 194
+    },
+    {
+      "path": "web/src/components/Player/LyricsPane.jsx",
+      "lines": 194
+    },
+    {
+      "path": "web/src/lib/discoveryGraph.test.js",
+      "lines": 194
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/upload_streaming.rs",
+      "lines": 193
+    },
+    {
+      "path": "web/src/components/System/Security/Security.css",
+      "lines": 192
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/download_progress.rs",
+      "lines": 191
+    },
+    {
+      "path": "scripts/parity_protocol_inventory.py",
+      "lines": 191
+    },
+    {
+      "path": "web/src/lib/swarmAnalytics.test.js",
+      "lines": 191
+    },
+    {
+      "path": "scripts/fixture-lidarr.py",
+      "lines": 190
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/peer_smoke_scenarios.rs",
+      "lines": 189
+    },
+    {
+      "path": "crates/slskr/src/wishlist_persistence.rs",
+      "lines": 189
+    },
+    {
+      "path": "web/src/lib/setupHealthCheck.test.js",
+      "lines": 189
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/mesh_content_projection.rs",
+      "lines": 187
+    },
+    {
+      "path": "crates/slskr/src/probe_output.rs",
+      "lines": 187
+    },
+    {
+      "path": "web/src/lib/reports.js",
+      "lines": 186
+    },
+    {
+      "path": "client-python/slskr/batch.py",
+      "lines": 185
+    },
+    {
+      "path": "web/src/components/System/LibraryHealth/index.test.jsx",
+      "lines": 185
+    },
+    {
+      "path": "web/src/lib/collections.test.js",
+      "lines": 185
+    },
+    {
+      "path": "crates/slskr-protocol/tests/primitives.rs",
+      "lines": 184
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/pod_room_bridge.rs",
+      "lines": 184
+    },
+    {
+      "path": "web/src/components/AppNavigationActivity.js",
+      "lines": 184
+    },
+    {
+      "path": "scripts/generate-release-manifests.sh",
+      "lines": 183
+    },
+    {
+      "path": "client-go/batch_test.go",
+      "lines": 182
+    },
+    {
+      "path": "crates/slskr/src/vpn_runtime.rs",
+      "lines": 182
+    },
+    {
+      "path": "scripts/parity_audit_files.py",
+      "lines": 182
+    },
+    {
+      "path": "dashboard/src/hooks/useFetch.ts",
+      "lines": 181
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_mesh_fixtures.rs",
+      "lines": 179
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_multisource_graph.rs",
+      "lines": 179
+    },
+    {
+      "path": "scripts/check-slskdn-openapi-mutation-statuses.mjs",
+      "lines": 179
+    },
+    {
+      "path": "crates/slskr/src/private_message_auto_responses.rs",
+      "lines": 178
+    },
+    {
+      "path": "web/src/lib/searchResultDeduplication.js",
+      "lines": 178
+    },
+    {
+      "path": "vendor/mainline/src/rpc/server/peers.rs",
+      "lines": 176
+    },
+    {
+      "path": "web/src/components/AppHeaderMenu.jsx",
+      "lines": 176
+    },
+    {
+      "path": "client-go/errors.go",
+      "lines": 175
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreFuzzyContentPanel.jsx",
+      "lines": 175
+    },
+    {
+      "path": "web/src/lib/hubFactory.test.js",
+      "lines": 175
+    },
+    {
+      "path": "web/src/lib/meshEvidencePolicy.test.js",
+      "lines": 175
+    },
+    {
+      "path": "crates/slskr/src/distributed_state.rs",
+      "lines": 174
+    },
+    {
+      "path": "web/src/lib/acquisitionRequests.test.js",
+      "lines": 174
+    },
+    {
+      "path": "web/src/components/Wishlist/WishlistItemRow.jsx",
+      "lines": 173
+    },
+    {
+      "path": "crates/slskr/src/preview_stream_state.rs",
+      "lines": 172
+    },
+    {
+      "path": "web/src/components/Player/PlayerIntegrationsModal.jsx",
+      "lines": 171
+    },
+    {
+      "path": "web/src/components/Rooms/RoomCreateModal.jsx",
+      "lines": 171
+    },
+    {
+      "path": "web/src/components/Wishlist/CsvImportModal.jsx",
+      "lines": 171
+    },
+    {
+      "path": "crates/slskr-client/tests/mesh.rs",
+      "lines": 169
+    },
+    {
+      "path": "crates/slskr-protocol/src/distributed.rs",
+      "lines": 169
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_selection_dialogs.css",
+      "lines": 169
+    },
+    {
+      "path": "web/src/components/Shared/FileList.jsx",
+      "lines": 169
+    },
+    {
+      "path": "web/src/components/LoginForm.jsx",
+      "lines": 168
+    },
+    {
+      "path": "web/src/components/Search/FederatedTasteRecommendationsPanel.test.jsx",
+      "lines": 168
+    },
+    {
+      "path": "scripts/collect-reproducibility-metadata.py",
+      "lines": 166
+    },
+    {
+      "path": "web/e2e/smoke-auth.spec.ts",
+      "lines": 165
+    },
+    {
+      "path": "web/src/components/Pods/Pods.test.jsx",
+      "lines": 165
+    },
+    {
+      "path": "web/src/lib/mediaServerIntegrations.test.js",
+      "lines": 165
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/shell_lifecycle.rs",
+      "lines": 164
+    },
+    {
+      "path": "crates/slskr/src/browse_path_state.rs",
+      "lines": 164
+    },
+    {
+      "path": "scripts/verify-cargo-package-contents.sh",
+      "lines": 164
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_persistence_fixtures.rs",
+      "lines": 163
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMessageStoragePanel.jsx",
+      "lines": 163
+    },
+    {
+      "path": "web/vite.config.mjs",
+      "lines": 162
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/player_queue_planning.rs",
+      "lines": 161
+    },
+    {
+      "path": "crates/slskr/src/session_state.rs",
+      "lines": 161
+    },
+    {
+      "path": "scripts/parity_audit_live_evidence.py",
+      "lines": 161
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/player_visualizer.css",
+      "lines": 160
+    },
+    {
+      "path": "web/src/lib/networkHealthScore.js",
+      "lines": 160
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_playlist_actions.rs",
+      "lines": 159
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/gateway_identity.rs",
+      "lines": 159
+    },
+    {
+      "path": "web/scripts/smoke-rustymilk.mjs",
+      "lines": 159
+    },
+    {
+      "path": "web/src/components/System/Integrations/FederationDiagnosticsPanel.jsx",
+      "lines": 158
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/protocol_names.rs",
+      "lines": 157
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCorePerceptualSimilarityPanel.jsx",
+      "lines": 157
+    },
+    {
+      "path": "crates/slskr-client/src/mesh.rs",
+      "lines": 156
+    },
+    {
+      "path": "web/scripts/smoke-subpath-build.mjs",
+      "lines": 156
+    },
+    {
+      "path": "web/src/lib/jobs.js",
+      "lines": 156
+    },
+    {
+      "path": "web/e2e/selectors.ts",
+      "lines": 155
+    },
+    {
+      "path": "web/src/lib/communityQualitySignals.test.js",
+      "lines": 155
+    },
+    {
+      "path": "web/src/lib/discoveryShelf.test.js",
+      "lines": 155
+    },
+    {
+      "path": "web/src/lib/util.js",
+      "lines": 155
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/experience_reports.rs",
+      "lines": 154
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/live_soak_entry.rs",
+      "lines": 154
+    },
+    {
+      "path": "scripts/derive-universal-transport-capability-evidence.py",
+      "lines": 154
+    },
+    {
+      "path": "client-python/examples/advanced_usage.py",
+      "lines": 153
+    },
+    {
+      "path": "web/src/lib/albumDecisionRules.js",
+      "lines": 153
+    },
+    {
+      "path": "web/src/lib/api.js",
+      "lines": 152
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_automation.rs",
+      "lines": 151
+    },
+    {
+      "path": "web/src/components/PlaylistIntake/PlaylistIntake.css",
+      "lines": 151
+    },
+    {
+      "path": "dashboard/src/pages/Database.tsx",
+      "lines": 150
+    },
+    {
+      "path": "crates/slskr-client/tests/stream.rs",
+      "lines": 149
+    },
+    {
+      "path": "web/src/components/Contacts/Contacts.test.jsx",
+      "lines": 149
+    },
+    {
+      "path": "web/src/components/System/QuarantineJury/index.test.jsx",
+      "lines": 149
+    },
+    {
+      "path": "crates/slskr/src/upload_peer_cooldowns.rs",
+      "lines": 148
+    },
+    {
+      "path": "scripts/parity_audit_persistence.py",
+      "lines": 148
+    },
+    {
+      "path": "web/src/components/Player/Equalizer.jsx",
+      "lines": 148
+    },
+    {
+      "path": "web/src/components/System/Info/index.jsx",
+      "lines": 147
+    },
+    {
+      "path": "dashboard/src/pages/Monitoring.tsx",
+      "lines": 146
+    },
+    {
+      "path": "scripts/check-slskdn-controller-parity.sh",
+      "lines": 146
+    },
+    {
+      "path": "web/src/components/ModeSpecificConnectButton.jsx",
+      "lines": 146
+    },
+    {
+      "path": "crates/slskr/src/cli_tests.rs",
+      "lines": 145
+    },
+    {
+      "path": "crates/slskr/src/hash_backfill_controller.rs",
+      "lines": 145
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreHashSimilarityPanel.jsx",
+      "lines": 145
+    },
+    {
+      "path": "crates/slskr/src/private_gateway.rs",
+      "lines": 144
+    },
+    {
+      "path": "scripts/fixture-metadata.py",
+      "lines": 144
+    },
+    {
+      "path": "web/e2e/search.spec.ts",
+      "lines": 144
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreTextSimilarityPanel.jsx",
+      "lines": 144
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/server_transport.rs",
+      "lines": 143
+    },
+    {
+      "path": "web/src/components/System/Info/DiagnosticBundleModal.jsx",
+      "lines": 143
+    },
+    {
+      "path": "web/src/lib/mediacore.test.js",
+      "lines": 143
+    },
+    {
+      "path": "scripts/check-local-identity-leaks.sh",
+      "lines": 142
+    },
+    {
+      "path": "scripts/test_check_web_bundle_budget.py",
+      "lines": 142
+    },
+    {
+      "path": "vendor/mainline/src/common/node.rs",
+      "lines": 142
+    },
+    {
+      "path": "web/src/components/Messaging/messagingWorkspaceState.js",
+      "lines": 142
+    },
+    {
+      "path": "web/src/components/Solid/SolidSettings.jsx",
+      "lines": 142
+    },
+    {
+      "path": "scripts/run-in-proton-wg-netns.sh",
+      "lines": 141
+    },
+    {
+      "path": "client-ts/src/batch-client.test.ts",
+      "lines": 140
+    },
+    {
+      "path": "crates/slskr/src/event_bus.rs",
+      "lines": 140
+    },
+    {
+      "path": "crates/slskr-protocol/src/frame.rs",
+      "lines": 138
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/rustymilk_shaders.rs",
+      "lines": 138
+    },
+    {
+      "path": "dashboard/src/lib/api.ts",
+      "lines": 138
+    },
+    {
+      "path": "scripts/check-remediation-baseline.sh",
+      "lines": 138
+    },
+    {
+      "path": "web/src/components/Shared/Footer.test.jsx",
+      "lines": 138
+    },
+    {
+      "path": "web/src/components/System/Mesh/index.test.jsx",
+      "lines": 138
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MessageSearchPanel.jsx",
+      "lines": 137
+    },
+    {
+      "path": "crates/slskr/src/managed_tasks.rs",
+      "lines": 135
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/gateway_models.rs",
+      "lines": 135
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_musicbrainz.rs",
+      "lines": 135
+    },
+    {
+      "path": "scripts/parity_audit_operator.py",
+      "lines": 134
+    },
+    {
+      "path": "web/src/components/Search/DiscoveryGraphCanvas.jsx",
+      "lines": 134
+    },
+    {
+      "path": "crates/slskr-client/src/error.rs",
+      "lines": 133
+    },
+    {
+      "path": "web/src/components/CompatibilityDashboard.test.jsx",
+      "lines": 133
+    },
+    {
+      "path": "web/src/lib/usePolling.js",
+      "lines": 133
+    },
+    {
+      "path": "web/src/serviceWorkerCaching.test.js",
+      "lines": 133
+    },
+    {
+      "path": "scripts/audit-slskdn-openapi-mutations.mjs",
+      "lines": 132
+    },
+    {
+      "path": "crates/slskr/src/route_request_entry.rs",
+      "lines": 131
+    },
+    {
+      "path": "web/src/lib/wishlist.js",
+      "lines": 130
+    },
+    {
+      "path": "web/src/components/CompatibilityDashboard.css",
+      "lines": 129
+    },
+    {
+      "path": "web/src/lib/slskr.test.js",
+      "lines": 129
+    },
+    {
+      "path": "crates/slskr/src/controller_options_state.rs",
+      "lines": 127
+    },
+    {
+      "path": "scripts/run-security-scans.sh",
+      "lines": 127
+    },
+    {
+      "path": "web/src/lib/swarmAnalytics.js",
+      "lines": 127
+    },
+    {
+      "path": "web/src/components/Collections/Collections.test.jsx",
+      "lines": 126
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/controller_surface_contracts.rs",
+      "lines": 125
+    },
+    {
+      "path": "web/src/components/System/MediaCore/ResolveExternalIdPanel.jsx",
+      "lines": 125
+    },
+    {
+      "path": "web/src/lib/autoReplace.js",
+      "lines": 125
+    },
+    {
+      "path": "web/src/lib/playerRatings.js",
+      "lines": 125
+    },
+    {
+      "path": "web/src/lib/searchState.js",
+      "lines": 125
+    },
+    {
+      "path": "crates/slskr/src/integration_target.rs",
+      "lines": 123
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/quic_relay.rs",
+      "lines": 123
+    },
+    {
+      "path": "client-go/examples/basic_usage.go",
+      "lines": 122
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/web_security.rs",
+      "lines": 122
+    },
+    {
+      "path": "web/src/components/Shared/UserCard.test.jsx",
+      "lines": 122
+    },
+    {
+      "path": "web/src/components/System/Shares/ContentsModal.jsx",
+      "lines": 122
+    },
+    {
+      "path": "crates/slskr-protocol/tests/protocol_behaviors_distributed_family.rs",
+      "lines": 121
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/peer_authentication.rs",
+      "lines": 121
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_metrics_jobs.rs",
+      "lines": 121
+    },
+    {
+      "path": "web/src/components/Browse/Browse.css",
+      "lines": 121
+    },
+    {
+      "path": "web/src/components/Player/audioGraph.test.js",
+      "lines": 121
+    },
+    {
+      "path": "web/src/lib/metadataMatcher.test.js",
+      "lines": 121
+    },
+    {
+      "path": "web/src/lib/transfers.test.js",
+      "lines": 121
+    },
+    {
+      "path": "web/src/components/System/MediaCore/mediaCoreWorkflows.js",
+      "lines": 120
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/visualizer_audio_analysis.rs",
+      "lines": 119
+    },
+    {
+      "path": "scripts/check-controller-auth-profiles.sh",
+      "lines": 119
+    },
+    {
+      "path": "scripts/parity_audit_security.py",
+      "lines": 119
+    },
+    {
+      "path": "vendor/mainline/src/rpc/server/tokens.rs",
+      "lines": 119
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/download_content_safety.rs",
+      "lines": 118
+    },
+    {
+      "path": "test-data/slskr-test-fixtures/meta/generate-manifest.js",
+      "lines": 118
+    },
+    {
+      "path": "web/src/components/Player/useExternalVisualizerControl.js",
+      "lines": 118
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/local_preferences.css",
+      "lines": 117
+    },
+    {
+      "path": "web/src/lib/servarrReadiness.js",
+      "lines": 117
+    },
+    {
+      "path": "crates/slskr-client/src/overlay/frame.rs",
+      "lines": 116
+    },
+    {
+      "path": "scripts/with-process-memory-guard.sh",
+      "lines": 116
+    },
+    {
+      "path": "crates/slskr/src/search_fallback.rs",
+      "lines": 115
+    },
+    {
+      "path": "dashboard/src/App.tsx",
+      "lines": 115
+    },
+    {
+      "path": "dashboard/src/components/Header.tsx",
+      "lines": 115
+    },
+    {
+      "path": "web/src/components/System/Options/index.jsx",
+      "lines": 115
+    },
+    {
+      "path": "crates/slskr-client/tests/file_transfer.rs",
+      "lines": 114
+    },
+    {
+      "path": "dashboard/src/lib/api.test.ts",
+      "lines": 114
+    },
+    {
+      "path": "web/src/lib/albumCandidatePicker.test.js",
+      "lines": 114
+    },
+    {
+      "path": "scripts/generate-vpn-soulseek-accounts.sh",
+      "lines": 113
+    },
+    {
+      "path": "web/.tmp-slskr-link-audit.mjs",
+      "lines": 113
+    },
+    {
+      "path": "web/src/components/Search/ArtistReleaseRadarPanel.test.jsx",
+      "lines": 113
+    },
+    {
+      "path": "crates/slskr-protocol/tests/distributed.rs",
+      "lines": 112
+    },
+    {
+      "path": "web/src/lib/playerRadio.js",
+      "lines": 112
+    },
+    {
+      "path": "web/src/lib/audioVerification.test.js",
+      "lines": 111
+    },
+    {
+      "path": "web/src/lib/session.test.js",
+      "lines": 111
+    },
+    {
+      "path": "scripts/check-rust-module-hygiene.sh",
+      "lines": 110
+    },
+    {
+      "path": "scripts/test-universal-lifecycle-matrix.py",
+      "lines": 110
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/bridge_contracts.rs",
+      "lines": 109
+    },
+    {
+      "path": "crates/slskr/src/listener_state.rs",
+      "lines": 109
+    },
+    {
+      "path": "scripts/check-secret-scanning.sh",
+      "lines": 109
+    },
+    {
+      "path": "web/src/components/Search/List/SearchList.jsx",
+      "lines": 109
+    },
+    {
+      "path": "crates/slskr-protocol/src/init.rs",
+      "lines": 108
+    },
+    {
+      "path": "web/eslint.config.mjs",
+      "lines": 108
+    },
+    {
+      "path": "web/src/components/Browse/BrowseSession.test.jsx",
+      "lines": 108
+    },
+    {
+      "path": "web/src/components/System/SourceProviders/index.test.jsx",
+      "lines": 108
+    },
+    {
+      "path": "crates/slskr-client/src/events.rs",
+      "lines": 107
+    },
+    {
+      "path": "web/src/components/Player/LyricsPane.test.jsx",
+      "lines": 107
+    },
+    {
+      "path": "web/src/lib/portForwarding.js",
+      "lines": 107
+    },
+    {
+      "path": "crates/slskr-client/src/share_payload.rs",
+      "lines": 106
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/log_redaction.rs",
+      "lines": 106
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/foundation.rs",
+      "lines": 106
+    },
+    {
+      "path": "scripts/parity_audit_process.py",
+      "lines": 106
+    },
+    {
+      "path": "scripts/test_compare_benchmark.py",
+      "lines": 106
+    },
+    {
+      "path": "web/src/lib/http.test.js",
+      "lines": 106
+    },
+    {
+      "path": "web/src/lib/listenBrainz.js",
+      "lines": 106
+    },
+    {
+      "path": "web/src/lib/playerRadio.test.js",
+      "lines": 106
+    },
+    {
+      "path": "web/src/lib/savedSearchFilters.js",
+      "lines": 106
+    },
+    {
+      "path": "scripts/check-client-sdk-gates.sh",
+      "lines": 105
+    },
+    {
+      "path": "scripts/check-aur-packaging-checksums.sh",
+      "lines": 104
+    },
+    {
+      "path": "scripts/check-sdk-example-contracts.sh",
+      "lines": 104
+    },
+    {
+      "path": "crates/slskr/src/search_runtime.rs",
+      "lines": 103
+    },
+    {
+      "path": "web/src/components/System/Events/index.test.jsx",
+      "lines": 103
+    },
+    {
+      "path": "web/src/components/System/Info/SetupHealthCheckModal.test.jsx",
+      "lines": 103
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/player_action_models.rs",
+      "lines": 102
+    },
+    {
+      "path": "crates/slskr/src/managed_blacklist_runtime.rs",
+      "lines": 102
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/inbound_transfer.rs",
+      "lines": 101
+    },
+    {
+      "path": "scripts/test-parity-owner-boundaries.py",
+      "lines": 101
+    },
+    {
+      "path": "web/src/lib/chat.js",
+      "lines": 101
+    },
+    {
+      "path": "crates/slskr-client/src/filters.rs",
+      "lines": 100
+    },
+    {
+      "path": "crates/slskr/src/source_discovery_runtime.rs",
+      "lines": 100
+    },
+    {
+      "path": "web/src/lib/rooms.js",
+      "lines": 100
+    },
+    {
+      "path": "client-python/examples/websocket_events.py",
+      "lines": 98
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/live_player_refresh.rs",
+      "lines": 98
+    },
+    {
+      "path": "web/src/components/Chat/ChatSession.test.jsx",
+      "lines": 98
+    },
+    {
+      "path": "crates/slskr-protocol/tests/init.rs",
+      "lines": 97
+    },
+    {
+      "path": "packaging/linux/install-from-release.sh",
+      "lines": 97
+    },
+    {
+      "path": "web/src/components/Chat/SendMessageModal.jsx",
+      "lines": 97
+    },
+    {
+      "path": "web/src/components/System/Mesh/MeshEvidencePolicy.test.jsx",
+      "lines": 97
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/room_dispatch.rs",
+      "lines": 96
+    },
+    {
+      "path": "scripts/run-release-gate.sh",
+      "lines": 96
+    },
+    {
+      "path": "client-go/examples/websocket_events.go",
+      "lines": 95
+    },
+    {
+      "path": "scripts/check-slskdn-controller-auth-registry.mjs",
+      "lines": 95
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/peer_connection_helpers.rs",
+      "lines": 94
+    },
+    {
+      "path": "dashboard/src/components/Sidebar.tsx",
+      "lines": 94
+    },
+    {
+      "path": "crates/slskr-web/src/rustymilk_ui_owners/browser_http_requests.rs",
+      "lines": 93
+    },
+    {
+      "path": "scripts/test_profile_sqlite.py",
+      "lines": 93
+    },
+    {
+      "path": "web/src/components/Rooms/RoomSession.test.jsx",
+      "lines": 93
+    },
+    {
+      "path": "web/src/components/Wishlist/Wishlist.css",
+      "lines": 93
+    },
+    {
+      "path": "scripts/diff-webui-endpoints.sh",
+      "lines": 92
+    },
+    {
+      "path": "web/src/lib/security.test.js",
+      "lines": 92
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/responsive_layout.css",
+      "lines": 91
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/wishlist_history.css",
+      "lines": 91
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodMessageMaintenanceActions.jsx",
+      "lines": 91
+    },
+    {
+      "path": "web/src/lib/persistedJson.js",
+      "lines": 91
+    },
+    {
+      "path": "crates/slskr-protocol/tests/protocol_behaviors_differential.rs",
+      "lines": 90
+    },
+    {
+      "path": "web/src/components/Pods/Pods.css",
+      "lines": 90
+    },
+    {
+      "path": "web/src/components/System/Mesh/RealmSubjectIndexConflicts.test.jsx",
+      "lines": 90
+    },
+    {
+      "path": "scripts/check-council-sweep-counts.sh",
+      "lines": 89
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/incoming_search.rs",
+      "lines": 88
+    },
+    {
+      "path": "scripts/check-docs-freshness.sh",
+      "lines": 88
+    },
+    {
+      "path": "web/src/components/System/Data/index.jsx",
+      "lines": 88
+    },
+    {
+      "path": "web/src/components/System/Integrations/MetadataProcessingPanel.jsx",
+      "lines": 88
+    },
+    {
+      "path": "web/src/lib/realmSubjectIndexes.test.js",
+      "lines": 88
+    },
+    {
+      "path": "crates/slskr-web/src/search_planning_owners/player_status_projection.rs",
+      "lines": 87
+    },
+    {
+      "path": "crates/slskr/src/source_discovery_state.rs",
+      "lines": 87
+    },
+    {
+      "path": "scripts/check-process-memory-guard.sh",
+      "lines": 87
+    },
+    {
+      "path": "web/src/lib/storage.js",
+      "lines": 87
+    },
+    {
+      "path": "packaging/proxmox-lxc/setup-inside-ct.sh",
+      "lines": 86
+    },
+    {
+      "path": "vendor/mainline/src/rpc/socket/inflight_requests.rs",
+      "lines": 86
+    },
+    {
+      "path": "web/src/lib/playerAutoQueue.js",
+      "lines": 86
+    },
+    {
+      "path": "web/src/lib/playerAutoQueue.test.js",
+      "lines": 86
+    },
+    {
+      "path": "web/src/lib/swarmJobs.js",
+      "lines": 86
+    },
+    {
+      "path": "web/src/components/Browse/DirectoryTree.test.jsx",
+      "lines": 85
+    },
+    {
+      "path": "web/src/components/Search/SoulseekDiscoveryPanel.test.jsx",
+      "lines": 85
+    },
+    {
+      "path": "web/src/lib/diagnosticBundle.test.js",
+      "lines": 85
+    },
+    {
+      "path": "web/src/lib/searchActionPreview.js",
+      "lines": 85
+    },
+    {
+      "path": "crates/slskr-protocol/tests/adversarial.rs",
+      "lines": 84
+    },
+    {
+      "path": "web/src/components/System/Options/DebugModal.jsx",
+      "lines": 84
+    },
+    {
+      "path": "crates/slskr/src/controller_yaml.rs",
+      "lines": 83
+    },
+    {
+      "path": "crates/slskr/src/incoming_share_store.rs",
+      "lines": 83
+    },
+    {
+      "path": "web/scripts/verify-build-output.mjs",
+      "lines": 83
+    },
+    {
+      "path": "web/src/components/Player/usePlayerPictureInPicture.js",
+      "lines": 83
+    },
+    {
+      "path": "web/src/lib/libraryHealth.test.js",
+      "lines": 83
+    },
+    {
+      "path": "crates/slskr/src/persistence_transfer_batches.rs",
+      "lines": 82
+    },
+    {
+      "path": "scripts/run-council-active-bughunt.sh",
+      "lines": 82
+    },
+    {
+      "path": "web/src/lib/autoReplace.test.js",
+      "lines": 82
+    },
+    {
+      "path": "web/src/lib/messageHistory.js",
+      "lines": 82
+    },
+    {
+      "path": "web/src/lib/musicBrainz.js",
+      "lines": 82
+    },
+    {
+      "path": "web/src/lib/networkHealthScore.test.js",
+      "lines": 82
+    },
+    {
+      "path": "client-ts/dist/batch-client.d.ts",
+      "lines": 81
+    },
+    {
+      "path": "scripts/check-python-client-quality.sh",
+      "lines": 81
+    },
+    {
+      "path": "web/src/components/Collections/CollectionAddItemModal.jsx",
+      "lines": 81
+    },
+    {
+      "path": "web/src/components/Collections/CollectionShareModal.jsx",
+      "lines": 81
+    },
+    {
+      "path": "web/src/components/TrafficTicker/TrafficTicker.css",
+      "lines": 81
+    },
+    {
+      "path": "web/src/lib/diagnosticBundle.js",
+      "lines": 81
+    },
+    {
+      "path": "web/src/lib/discoveryInboxReview.js",
+      "lines": 81
+    },
+    {
+      "path": "client-ts/src/errors.ts",
+      "lines": 80
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests/fixtures.rs",
+      "lines": 80
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime.rs",
+      "lines": 80
+    },
+    {
+      "path": "client-ts/dist/client.d.ts",
+      "lines": 79
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_application_contracts.rs",
+      "lines": 79
+    },
+    {
+      "path": "scripts/check-council-negative-space.sh",
+      "lines": 79
+    },
+    {
+      "path": "scripts/probe-natpmp-mapping.sh",
+      "lines": 79
+    },
+    {
+      "path": "web/src/components/System/Bridge/index.test.jsx",
+      "lines": 79
+    },
+    {
+      "path": "web/src/lib/realmSubjectIndexes.js",
+      "lines": 79
+    },
+    {
+      "path": "client-ts/dist/errors.js",
+      "lines": 78
+    },
+    {
+      "path": "crates/slskr/src/persistence_oauth.rs",
+      "lines": 78
+    },
+    {
+      "path": "web/src/lib/searchResultDeduplication.test.js",
+      "lines": 78
+    },
+    {
+      "path": "scripts/test-process-memory-guard.sh",
+      "lines": 77
+    },
+    {
+      "path": "web/src/lib/playerRatings.test.js",
+      "lines": 77
+    },
+    {
+      "path": "client-python/examples/basic_usage.py",
+      "lines": 76
+    },
+    {
+      "path": "client-ts/dist/websocket-client.d.ts",
+      "lines": 76
+    },
+    {
+      "path": "crates/slskr/src/config_parts/media_services.rs",
+      "lines": 76
+    },
+    {
+      "path": "scripts/check-web-audit.sh",
+      "lines": 76
+    },
+    {
+      "path": "scripts/scan-bug-council-candidates.sh",
+      "lines": 76
+    },
+    {
+      "path": "web/.tmp-slskr-crawl.mjs",
+      "lines": 76
+    },
+    {
+      "path": "web/src/components/Search/DownloadActionPreviewModal.jsx",
+      "lines": 76
+    },
+    {
+      "path": "web/src/components/System/Info/DiagnosticBundleModal.test.jsx",
+      "lines": 76
+    },
+    {
+      "path": "web/src/lib/coreServiceContracts.test.js",
+      "lines": 76
+    },
+    {
+      "path": "web/src/lib/streaming.test.js",
+      "lines": 76
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/live_soak_configuration.rs",
+      "lines": 75
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/service_policy.rs",
+      "lines": 75
+    },
+    {
+      "path": "scripts/check-bug-council-all-phases.sh",
+      "lines": 75
+    },
+    {
+      "path": "web/src/components/Search/DiscoveryGraphAtlas.jsx",
+      "lines": 75
+    },
+    {
+      "path": "web/src/lib/options.test.js",
+      "lines": 75
+    },
+    {
+      "path": "web/src/lib/servarrReadiness.test.js",
+      "lines": 75
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak.rs",
+      "lines": 74
+    },
+    {
+      "path": "scripts/check-rust-protocol-taint-lens.sh",
+      "lines": 74
+    },
+    {
+      "path": "scripts/check-webhook-outbound-policy.sh",
+      "lines": 74
+    },
+    {
+      "path": "web/src/lib/discoveryInbox.test.js",
+      "lines": 74
+    },
+    {
+      "path": "client-go/examples/batch_operations.go",
+      "lines": 73
+    },
+    {
+      "path": "crates/slskr/src/local_file_hash.rs",
+      "lines": 73
+    },
+    {
+      "path": "scripts/check-fixture-manifest.sh",
+      "lines": 73
+    },
+    {
+      "path": "scripts/check-npm-dependency-hygiene.sh",
+      "lines": 73
+    },
+    {
+      "path": "scripts/check-websocket-auth-coverage.sh",
+      "lines": 73
+    },
+    {
+      "path": "scripts/validate-changelog.sh",
+      "lines": 73
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreButton.jsx",
+      "lines": 73
+    },
+    {
+      "path": "web/src/components/Transfers/Transfers.css",
+      "lines": 73
+    },
+    {
+      "path": "web/src/lib/spotifyIntegration.test.js",
+      "lines": 73
+    },
+    {
+      "path": "scripts/check-rust-format.sh",
+      "lines": 72
+    },
+    {
+      "path": "scripts/check-storage-listing-pressure.sh",
+      "lines": 72
+    },
+    {
+      "path": "web/src/components/Search/SongIDEvidenceDetails.test.jsx",
+      "lines": 72
+    },
+    {
+      "path": "web/src/lib/acquisitionProfiles.js",
+      "lines": 72
+    },
+    {
+      "path": "web/src/lib/libraryHealth.js",
+      "lines": 72
+    },
+    {
+      "path": "web/src/lib/rooms.test.js",
+      "lines": 72
+    },
+    {
+      "path": "web/src/lib/tabStorage.js",
+      "lines": 72
+    },
+    {
+      "path": "crates/slskr/build.rs",
+      "lines": 71
+    },
+    {
+      "path": "crates/slskr/src/download_filter.rs",
+      "lines": 71
+    },
+    {
+      "path": "scripts/fetch-open-commons-fixtures.sh",
+      "lines": 71
+    },
+    {
+      "path": "scripts/parity_audit_protocol.py",
+      "lines": 71
+    },
+    {
+      "path": "scripts/store-copr-kerberos-openbao.sh",
+      "lines": 71
+    },
+    {
+      "path": "web/src/lib/chat.test.js",
+      "lines": 71
+    },
+    {
+      "path": "web/src/lib/usePolling.test.jsx",
+      "lines": 71
+    },
+    {
+      "path": "crates/slskr-protocol/tests/frames.rs",
+      "lines": 70
+    },
+    {
+      "path": "scripts/test-native-style-owners.py",
+      "lines": 70
+    },
+    {
+      "path": "vendor/mainline/src/rpc/info.rs",
+      "lines": 70
+    },
+    {
+      "path": "web/src/components/Search/SearchStatusIcon.jsx",
+      "lines": 70
+    },
+    {
+      "path": "web/src/lib/bridge.js",
+      "lines": 70
+    },
+    {
+      "path": "web/src/lib/session.js",
+      "lines": 70
+    },
+    {
+      "path": "web/src/lib/streaming.js",
+      "lines": 70
+    },
+    {
+      "path": "crates/slskr/src/controller_regex.rs",
+      "lines": 69
+    },
+    {
+      "path": "web/src/components/Users/User.jsx",
+      "lines": 69
+    },
+    {
+      "path": "web/src/lib/albumDecisionRules.test.js",
+      "lines": 69
+    },
+    {
+      "path": "web/src/lib/reports.test.js",
+      "lines": 69
+    },
+    {
+      "path": "web/src/lib/soulseekDiscovery.test.js",
+      "lines": 69
+    },
+    {
+      "path": "client-python/slskr/exceptions.py",
+      "lines": 68
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/indirect_transfer.rs",
+      "lines": 68
+    },
+    {
+      "path": "scripts/run-container-shutdown-smoke.sh",
+      "lines": 68
+    },
+    {
+      "path": "web/e2e/library.spec.ts",
+      "lines": 68
+    },
+    {
+      "path": "web/src/lib/searchActionPreview.test.js",
+      "lines": 68
+    },
+    {
+      "path": "web/src/lib/users.js",
+      "lines": 68
+    },
+    {
+      "path": "crates/slskr/src/session_runtime_owners/peer_connection.rs",
+      "lines": 67
+    },
+    {
+      "path": "dashboard/src/context/ApiContext.tsx",
+      "lines": 67
+    },
+    {
+      "path": "scripts/check-council-active-backlog.sh",
+      "lines": 67
+    },
+    {
+      "path": "web/e2e/harness/MultiPeerHarness.ts",
+      "lines": 67
+    },
+    {
+      "path": "web/src/components/System/Security/AdversarialSettings.test.jsx",
+      "lines": 67
+    },
+    {
+      "path": "vendor/mainline/src/rpc/config.rs",
+      "lines": 66
+    },
+    {
+      "path": "web/src/components/Rooms/Rooms.test.jsx",
+      "lines": 66
+    },
+    {
+      "path": "web/src/lib/automationActions.test.js",
+      "lines": 66
+    },
+    {
+      "path": "web/src/lib/options.js",
+      "lines": 66
+    },
+    {
+      "path": "crates/slskr-protocol/src/error.rs",
+      "lines": 65
+    },
+    {
+      "path": "web/src/components/Rooms/RoomUserList.jsx",
+      "lines": 65
+    },
+    {
+      "path": "web/src/lib/events.test.js",
+      "lines": 65
+    },
+    {
+      "path": "crates/slskr/src/listening_party_stream_state.rs",
+      "lines": 64
+    },
+    {
+      "path": "scripts/check-rust-dependency-hygiene.sh",
+      "lines": 64
+    },
+    {
+      "path": "web/src/lib/playerShortcuts.js",
+      "lines": 64
+    },
+    {
+      "path": "dashboard/src/pages/AdminPages.test.tsx",
+      "lines": 63
+    },
+    {
+      "path": "scripts/check-release-version-metadata.sh",
+      "lines": 63
+    },
+    {
+      "path": "scripts/check-web-ownership-inventory.sh",
+      "lines": 63
+    },
+    {
+      "path": "web/public/service-worker.js",
+      "lines": 63
+    },
+    {
+      "path": "web/src/lib/bridge.test.js",
+      "lines": 63
+    },
+    {
+      "path": "web/src/lib/runtimeCapabilities.test.js",
+      "lines": 63
+    },
+    {
+      "path": "scripts/check-council-loop.sh",
+      "lines": 62
+    },
+    {
+      "path": "web/src/components/Collections/CreateCollectionModal.jsx",
+      "lines": 62
+    },
+    {
+      "path": "client-python/examples/batch_operations.py",
+      "lines": 61
+    },
+    {
+      "path": "dashboard/src/components/Sidebar.test.tsx",
+      "lines": 61
+    },
+    {
+      "path": "scripts/check-plan-freshness.sh",
+      "lines": 61
+    },
+    {
+      "path": "scripts/check-proton-wg-labels.sh",
+      "lines": 61
+    },
+    {
+      "path": "scripts/collect-upstream-parity-delta.sh",
+      "lines": 61
+    },
+    {
+      "path": "web/src/components/System/Integrations/index.jsx",
+      "lines": 61
+    },
+    {
+      "path": "web/src/components/System/Shares/ShareTable.jsx",
+      "lines": 61
+    },
+    {
+      "path": "web/src/lib/searchState.test.js",
+      "lines": 61
+    },
+    {
+      "path": "web/src/registerServiceWorker.test.js",
+      "lines": 61
+    },
+    {
+      "path": "scripts/run-council-scan.sh",
+      "lines": 60
+    },
+    {
+      "path": "web/src/lib/users.test.js",
+      "lines": 60
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/native_action_projection.rs",
+      "lines": 59
+    },
+    {
+      "path": "crates/slskr/src/config_file_parts/filters_shares.rs",
+      "lines": 59
+    },
+    {
+      "path": "web/src/components/System/ExperienceSettings/index.test.jsx",
+      "lines": 59
+    },
+    {
+      "path": "web/src/lib/lidarr.js",
+      "lines": 59
+    },
+    {
+      "path": "web/src/lib/opinions.test.js",
+      "lines": 59
+    },
+    {
+      "path": "packaging/scripts/release-assets.sh",
+      "lines": 58
+    },
+    {
+      "path": "scripts/check-dev-tooling.sh",
+      "lines": 58
+    },
+    {
+      "path": "scripts/check-endpoint-parity-drift.sh",
+      "lines": 58
+    },
+    {
+      "path": "web/src/components/Messaging/BatchPrivateMessageModal.jsx",
+      "lines": 58
+    },
+    {
+      "path": "web/src/lib/searchItemId.js",
+      "lines": 58
+    },
+    {
+      "path": "crates/slskr-client/src/overlay.rs",
+      "lines": 57
+    },
+    {
+      "path": "dashboard/src/components/ErrorBoundary.tsx",
+      "lines": 57
+    },
+    {
+      "path": "scripts/council-source-digest.py",
+      "lines": 57
+    },
+    {
+      "path": "web/src/components/Player/Equalizer.test.jsx",
+      "lines": 57
+    },
+    {
+      "path": "web/src/components/Player/PlayerRatingControls.jsx",
+      "lines": 57
+    },
+    {
+      "path": "web/src/components/Player/usePlayerStreamSource.js",
+      "lines": 57
+    },
+    {
+      "path": "web/src/lib/http.js",
+      "lines": 57
+    },
+    {
+      "path": "crates/slskr/src/config_parts/projection.rs",
+      "lines": 56
+    },
+    {
+      "path": "crates/slskr/src/relay_state.rs",
+      "lines": 56
+    },
+    {
+      "path": "scripts/check-kubernetes-public-posture.sh",
+      "lines": 56
+    },
+    {
+      "path": "scripts/check-openapi-docs-drift.sh",
+      "lines": 56
+    },
+    {
+      "path": "test-data/slskr-test-fixtures/meta/fetch_media.sh",
+      "lines": 56
+    },
+    {
+      "path": "crates/slskr-protocol/tests/obfuscation.rs",
+      "lines": 55
+    },
+    {
+      "path": "scripts/check-audit-tooling.sh",
+      "lines": 55
+    },
+    {
+      "path": "scripts/check-council-freshness.sh",
+      "lines": 55
+    },
+    {
+      "path": "scripts/check-council-inventory-closure.sh",
+      "lines": 55
+    },
+    {
+      "path": "web/src/components/Search/List/SearchListRow.test.jsx",
+      "lines": 55
+    },
+    {
+      "path": "web/src/components/Shared/UserContextMenu.jsx",
+      "lines": 55
+    },
+    {
+      "path": "web/src/lib/fileReaders.test.js",
+      "lines": 55
+    },
+    {
+      "path": "web/src/lib/sourceProviders.test.js",
+      "lines": 55
+    },
+    {
+      "path": "flake.nix",
+      "lines": 54
+    },
+    {
+      "path": "scripts/check-rate-limit-proxy-policy.sh",
+      "lines": 54
+    },
+    {
+      "path": "web/src/lib/automationActions.js",
+      "lines": 54
+    },
+    {
+      "path": "dashboard/src/hooks/useLocalStorage.ts",
+      "lines": 53
+    },
+    {
+      "path": "web/src/components/System/Files/index.jsx",
+      "lines": 53
+    },
+    {
+      "path": "web/src/lib/savedSearchFilters.test.js",
+      "lines": 53
+    },
+    {
+      "path": "dashboard/src/hooks/useLocalStorage.test.tsx",
+      "lines": 52
+    },
+    {
+      "path": "scripts/check-aur-package-smoke.sh",
+      "lines": 52
+    },
+    {
+      "path": "vendor/mainline/src/common/immutable.rs",
+      "lines": 52
+    },
+    {
+      "path": "web/src/components/Shared/TooltipButton.jsx",
+      "lines": 52
+    },
+    {
+      "path": "web/src/lib/fileFingerprint.js",
+      "lines": 52
+    },
+    {
+      "path": "web/src/lib/tabStorage.test.js",
+      "lines": 52
+    },
+    {
+      "path": "crates/slskr/src/storage_directory_state.rs",
+      "lines": 51
+    },
+    {
+      "path": "scripts/store-live-interop-creds-openbao.sh",
+      "lines": 51
+    },
+    {
+      "path": "test-data/slskr-test-fixtures/meta/fetch_media.py",
+      "lines": 51
+    },
+    {
+      "path": "web/src/lib/soulseekDiscovery.js",
+      "lines": 51
+    },
+    {
+      "path": "crates/slskr/src/session_runtime.rs",
+      "lines": 50
+    },
+    {
+      "path": "crates/slskr-client/src/connection.rs",
+      "lines": 49
+    },
+    {
+      "path": "crates/slskr/src/record_list_filter.rs",
+      "lines": 49
+    },
+    {
+      "path": "dashboard/src/pages/Dashboard.test.tsx",
+      "lines": 49
+    },
+    {
+      "path": "scripts/check-csp-policy.sh",
+      "lines": 49
+    },
+    {
+      "path": "scripts/check-python-client-package.sh",
+      "lines": 49
+    },
+    {
+      "path": "scripts/test-check-docs-freshness.sh",
+      "lines": 49
+    },
+    {
+      "path": "web/src/lib/shares.js",
+      "lines": 49
+    },
+    {
+      "path": "web/src/components/System/Logs/index.test.jsx",
+      "lines": 48
+    },
+    {
+      "path": "web/src/components/System/Shares/ExclusionTable.jsx",
+      "lines": 48
+    },
+    {
+      "path": "web/src/lib/persistedJson.test.js",
+      "lines": 48
+    },
+    {
+      "path": "crates/slskr/src/file_transfer_runtime_owners/completed_permissions.rs",
+      "lines": 47
+    },
+    {
+      "path": "scripts/verify-open-commons-fixtures.sh",
+      "lines": 47
+    },
+    {
+      "path": "web/e2e/env.ts",
+      "lines": 47
+    },
+    {
+      "path": "web/src/lib/lidarr.test.js",
+      "lines": 47
+    },
+    {
+      "path": "web/src/lib/listeningParty.js",
+      "lines": 47
+    },
+    {
+      "path": "web/src/lib/searchItemId.test.js",
+      "lines": 47
+    },
+    {
+      "path": "web/src/lib/songid.test.js",
+      "lines": 47
+    },
+    {
+      "path": "scripts/build-native-styles.py",
+      "lines": 46
+    },
+    {
+      "path": "src/slskdN.VpnAgent/install.sh",
+      "lines": 46
+    },
+    {
+      "path": "web/src/components/Rooms/RoomJoinModal.test.jsx",
+      "lines": 46
+    },
+    {
+      "path": "web/src/lib/wishlist.test.js",
+      "lines": 46
+    },
+    {
+      "path": "scripts/run-proton-natpmp-command.sh",
+      "lines": 45
+    },
+    {
+      "path": "web/src/components/Player/visualizers/rustyMilkEngine.js",
+      "lines": 45
+    },
+    {
+      "path": "web/src/components/Pods/PortForwarding.test.jsx",
+      "lines": 45
+    },
+    {
+      "path": "web/src/lib/discoveryInboxReview.test.js",
+      "lines": 45
+    },
+    {
+      "path": "web/src/lib/shares.test.js",
+      "lines": 45
+    },
+    {
+      "path": "client-python/setup.py",
+      "lines": 44
+    },
+    {
+      "path": "vendor/mainline/src/lib.rs",
+      "lines": 44
+    },
+    {
+      "path": "web/src/components/System/Metrics/index.test.jsx",
+      "lines": 44
+    },
+    {
+      "path": "web/src/config.js",
+      "lines": 44
+    },
+    {
+      "path": "web/src/lib/fileReaders.js",
+      "lines": 44
+    },
+    {
+      "path": "web/src/lib/sourceProviders.js",
+      "lines": 44
+    },
+    {
+      "path": "web/src/registerServiceWorker.js",
+      "lines": 44
+    },
+    {
+      "path": "crates/slskr/src/cli_smoke_soak_owners/peer_probe_models.rs",
+      "lines": 43
+    },
+    {
+      "path": "web/src/components/Shared/ShrinkableDropdownButton.jsx",
+      "lines": 43
+    },
+    {
+      "path": "web/src/lib/listeningParty.test.js",
+      "lines": 43
+    },
+    {
+      "path": "web/src/components/Chat/ChatMenu.jsx",
+      "lines": 42
+    },
+    {
+      "path": "web/src/components/Users/Users.css",
+      "lines": 42
+    },
+    {
+      "path": "web/src/lib/playerShortcuts.test.js",
+      "lines": 42
+    },
+    {
+      "path": "web/src/lib/tasteRecommendations.js",
+      "lines": 42
+    },
+    {
+      "path": "crates/slskr/src/config_tests.rs",
+      "lines": 41
+    },
+    {
+      "path": "dashboard/src/App.test.tsx",
+      "lines": 41
+    },
+    {
+      "path": "scripts/build-rust-web.sh",
+      "lines": 41
+    },
+    {
+      "path": "scripts/check-compatibility-noop-documentation.sh",
+      "lines": 41
+    },
+    {
+      "path": "web/src/components/Chat/Chat.test.jsx",
+      "lines": 41
+    },
+    {
+      "path": "web/src/lib/downloadRequests.test.js",
+      "lines": 41
+    },
+    {
+      "path": "web/src/lib/messageHistory.test.js",
+      "lines": 41
+    },
+    {
+      "path": "scripts/start-proton-listener-soak.sh",
+      "lines": 40
+    },
+    {
+      "path": "web/src/lib/files.test.js",
+      "lines": 40
+    },
+    {
+      "path": "web/src/lib/quarantineJury.js",
+      "lines": 40
+    },
+    {
+      "path": "web/src/components/LoginForm.test.jsx",
+      "lines": 39
+    },
+    {
+      "path": "dashboard/src/lib/prometheus.ts",
+      "lines": 38
+    },
+    {
+      "path": "dashboard/src/pages/Monitoring.test.tsx",
+      "lines": 38
+    },
+    {
+      "path": "scripts/check-browser-token-persistence.sh",
+      "lines": 38
+    },
+    {
+      "path": "scripts/check-remediation-script-registry.sh",
+      "lines": 38
+    },
+    {
+      "path": "scripts/check-unsafe-blank-opens.sh",
+      "lines": 38
+    },
+    {
+      "path": "test-data/slskr-test-fixtures/meta/write_checksums.py",
+      "lines": 38
+    },
+    {
+      "path": "web/src/components/Shared/ShrinkableButton.jsx",
+      "lines": 38
+    },
+    {
+      "path": "web/src/lib/application.js",
+      "lines": 38
+    },
+    {
+      "path": "crates/slskr/src/private_gateway_owners/pod_request_models.rs",
+      "lines": 37
+    },
+    {
+      "path": "scripts/check-public-posture.sh",
+      "lines": 37
+    },
+    {
+      "path": "web/src/components/Search/List/SearchActionIcon.jsx",
+      "lines": 37
+    },
+    {
+      "path": "web/src/components/Shared/ErrorBoundary.jsx",
+      "lines": 37
+    },
+    {
+      "path": "web/src/components/System/Files/Explorer.test.jsx",
+      "lines": 37
+    },
+    {
+      "path": "dashboard/src/pages/Database.test.tsx",
+      "lines": 36
+    },
+    {
+      "path": "packaging/homebrew/Formula/slskr.rb",
+      "lines": 36
+    },
+    {
+      "path": "scripts/run-live-soak-24h.sh",
+      "lines": 36
+    },
+    {
+      "path": "web/src/components/Shared/ErrorBoundary.test.jsx",
+      "lines": 36
+    },
+    {
+      "path": "web/src/components/Player/PlayerToolButton.jsx",
+      "lines": 35
+    },
+    {
+      "path": "web/src/lib/opinions.js",
+      "lines": 35
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_dispatch_contracts.rs",
+      "lines": 34
+    },
+    {
+      "path": "scripts/check-typescript-client-package.sh",
+      "lines": 34
+    },
+    {
+      "path": "scripts/run-bug-council-all-phases.sh",
+      "lines": 34
+    },
+    {
+      "path": "web/src/components/Rooms/RoomMenu.jsx",
+      "lines": 34
+    },
+    {
+      "path": "web/src/components/Shared/FileList.test.jsx",
+      "lines": 34
+    },
+    {
+      "path": "client-ts/dist/errors.d.ts",
+      "lines": 33
+    },
+    {
+      "path": "client-ts/eslint.config.mjs",
+      "lines": 33
+    },
+    {
+      "path": "crates/slskr-protocol/src/obfuscation.rs",
+      "lines": 33
+    },
+    {
+      "path": "scripts/check-transfer-event-growth.sh",
+      "lines": 33
+    },
+    {
+      "path": "web/src/components/System/System.test.jsx",
+      "lines": 33
+    },
+    {
+      "path": "web/src/lib/songid.js",
+      "lines": 33
+    },
+    {
+      "path": "crates/slskr-web/src/web_tests.rs",
+      "lines": 32
+    },
+    {
+      "path": "web/src/components/ShareGroups/ShareGroups.test.jsx",
+      "lines": 32
+    },
+    {
+      "path": "web/src/components/Shares/SharedWithMe.test.jsx",
+      "lines": 32
+    },
+    {
+      "path": "web/src/lib/discoveryGraphApi.test.js",
+      "lines": 32
+    },
+    {
+      "path": "web/src/lib/events.js",
+      "lines": 32
+    },
+    {
+      "path": "web/src/lib/fileFingerprint.test.js",
+      "lines": 32
+    },
+    {
+      "path": "web/src/lib/safeOpen.test.js",
+      "lines": 32
+    },
+    {
+      "path": "dashboard/src/lib/prometheus.test.ts",
+      "lines": 31
+    },
+    {
+      "path": "packaging/synology-spk/build-spk.sh",
+      "lines": 31
+    },
+    {
+      "path": "scripts/check-shell-script-hygiene.sh",
+      "lines": 31
+    },
+    {
+      "path": "scripts/parity_audit_config.py",
+      "lines": 31
+    },
+    {
+      "path": "web/src/components/Shared/CodeEditor.jsx",
+      "lines": 31
+    },
+    {
+      "path": "web/src/components/Shared/ErrorSegment.jsx",
+      "lines": 31
+    },
+    {
+      "path": "web/src/lib/files.js",
+      "lines": 31
+    },
+    {
+      "path": "crates/slskr-client/src/lib.rs",
+      "lines": 30
+    },
+    {
+      "path": "dashboard/vite.config.ts",
+      "lines": 30
+    },
+    {
+      "path": "scripts/test-check-council-freshness.sh",
+      "lines": 30
+    },
+    {
+      "path": "web/src/lib/safeOpen.js",
+      "lines": 30
+    },
+    {
+      "path": "client-python/slskr/__init__.py",
+      "lines": 29
+    },
+    {
+      "path": "client-ts/dist/index.js",
+      "lines": 29
+    },
+    {
+      "path": "web/scripts/report-rustymilk-compatibility.mjs",
+      "lines": 29
+    },
+    {
+      "path": "web/src/lib/clipboard.test.js",
+      "lines": 29
+    },
+    {
+      "path": "web/src/lib/downloadRequests.js",
+      "lines": 29
+    },
+    {
+      "path": "web/src/lib/quarantineJury.test.js",
+      "lines": 29
+    },
+    {
+      "path": "web/src/components/Player/SpectrumAnalyzer.test.jsx",
+      "lines": 28
+    },
+    {
+      "path": "web/src/index.jsx",
+      "lines": 28
+    },
+    {
+      "path": "web/src/lib/destinations.js",
+      "lines": 28
+    },
+    {
+      "path": "crates/slskr-web/src/web_action_owners/search_action_models.rs",
+      "lines": 27
+    },
+    {
+      "path": "scripts/validate-release-notes.sh",
+      "lines": 27
+    },
+    {
+      "path": "web/src/lib/federationDiagnostics.test.js",
+      "lines": 27
+    },
+    {
+      "path": "packaging/scripts/generate-aur-srcinfo.sh",
+      "lines": 26
+    },
+    {
+      "path": "scripts/process-memory-guard-active.sh",
+      "lines": 26
+    },
+    {
+      "path": "web/playwright.config.ts",
+      "lines": 26
+    },
+    {
+      "path": "web/src/components/Player/PlayCollectionItemButton.jsx",
+      "lines": 26
+    },
+    {
+      "path": "web/src/lib/optionalApi.test.js",
+      "lines": 26
+    },
+    {
+      "path": "web/src/semantic-ui-react/index.test.jsx",
+      "lines": 26
+    },
+    {
+      "path": "dashboard/src/components/ErrorBoundary.test.tsx",
+      "lines": 25
+    },
+    {
+      "path": "scripts/check-rust-protocol-adversarial-corpus.sh",
+      "lines": 25
+    },
+    {
+      "path": "scripts/test-check-plan-freshness.sh",
+      "lines": 25
+    },
+    {
+      "path": "web/src/lib/identity.js",
+      "lines": 25
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/quarantine_verdict_fixture.rs",
+      "lines": 23
+    },
+    {
+      "path": "dashboard/src/index.css",
+      "lines": 23
+    },
+    {
+      "path": "web/src/components/Shared/PlaceholderSegment.jsx",
+      "lines": 23
+    },
+    {
+      "path": "web/src/components/System/MediaCore/PodWorkflowNotice.jsx",
+      "lines": 23
+    },
+    {
+      "path": "web/src/lib/nowPlaying.js",
+      "lines": 23
+    },
+    {
+      "path": "web/src/lib/userNotes.js",
+      "lines": 23
+    },
+    {
+      "path": "dashboard/eslint.config.js",
+      "lines": 22
+    },
+    {
+      "path": "web/index.html",
+      "lines": 22
+    },
+    {
+      "path": "web/src/lib/server.js",
+      "lines": 22
+    },
+    {
+      "path": "crates/slskr-client/tests/version.rs",
+      "lines": 21
+    },
+    {
+      "path": "web/public/index.html",
+      "lines": 21
+    },
+    {
+      "path": "web/src/lib/sourceFeedImports.js",
+      "lines": 21
+    },
+    {
+      "path": "web/src/components/Shared/LoaderSegment.jsx",
+      "lines": 20
+    },
+    {
+      "path": "web/src/lib/errors.test.js",
+      "lines": 20
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6.rs",
+      "lines": 19
+    },
+    {
+      "path": "web/src/components/System/Files/Files.css",
+      "lines": 19
+    },
+    {
+      "path": "web/src/lib/errors.js",
+      "lines": 19
+    },
+    {
+      "path": "web/src/lib/mesh.js",
+      "lines": 19
+    },
+    {
+      "path": "web/src/lib/spotifyIntegration.js",
+      "lines": 19
+    },
+    {
+      "path": "web/src/lib/telemetry.js",
+      "lines": 19
+    },
+    {
+      "path": "web/src/lib/util.test.js",
+      "lines": 19
+    },
+    {
+      "path": "crates/slskr-protocol/src/lib.rs",
+      "lines": 18
+    },
+    {
+      "path": "crates/slskr/src/focused_controller_tests.rs",
+      "lines": 18
+    },
+    {
+      "path": "web/scripts/measure-rustymilk-performance.mjs",
+      "lines": 18
+    },
+    {
+      "path": "web/src/lib/token.js",
+      "lines": 18
+    },
+    {
+      "path": "scripts/test-check-fixture-manifest.sh",
+      "lines": 17
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_2.rs",
+      "lines": 16
+    },
+    {
+      "path": "docs/dev/council-calibration/rust-protocol-taint-bad.rs",
+      "lines": 16
+    },
+    {
+      "path": "packaging/scripts/push-aur-repo.sh",
+      "lines": 16
+    },
+    {
+      "path": "packaging/scripts/setup-aur-ssh.sh",
+      "lines": 16
+    },
+    {
+      "path": "vendor/mainline/src/common.rs",
+      "lines": 16
+    },
+    {
+      "path": "web/src/components/Shared/Logo.jsx",
+      "lines": 16
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreSimilarityAnalysisPanel.jsx",
+      "lines": 16
+    },
+    {
+      "path": "web/src/components/Wishlist/wishlistHooks.js",
+      "lines": 16
+    },
+    {
+      "path": "web/src/config.test.js",
+      "lines": 16
+    },
+    {
+      "path": "crates/slskr/src/controller_tests/full_relay_differential.rs",
+      "lines": 15
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_telemetry.rs",
+      "lines": 15
+    },
+    {
+      "path": "web/src/lib/optionalApi.js",
+      "lines": 15
+    },
+    {
+      "path": "scripts/fetch-test-fixtures.sh",
+      "lines": 14
+    },
+    {
+      "path": "web/src/components/System/MediaCore/MediaCoreDescriptorManagementPanel.jsx",
+      "lines": 14
+    },
+    {
+      "path": "web/src/lib/useMountedRef.js",
+      "lines": 14
+    },
+    {
+      "path": "web/src/setupTests.js",
+      "lines": 14
+    },
+    {
+      "path": "client-ts/dist/index.d.ts",
+      "lines": 13
+    },
+    {
+      "path": "client-ts/src/index.ts",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr-client/src/version.rs",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr-web/static/index.html",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_1.rs",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_3.rs",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_4.rs",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_5.rs",
+      "lines": 13
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_7.rs",
+      "lines": 13
+    },
+    {
+      "path": "docs/dev/council-calibration/rust-protocol-taint-good.rs",
+      "lines": 13
+    },
+    {
+      "path": "scripts/check-release-package.sh",
+      "lines": 13
+    },
+    {
+      "path": "scripts/run-universal-lifecycle-matrix.sh",
+      "lines": 13
+    },
+    {
+      "path": "web/src/components/Search/DiscoveryGraphAtlasPage.jsx",
+      "lines": 13
+    },
+    {
+      "path": "web/src/lib/pathEncoding.js",
+      "lines": 13
+    },
+    {
+      "path": "dashboard/index.html",
+      "lines": 12
+    },
+    {
+      "path": "web/src/components/Shared/Div.jsx",
+      "lines": 11
+    },
+    {
+      "path": "web/src/components/Shared/Switch.jsx",
+      "lines": 11
+    },
+    {
+      "path": "web/src/components/Shared/index.js",
+      "lines": 11
+    },
+    {
+      "path": "dashboard/src/main.tsx",
+      "lines": 10
+    },
+    {
+      "path": "packaging/scripts/validate-aur-pkgbuild-hashes.sh",
+      "lines": 10
+    },
+    {
+      "path": "scripts/check-reproducibility-metadata.sh",
+      "lines": 10
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_6_admin_discovery.rs",
+      "lines": 9
+    },
+    {
+      "path": "web/src/lib/relay.js",
+      "lines": 9
+    },
+    {
+      "path": "web/src/lib/clipboard.js",
+      "lines": 8
+    },
+    {
+      "path": "crates/slskr/src/route_dispatch_group_0.rs",
+      "lines": 7
+    },
+    {
+      "path": "dashboard/tailwind.config.js",
+      "lines": 7
+    },
+    {
+      "path": "packaging/scripts/checkout-aur-repo.sh",
+      "lines": 7
+    },
+    {
+      "path": "web/src/lib/externalVisualizer.js",
+      "lines": 7
+    },
+    {
+      "path": "web/src/lib/federationDiagnostics.js",
+      "lines": 7
+    },
+    {
+      "path": "client-ts/dist/types.js",
+      "lines": 6
+    },
+    {
+      "path": "dashboard/postcss.config.js",
+      "lines": 6
+    },
+    {
+      "path": "client-ts/jest.config.cjs",
+      "lines": 5
+    },
+    {
+      "path": "packaging/chocolatey/tools/chocolateyinstall.ps1",
+      "lines": 5
+    },
+    {
+      "path": "scripts/run-council-bughunt.sh",
+      "lines": 5
+    },
+    {
+      "path": "web/src/components/AppContext.js",
+      "lines": 5
+    },
+    {
+      "path": "web/src/components/Shared/Nbsp.jsx",
+      "lines": 5
+    },
+    {
+      "path": "web/src/components/System/PaneGroups/DiagnosticPanes.jsx",
+      "lines": 5
+    },
+    {
+      "path": "web/src/components/System/PaneGroups/NetworkPanes.jsx",
+      "lines": 4
+    },
+    {
+      "path": "crates/slskr-web/static/slskr_web_bootstrap.js",
+      "lines": 3
+    },
+    {
+      "path": "crates/slskr/src/bin/slskr-bounded-differential.rs",
+      "lines": 3
+    },
+    {
+      "path": "crates/slskr/src/main.rs",
+      "lines": 3
+    },
+    {
+      "path": "packaging/truenas-scale/charts/slskr/ci-test.sh",
+      "lines": 3
+    },
+    {
+      "path": "web/src/components/PortForwarding/PortForwarding.jsx",
+      "lines": 3
+    },
+    {
+      "path": "web/src/components/System/PaneGroups/AutomationPanes.jsx",
+      "lines": 3
+    },
+    {
+      "path": "web/src/components/System/PaneGroups/OverviewPanes.jsx",
+      "lines": 3
+    },
+    {
+      "path": "web/src/components/System/PaneGroups/AdvancedPanes.jsx",
+      "lines": 2
+    },
+    {
+      "path": "web/src/components/System/PaneGroups/SecurityPanes.jsx",
+      "lines": 2
+    }
+  ]
+}

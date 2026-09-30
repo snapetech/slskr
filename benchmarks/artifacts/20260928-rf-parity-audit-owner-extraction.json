@@ -1,0 +1,823 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "a697bdb3db3af68bd0f8b74f29bc0119c97bef80",
+  "source": "scripts/audit-parity-manifest.py",
+  "originalBytes": 153610,
+  "originalLines": 3589,
+  "originalSha256": "371d670dc8de893828ec95e3bce8c0ee4d3cfe27f83052629a8c0bfdddd7f1e8",
+  "exactSourceReconstruction": true,
+  "functionBodiesMatchOriginalAST": true,
+  "constantDeclarationsMatchOriginalAST": true,
+  "preservedFunctions": 41,
+  "rootFunctionBindings": [
+    "api_entries",
+    "bounded_slskr_test_command",
+    "config_entries",
+    "controller_api_ledger",
+    "database_domains",
+    "feature_family",
+    "file_lifecycle_entries",
+    "file_lifecycle_ledger",
+    "file_write_domains",
+    "fresh_json_evidence_paths",
+    "frozen_slskdn_expected_failure_checks",
+    "frozen_slskdn_transport_not_applicable_contracts",
+    "guarded_process_command",
+    "live_interop_entries",
+    "live_interop_features",
+    "live_interop_ledger",
+    "live_interop_not_applicable_reason",
+    "main",
+    "operator_entries",
+    "operator_families",
+    "operator_packaging_ledger",
+    "persistence_entries",
+    "persistence_lifecycle_ledger",
+    "protocol_behaviors_ledger",
+    "run_json",
+    "run_logged",
+    "security_authorization_ledger",
+    "security_component_entries",
+    "security_components",
+    "security_control_ledger",
+    "strict_universal_failures",
+    "summarize",
+    "transport_capability_evidence_failures",
+    "universal_target_ui_comparison_failures",
+    "universal_transport_failures",
+    "universal_ui_scenario_failures",
+    "validate_live_interop_mapping_contracts",
+    "validate_live_interop_scope_contracts",
+    "validate_universal_transport_scope_contracts",
+    "webui_entries",
+    "webui_workflow_ledger"
+  ],
+  "rootConstantBindings": [
+    "CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX",
+    "CONTROLLER_API_TEST_FEATURES",
+    "EXPECTED",
+    "FILE_LIFECYCLE_DIFFERENTIAL_TEST_PREFIX",
+    "LIVE_INTEROP_EXPECTED_FAILURE_DETAIL_TOKENS",
+    "LIVE_INTEROP_LOCAL_CONTROLLER_FEATURES",
+    "LIVE_INTEROP_PROOF_REQUIREMENTS",
+    "LIVE_INTEROP_REQUIRED_DETAIL_TOKENS",
+    "PERSISTENCE_DIFFERENTIAL_TEST_PREFIX",
+    "PROTOCOL_DIFFERENTIAL_TEST_PREFIX",
+    "REACT_WEB_UI_CASE_COUNT",
+    "REACT_WEB_UI_ROUTE_COUNT",
+    "SECURITY_AUTHORIZATION_TEST",
+    "SECURITY_CONTROL_CASES",
+    "SECURITY_CONTROL_DIFFERENTIAL_TEST_PREFIX",
+    "UNIVERSAL_BIDIRECTIONAL_TRANSPORTS",
+    "UNIVERSAL_BIDIRECTIONAL_TRANSPORT_TARGETS",
+    "UNIVERSAL_LIFECYCLE_CHECK",
+    "UNIVERSAL_LIFECYCLE_SCENARIOS",
+    "UNIVERSAL_TRANSPORT_LIFECYCLE_DETAIL_TOKENS",
+    "UNIVERSAL_TRANSPORT_LIFECYCLE_REQUIREMENTS",
+    "UNIVERSAL_TRANSPORT_TARGETS",
+    "UNIVERSAL_UI_SCENARIOS",
+    "UNIVERSAL_UI_WORKFLOWS",
+    "UNMATERIALIZED_WORKSTREAMS"
+  ],
+  "registryLines": 605,
+  "registrySha256": "48da2bb7dbdc543980fb9a55451e4c6413219d451485bed7920e76644777e86a",
+  "owners": {
+    "scripts/parity_audit_api.py": {
+      "lines": 251,
+      "sha256": "e1cada7ec013973a56ba574bb545eb56e63636eb9c1b15858944522050e367c7"
+    },
+    "scripts/parity_audit_completeness.py": {
+      "lines": 239,
+      "sha256": "28a110e3dfaa85114c22f3c5415ee12b645a874971a9442ae863321c074c67bc"
+    },
+    "scripts/parity_audit_config.py": {
+      "lines": 31,
+      "sha256": "444dbcb024310da479d735287a5918a1f258e2fd399d3f095c9718a3ce8751b0"
+    },
+    "scripts/parity_audit_files.py": {
+      "lines": 182,
+      "sha256": "0bbbe5ec9e62823b138ef3e8c2306114a67a3f41aa2a9ee96505408f388042aa"
+    },
+    "scripts/parity_audit_frozen_transport.py": {
+      "lines": 379,
+      "sha256": "58d0d0a0aa7659f077dc30d575d75c942b215feab2e78380ecc5c8aedc78d1d8"
+    },
+    "scripts/parity_audit_live_catalog.py": {
+      "lines": 225,
+      "sha256": "6be36a6bd303a87de61b85bc514e35d8414b363899b37181af83e32262cf71bd"
+    },
+    "scripts/parity_audit_live_evidence.py": {
+      "lines": 161,
+      "sha256": "f2004ef777d7acc8de1c96c4eb387fb032fe30340d3da62f4b12093710c7e73d"
+    },
+    "scripts/parity_audit_operator.py": {
+      "lines": 134,
+      "sha256": "6d18e4ec4c45293db11f9fd5871481e87893e11cd3834bae0f690690410a7ed4"
+    },
+    "scripts/parity_audit_persistence.py": {
+      "lines": 148,
+      "sha256": "ab793e54665554f1b876176ac0dcbe670451fdee301a8c611ca857cbe423362c"
+    },
+    "scripts/parity_audit_process.py": {
+      "lines": 106,
+      "sha256": "199a1a875817baee2d3017243bdbca6167d546dabfcc1715677fb760ebe5e9e8"
+    },
+    "scripts/parity_audit_protocol.py": {
+      "lines": 71,
+      "sha256": "0f2d121f31775816b887c46777ba4f4b01089c535c47047aa87298ac0817eaaa"
+    },
+    "scripts/parity_audit_security.py": {
+      "lines": 119,
+      "sha256": "886454775805afc8b7bb9ad76e131067f981626df5fc24c98221bc0be3c48299"
+    },
+    "scripts/parity_audit_shared.py": {
+      "lines": 405,
+      "sha256": "95f6ee27cde9a55d75040c8bcf410ac583082898865c8feef21f21b99b7e28bb"
+    },
+    "scripts/parity_audit_transport.py": {
+      "lines": 415,
+      "sha256": "c881ef557f8e2f853ef7a88cb0bdc791139da511260e6b88389db439c429b975"
+    },
+    "scripts/parity_audit_ui_evidence.py": {
+      "lines": 197,
+      "sha256": "2f6909a794df7f9dece6b8f85f4d876574d9eb6c793aa15511a89cd8539cfe7e"
+    },
+    "scripts/parity_audit_webui.py": {
+      "lines": 256,
+      "sha256": "5930470cdf69616fdc19808ce76f2bd8ba04700169bb756289975461a47785bc"
+    }
+  },
+  "items": [
+    {
+      "kind": "Expr",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 276,
+      "originalSha256": "b9c66de776e392c2393ee509b2f7fee7f7a3e1b4bf7b2c76b6761c4142308ed4"
+    },
+    {
+      "kind": "ImportFrom",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 36,
+      "originalSha256": "6c9bf1ce797b702fbbc05d614b8a0aea025095cb861e4da97f6e50b7db903078"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 17,
+      "originalSha256": "90bab10a59fb590614c0ddd6dbb75ce7f29c20c5ea8e7ed1231d5c8f010bc960"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 19,
+      "originalSha256": "2da054a6a62e1fafcd9164dbd3b7683f7320ebcf420bc338651f92f1f766c45d"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 11,
+      "originalSha256": "f7a754565b6b14d2483901fcd1ae572405fe80395bcf3deaa7843e32fc2a88d7"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 12,
+      "originalSha256": "55623722f3a716b73b40bd146a4a922d149dd6e93cf504b702087a67c354ed43"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 10,
+      "originalSha256": "b103b3a71cd59b3d629289c0b87a3fc6cd46d9e5d423fe4686f8661735ff167b"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 10,
+      "originalSha256": "f517d6b053944ebb1edfa5d084969fa784789cfe5528eb3cbab83427733208c1"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 14,
+      "originalSha256": "f66c526e79ba708a9f3d10edbfeaafaca9461e0dec02f35b3643813b2492b420"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 18,
+      "originalSha256": "51fb82e631da1ad4601b6eb0680fdf522b8d498c85382f7601aa0d97124d6193"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 11,
+      "originalSha256": "04bf7829d19865d6ba42b938e6d2c993a6433c2dec9f738876e3fc6bf33d336e"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 16,
+      "originalSha256": "20839fe7d56be4727032b2efd5144c8bdb6d9de8b8e7f88435ac7fadb643b4d6"
+    },
+    {
+      "kind": "Import",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 12,
+      "originalSha256": "b59783cdf9caefaf261aad09e25bfffd6ff62b26541a7ccec7997170b3c2bc7a"
+    },
+    {
+      "kind": "ImportFrom",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 25,
+      "originalSha256": "38644052f8636d8ae5f3cbc9acb58cebc95280b0cf83e73cf2e473f61c40439c"
+    },
+    {
+      "kind": "ImportFrom",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 23,
+      "originalSha256": "09e9864195b55f6a4320c42c495963d448c6f33a54952eb9054038fe337b145b"
+    },
+    {
+      "kind": "ImportFrom",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 33,
+      "originalSha256": "b4910a93ba1d7b8ce1ecfcde6f0107909529d3ebbd74ad5191454dbd6a931a4e"
+    },
+    {
+      "kind": "ImportFrom",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 72,
+      "originalSha256": "a5c5583c47f964dca832407ae5ec40403080aae5e1305227cf7f70249ac91a22"
+    },
+    {
+      "kind": "ImportFrom",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 236,
+      "originalSha256": "99f910ae5cbe7e04d3c68e9ecbb17153a1d10b034a85ddebde917bb56f387feb"
+    },
+    {
+      "kind": "Assign",
+      "name": "EXPECTED",
+      "owner": "parity_audit_shared",
+      "originalBytes": 505,
+      "originalSha256": "5d07ea5b7d8cf6838769a31b8210b819725aacb1dab911515109bd0d789232dd"
+    },
+    {
+      "kind": "Assign",
+      "name": "REACT_WEB_UI_ROUTE_COUNT",
+      "owner": "parity_audit_shared",
+      "originalBytes": 31,
+      "originalSha256": "95bde76611203deb2f75012a54424019ec8a988c3a277ab3ee2ea17e85c4d9db"
+    },
+    {
+      "kind": "Assign",
+      "name": "REACT_WEB_UI_CASE_COUNT",
+      "owner": "parity_audit_shared",
+      "originalBytes": 55,
+      "originalSha256": "2331e1c1b6afd3f40f2cbf34bb3f615fd778d0a27a13b938898920ce0071ef32"
+    },
+    {
+      "kind": "AnnAssign",
+      "name": "UNMATERIALIZED_WORKSTREAMS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 55,
+      "originalSha256": "b23df82132a12db5a5ec88609e4dc21458f7d51df7c61000b459d2ffb5c77963"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_BIDIRECTIONAL_TRANSPORTS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 402,
+      "originalSha256": "b545a6d25b60064f99ea970c28cdb1204ce41aaea69979404608c918b0e8306d"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_TRANSPORT_TARGETS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 61,
+      "originalSha256": "5ac3c6cd14a972967dfe2400be0df66f14a096038092b0f083e5c0aeab642446"
+    },
+    {
+      "kind": "AnnAssign",
+      "name": "UNIVERSAL_BIDIRECTIONAL_TRANSPORT_TARGETS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 909,
+      "originalSha256": "a39860ca7803a8e9f0732b7ee05dd3a23e13f3b30986b0be2dab88eb9c07288e"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_LIFECYCLE_CHECK",
+      "owner": "parity_audit_shared",
+      "originalBytes": 63,
+      "originalSha256": "c54a6a6d1e58bf6b0eedd73c054407b3fabe3802c718b87353dc588274e47f57"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_LIFECYCLE_SCENARIOS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 287,
+      "originalSha256": "f643fff367b3d72d527c752880fcc2d9005b834da1c71f8ee0fa4ec5216e423e"
+    },
+    {
+      "kind": "AnnAssign",
+      "name": "UNIVERSAL_TRANSPORT_LIFECYCLE_REQUIREMENTS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 286,
+      "originalSha256": "13c4171b8d03db718c702d67b440f6e895f6224467f02a3d4caa8dd9737032ea"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_TRANSPORT_LIFECYCLE_DETAIL_TOKENS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 193,
+      "originalSha256": "2c3fe965b3d3d57382bc06087d738ceefd70f2d70e0aaeed8ce642246235b7d5"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_UI_SCENARIOS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 202,
+      "originalSha256": "0e5e172c8f252b095d492778eb8894c2d07c01e73fe4d3e357918085e5105938"
+    },
+    {
+      "kind": "Assign",
+      "name": "UNIVERSAL_UI_WORKFLOWS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 216,
+      "originalSha256": "d97aa81cfc6c8ba0b4c2147c32d778249a15c8c2d4f879cd053b22aa64211a5c"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "run_json",
+      "owner": "parity_audit_process",
+      "originalBytes": 321,
+      "originalSha256": "17f6c2e126f0aac4c2c36e1f36d769c918256f70a2e533ccec91af619e7b22b8"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "run_logged",
+      "owner": "parity_audit_process",
+      "originalBytes": 797,
+      "originalSha256": "8d0890e675687cdc6d4a64988f7c92705cb8b9daa401774866d5b7d94e450f87"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "guarded_process_command",
+      "owner": "parity_audit_process",
+      "originalBytes": 336,
+      "originalSha256": "595bb81ab243f4b06498e626f176b170f68ca82f84b7ce59867423759b71c6e9"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "bounded_slskr_test_command",
+      "owner": "parity_audit_process",
+      "originalBytes": 783,
+      "originalSha256": "6d35fa15468088868b76f054b43293cee09863aef6638dd51eab9eab08848d39"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "fresh_json_evidence_paths",
+      "owner": "parity_audit_process",
+      "originalBytes": 684,
+      "originalSha256": "39b572070acca0b835185278e26ef0c8861f87e23e37acb034bedcb238cac7ea"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "feature_family",
+      "owner": "parity_audit_process",
+      "originalBytes": 331,
+      "originalSha256": "2040261055bb9bc0cedeed16a7d438af13b89a4121f13c92b896690a70b54291"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "config_entries",
+      "owner": "parity_audit_config",
+      "originalBytes": 988,
+      "originalSha256": "e20335eb3f9ae2b39c1cb825e1fe041f62283174eadc5d86e1c089cbb14cb720"
+    },
+    {
+      "kind": "Assign",
+      "name": "SECURITY_AUTHORIZATION_TEST",
+      "owner": "parity_audit_shared",
+      "originalBytes": 167,
+      "originalSha256": "3a028413f0b928519e9a53782d94dbb5b2c954e185338b8ea9a2dbe67ea33f7b"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "security_authorization_ledger",
+      "owner": "parity_audit_api",
+      "originalBytes": 1766,
+      "originalSha256": "6736d722b2f79a8d47794659361141d66001d8336c30bcca37283d21f851d58d"
+    },
+    {
+      "kind": "Assign",
+      "name": "CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX",
+      "owner": "parity_audit_shared",
+      "originalBytes": 75,
+      "originalSha256": "8624a919adbf6a76d82cd8827aca3166f0f78ab25ce6f96fc60a6b5de95d8e47"
+    },
+    {
+      "kind": "Assign",
+      "name": "CONTROLLER_API_TEST_FEATURES",
+      "owner": "parity_audit_shared",
+      "originalBytes": 187,
+      "originalSha256": "94e98bebc4619d3a6d8cc3e2ea4c4d4cb97316d23d23ca5ee1e7dee494a694a8"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "controller_api_ledger",
+      "owner": "parity_audit_api",
+      "originalBytes": 4535,
+      "originalSha256": "446393cb8ab9884469060b1103ea0f32122b4a7c9e172227b9e6c55ce30b6ee8"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "api_entries",
+      "owner": "parity_audit_api",
+      "originalBytes": 3349,
+      "originalSha256": "c08e83bb3243eb2386674143a42d5abc7785cf975fea81237151366e69862d74"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "webui_workflow_ledger",
+      "owner": "parity_audit_webui",
+      "originalBytes": 7418,
+      "originalSha256": "42472f59bc44ad352d6c81a93f44ffef89b1ef9287f723d1bf6466510013cb3b"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "webui_entries",
+      "owner": "parity_audit_webui",
+      "originalBytes": 3474,
+      "originalSha256": "57b8722450ec247668904f8248b459f7c14ca25e945abbb45a15ec89ddc82e9e"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "database_domains",
+      "owner": "parity_audit_persistence",
+      "originalBytes": 1421,
+      "originalSha256": "9cbbc7c434b2619b5468f89e7f3926cde864a2f0bc35110562ee69fe0a78dcea"
+    },
+    {
+      "kind": "Assign",
+      "name": "PERSISTENCE_DIFFERENTIAL_TEST_PREFIX",
+      "owner": "parity_audit_shared",
+      "originalBytes": 79,
+      "originalSha256": "0bc77f0c3291b6b899ab3faf7041bfe50c1d106a5bb3748f0221ed37d3371a1a"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "persistence_lifecycle_ledger",
+      "owner": "parity_audit_persistence",
+      "originalBytes": 1785,
+      "originalSha256": "991ddf29be45572f0305cae1006cb691048e99fab950d7caaa1a80327311e9ec"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "persistence_entries",
+      "owner": "parity_audit_persistence",
+      "originalBytes": 2091,
+      "originalSha256": "9a59d8ae34aa66159dd430f339a14f61c700563d69327bc281f01c17838f4583"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "file_write_domains",
+      "owner": "parity_audit_files",
+      "originalBytes": 750,
+      "originalSha256": "eaad7970388e821107d6973141bd9315a7a562a7f61322569586526495b51695"
+    },
+    {
+      "kind": "Assign",
+      "name": "FILE_LIFECYCLE_DIFFERENTIAL_TEST_PREFIX",
+      "owner": "parity_audit_shared",
+      "originalBytes": 75,
+      "originalSha256": "b97fd6971afeefaf828b56ee5e35aac938011e2fcb8e4528c1da5ce597148a40"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "file_lifecycle_ledger",
+      "owner": "parity_audit_files",
+      "originalBytes": 1491,
+      "originalSha256": "f3131047214834c5f4337e1db9d088b446e403f3306a5d85e8dd763f08a338a0"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "file_lifecycle_entries",
+      "owner": "parity_audit_files",
+      "originalBytes": 4447,
+      "originalSha256": "82bdae677e7ae3d6b8ed216bd808f4d9c043ed46195a5490dac3ce588f4d6bb7"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "security_components",
+      "owner": "parity_audit_security",
+      "originalBytes": 462,
+      "originalSha256": "24c501bea0ff5bcbec8af98b024cfbe8b07d9d76247b00d77775d17bc316af6b"
+    },
+    {
+      "kind": "Assign",
+      "name": "SECURITY_CONTROL_DIFFERENTIAL_TEST_PREFIX",
+      "owner": "parity_audit_shared",
+      "originalBytes": 80,
+      "originalSha256": "ca44171641496d828b8b6e76a12bda269f4b4766ff19d4859b23abed59011610"
+    },
+    {
+      "kind": "Assign",
+      "name": "SECURITY_CONTROL_CASES",
+      "owner": "parity_audit_shared",
+      "originalBytes": 262,
+      "originalSha256": "adba1cc2dfe5d09c23a6f32d280c05473c7f28f75dcb7598991b6db5c0c60e93"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "security_control_ledger",
+      "owner": "parity_audit_security",
+      "originalBytes": 1527,
+      "originalSha256": "1bc0cad7431e92bce0e52a7860e279af3633643874c5d64b1429b661ead10aa0"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "security_component_entries",
+      "owner": "parity_audit_security",
+      "originalBytes": 1942,
+      "originalSha256": "65282b3ce452782a97ccaf4b9ad6fd068cee81ccc6d2cb957ba433a6955d4cb1"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "operator_families",
+      "owner": "parity_audit_operator",
+      "originalBytes": 1520,
+      "originalSha256": "5c55b4ed6802451a3e831a543146739e0203a5b3c5075e1656c3ea25895cf6a4"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "operator_packaging_ledger",
+      "owner": "parity_audit_operator",
+      "originalBytes": 1259,
+      "originalSha256": "7949d01f311067f041a8934beaf72c86d1720991dd34c6730b30f022f638dc29"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "operator_entries",
+      "owner": "parity_audit_operator",
+      "originalBytes": 2204,
+      "originalSha256": "49eb222a65bda08d1bd3c7a663a7e7b9059bebd433bacac6ce13b8e54b719497"
+    },
+    {
+      "kind": "Assign",
+      "name": "PROTOCOL_DIFFERENTIAL_TEST_PREFIX",
+      "owner": "parity_audit_shared",
+      "originalBytes": 79,
+      "originalSha256": "0c2e6f79099b602e62c949606aa3512b4b3aea8ee1513ba1c0ba51302e856a1d"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "protocol_behaviors_ledger",
+      "owner": "parity_audit_protocol",
+      "originalBytes": 2225,
+      "originalSha256": "457ab377365bfad2be308e2f0374d95eb7402b791ebefe6e7d9564e95e2da798"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "live_interop_features",
+      "owner": "parity_audit_live_catalog",
+      "originalBytes": 1471,
+      "originalSha256": "2ef6dc59219023764b6acce250866e6427b8632d03819f8949e7cad0218638fd"
+    },
+    {
+      "kind": "AnnAssign",
+      "name": "LIVE_INTEROP_PROOF_REQUIREMENTS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 7781,
+      "originalSha256": "2c0927a2117ef9bf2a37d5f4ad24b7d44d26a43875d74b5123b3db34febd3bdc"
+    },
+    {
+      "kind": "AnnAssign",
+      "name": "LIVE_INTEROP_REQUIRED_DETAIL_TOKENS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 604,
+      "originalSha256": "a3f72fb97958832d1f700b1de6ae5bd9c7be4f53e869e5fd7125224179c4aabe"
+    },
+    {
+      "kind": "AnnAssign",
+      "name": "LIVE_INTEROP_EXPECTED_FAILURE_DETAIL_TOKENS",
+      "owner": "parity_audit_shared",
+      "originalBytes": 1987,
+      "originalSha256": "32ec9c1d82631140a7634722d6f1e5365016ff1182d504cf2db59fb32c1ec944"
+    },
+    {
+      "kind": "Assign",
+      "name": "LIVE_INTEROP_LOCAL_CONTROLLER_FEATURES",
+      "owner": "parity_audit_shared",
+      "originalBytes": 886,
+      "originalSha256": "82b6be0805f64de7d71017c555e62529d48c662996fb20820f2540560fad84a7"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "live_interop_not_applicable_reason",
+      "owner": "parity_audit_live_catalog",
+      "originalBytes": 3426,
+      "originalSha256": "7654a54f0f43e4fa3849ff9d9f5dfb857c8075f950d53fbe1d113a4eaba53468"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "validate_live_interop_scope_contracts",
+      "owner": "parity_audit_live_catalog",
+      "originalBytes": 3265,
+      "originalSha256": "a68b136f48d0b250485e7f12c5177a1b049fe05edb163b1a79dad4e6dde2ad0d"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "validate_universal_transport_scope_contracts",
+      "owner": "parity_audit_frozen_transport",
+      "originalBytes": 2589,
+      "originalSha256": "8de9afdf683b4586ec478af7ad4784e80487b231a6717f18f28c96202650950f"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "frozen_slskdn_expected_failure_checks",
+      "owner": "parity_audit_frozen_transport",
+      "originalBytes": 3566,
+      "originalSha256": "c0bb2eff0a8ed80b0f61b352f1cc096168e727915db2336350b3ac2c8add15e0"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "frozen_slskdn_transport_not_applicable_contracts",
+      "owner": "parity_audit_frozen_transport",
+      "originalBytes": 8245,
+      "originalSha256": "a836ddb6a390df7da69563df51be1e29725d1523727b44675e91c5593f089feb"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "validate_live_interop_mapping_contracts",
+      "owner": "parity_audit_frozen_transport",
+      "originalBytes": 2780,
+      "originalSha256": "1f0f9b0b92ea4e50baf8c748bcfc726158e08a82af931b828293d47d6dd493fb"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "live_interop_ledger",
+      "owner": "parity_audit_live_evidence",
+      "originalBytes": 2694,
+      "originalSha256": "127a11f449e9ad838466897b9407523af8a1098f60d446c5dd29f9e5fe719124"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "live_interop_entries",
+      "owner": "parity_audit_live_evidence",
+      "originalBytes": 3452,
+      "originalSha256": "cc2320ac53bd35c06eeefb08d30ea342eaf93f60708f7d0093bf4d4f63174044"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "transport_capability_evidence_failures",
+      "owner": "parity_audit_transport",
+      "originalBytes": 6975,
+      "originalSha256": "c1cacbe43f744aff6ee5e716a966844d608524b6305f45a03e347607d3947eb4"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "universal_transport_failures",
+      "owner": "parity_audit_transport",
+      "originalBytes": 14320,
+      "originalSha256": "13ed2eb3e8bb87e20b062ba387bb1a2943505b4ed6c04c4b36714694e4a75a95"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "universal_ui_scenario_failures",
+      "owner": "parity_audit_ui_evidence",
+      "originalBytes": 1994,
+      "originalSha256": "886acdc8f45bd256ba98b12131ac690819087b4deaa8d83af7e9414e4bc6705c"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "universal_target_ui_comparison_failures",
+      "owner": "parity_audit_ui_evidence",
+      "originalBytes": 6896,
+      "originalSha256": "2b67180703cd38931d455c2087d7bb2a2885be61eaeb6e56475f076c0e55cec5"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "strict_universal_failures",
+      "owner": "parity_audit_completeness",
+      "originalBytes": 7540,
+      "originalSha256": "3dba87fd6a4bffe377cc3e0822df0ed1a917460f15af06c5941a41e4c1201d3b"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "summarize",
+      "owner": "parity_audit_completeness",
+      "originalBytes": 1998,
+      "originalSha256": "52992192944f1eb5d4ccff96f0f71a533dd20b38e8ab66bfbdf05af086ff49d2"
+    },
+    {
+      "kind": "FunctionDef",
+      "name": "main",
+      "owner": "registry",
+      "originalBytes": 18074,
+      "originalSha256": "41a141047aeb76395b4e4a5fdb6e526019c643b183c6a2b22c7914a5a373de63"
+    },
+    {
+      "kind": "If",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 40,
+      "originalSha256": "1e54149f97c05d1b9f32706514581d1987886ab39a440c2b7993ff0dd7e28644"
+    }
+  ],
+  "dependencyGraph": {
+    "parity_audit_api": [
+      "parity_audit_process"
+    ],
+    "parity_audit_webui": [
+      "parity_audit_process"
+    ],
+    "parity_audit_persistence": [
+      "parity_audit_process"
+    ],
+    "parity_audit_files": [
+      "parity_audit_process"
+    ],
+    "parity_audit_security": [
+      "parity_audit_process"
+    ],
+    "parity_audit_protocol": [
+      "parity_audit_process"
+    ],
+    "parity_audit_live_evidence": [
+      "parity_audit_live_catalog"
+    ],
+    "parity_audit_completeness": [
+      "parity_audit_transport",
+      "parity_audit_ui_evidence"
+    ],
+    "registry": [
+      "parity_audit_api",
+      "parity_audit_completeness",
+      "parity_audit_config",
+      "parity_audit_files",
+      "parity_audit_frozen_transport",
+      "parity_audit_live_catalog",
+      "parity_audit_live_evidence",
+      "parity_audit_operator",
+      "parity_audit_persistence",
+      "parity_audit_process",
+      "parity_audit_protocol",
+      "parity_audit_security",
+      "parity_audit_webui"
+    ],
+    "parity_audit_process": [],
+    "parity_audit_config": [],
+    "parity_audit_operator": [],
+    "parity_audit_live_catalog": [],
+    "parity_audit_frozen_transport": [],
+    "parity_audit_transport": [],
+    "parity_audit_ui_evidence": []
+  },
+  "preservedNestedAndTopLevelFunctions": 43,
+  "equivalenceFixture": {
+    "passed": true,
+    "entries": 19216,
+    "allDifferentialExecutionDisabled": true,
+    "browserEvidence": null,
+    "sameCapturedInventoryInputs": true,
+    "liveProof": false,
+    "beforeSha256": "db601b8ffec2b3291fdae75e7be223ce8764fdcfe99c9897ac6c86d69fffaf43",
+    "afterSha256": "db601b8ffec2b3291fdae75e7be223ce8764fdcfe99c9897ac6c86d69fffaf43",
+    "inventoryInputs": {
+      "150aa93bfc8568205690456e16a3d11a103e03bdb4b0a02632238c2d77b80456.json": "cbf87c99001e705675e76995b319a5861322da0fc48b3e5b5baffbc1a11c915c",
+      "1949a9d416e25f5792d5aa28ebeefc4f761d00ec1b519c0bc3df48fb708a74b1.json": "e0e88a69729d948d1b259462f9def8b9dad00d810f0fb9f882523fea95cfda45",
+      "a85dcb784336d6cbedd6b14880c15eec0f16de09d16ca308482ee2531e88c379.json": "81962ea483fe61f3afddb807c06013972e5b0f1da7ed0d882dcebf077d6bd9a0",
+      "bac5e503996e196d1f4e218524815875d346cad90da43a5ac2861095f8d36277.json": "720fc7282b4dfc4948ccc64959156fff7a153e2e915a3e86f9c12516f83548e3"
+    }
+  },
+  "validation": {
+    "auditTooling": {
+      "passed": true,
+      "sha256": "ed013d9fe94c9ecf19742a404f4e427b240ce3cf3d79d2761286c8c86489280f"
+    },
+    "processGuard": {
+      "passed": true,
+      "sha256": "99a1d02cf1a2ea6ee9186ad1d770a65e94d61542ee157a13d359b487a3d6474e"
+    }
+  }
+}

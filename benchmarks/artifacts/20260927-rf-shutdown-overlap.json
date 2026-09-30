@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "sourceSha": "55be6aec7ed392700e479302e267d83210fd4277",
+  "dirtyWorktree": false,
+  "startedUtc": "2026-09-27T23:09:47.819734+00:00",
+  "binarySha256": "7adaf8fe6b62d05878f4bcf9b08428b5dd0fa1bc8481d06446fb16e24d4b1f9a",
+  "harnessSha256": "2a7db9e16e418ee3666c947c1a831a06285acb0f1022f93383b5e121eaf819b4",
+  "rustVersion": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "case": "live-share-scan-SIGTERM-overlap-and-restart",
+  "controllerProfile": "native",
+  "fixtureFiles": 20000,
+  "disabledServices": [
+    "dht",
+    "mesh",
+    "overlay",
+    "https"
+  ],
+  "initialShares": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": false
+  },
+  "observedScanning": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": true
+  },
+  "exitCode": 0,
+  "shutdownSeconds": 0.113569,
+  "scanRequestOutcome": "http-error",
+  "scanRequestHttpStatus": 503,
+  "durableShareRowsAfterShutdown": 0,
+  "sqliteIntegrity": "ok",
+  "restartedShares": {
+    "cancelled": false,
+    "directories": 0,
+    "faulted": false,
+    "files": 0,
+    "hosts": [],
+    "ready": false,
+    "scanPending": false,
+    "scanProgress": 0,
+    "scanning": false
+  },
+  "restartExitCode": 0,
+  "restartShutdownSeconds": 0.113572,
+  "passed": true
+}

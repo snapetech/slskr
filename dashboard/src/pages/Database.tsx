@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trash2, Database as DatabaseIcon } from 'lucide-react';
 import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
+import { useAbortableRequests } from '../hooks/useAbortableRequests';
 
 interface DatabasePageProps {
   apiUrl: string;
@@ -18,6 +19,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const { createController, releaseController } = useAbortableRequests();
 
   const fetchStats = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++requestIdRef.current;
@@ -47,30 +49,44 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
   const handleCleanup = async (days: number) => {
     if (!window.confirm(`Delete records older than ${days} days?`)) return;
 
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, '/api/admin/database/cleanup'), apiKey, {
         method: 'POST',
         body: JSON.stringify({ days }),
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
       setError(null);
-      await fetchStats();
+      await fetchStats(controller.signal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Cleanup failed');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Cleanup failed');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
   const handleVacuum = async () => {
     if (!window.confirm('Optimize database? This may take time.')) return;
 
+    const controller = createController();
     try {
       await requestJson(apiEndpoint(apiUrl, '/api/admin/database/vacuum'), apiKey, {
         method: 'POST',
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Vacuum failed');
+      if (!controller.signal.aborted && !isAbortError(err)) {
+        setError(err instanceof Error ? err.message : 'Vacuum failed');
+      }
+    } finally {
+      releaseController(controller);
     }
   };
 
@@ -125,14 +141,14 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
         <div className="space-y-3">
           <button
             onClick={() => handleCleanup(30)}
-            className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
+            className="w-full px-4 py-2 bg-orange-800 text-white rounded-lg hover:bg-orange-900 flex items-center gap-2"
           >
             <Trash2 className="w-4 h-4" />
             Cleanup Records (30+ days old)
           </button>
           <button
             onClick={() => handleCleanup(90)}
-            className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
+            className="w-full px-4 py-2 bg-orange-800 text-white rounded-lg hover:bg-orange-900 flex items-center gap-2"
           >
             <Trash2 className="w-4 h-4" />
             Cleanup Records (90+ days old)

@@ -1,0 +1,51 @@
+{
+  "scope": "Dashboard webhook lifecycle and accessible controls",
+  "tests": 48,
+  "coverage": {
+    "lines": {
+      "total": 568,
+      "covered": 451,
+      "skipped": 0,
+      "pct": 79.4
+    },
+    "statements": {
+      "total": 625,
+      "covered": 471,
+      "skipped": 0,
+      "pct": 75.36
+    },
+    "functions": {
+      "total": 125,
+      "covered": 89,
+      "skipped": 0,
+      "pct": 71.2
+    },
+    "branches": {
+      "total": 498,
+      "covered": 316,
+      "skipped": 0,
+      "pct": 63.45
+    },
+    "branchesTrue": {
+      "total": 0,
+      "covered": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  },
+  "unchangedThresholds": {
+    "statements": 67,
+    "branches": 55,
+    "functions": 55,
+    "lines": 71
+  },
+  "gates": [
+    "test:coverage",
+    "type-check",
+    "lint",
+    "build",
+    "test:bundle-budget"
+  ],
+  "portsAdded": 0,
+  "hostedValidation": "pending exact pushed tip"
+}

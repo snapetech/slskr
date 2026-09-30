@@ -1,0 +1,129 @@
+{
+  "scope": "RF-024 structural ownership hosted validation baseline",
+  "sourceCommit": "29165746acc69e6318c45ae8a3624e23566dc47f",
+  "runUrl": "https://github.com/snapetech/slskr/actions/runs/36376549126",
+  "conclusion": "success",
+  "createdAt": "2026-09-28T04:10:06Z",
+  "completedAt": "2026-09-28T04:46:36Z",
+  "jobs": [
+    {
+      "name": "Linux AArch64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783469846"
+    },
+    {
+      "name": "Production web assets",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783470002"
+    },
+    {
+      "name": "rust",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783470026"
+    },
+    {
+      "name": "Platform macos-arm64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677198"
+    },
+    {
+      "name": "Platform linux-musl-x64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677212"
+    },
+    {
+      "name": "Platform linux-arm64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677220"
+    },
+    {
+      "name": "Platform linux-x64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677233"
+    },
+    {
+      "name": "Platform macos-x64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677239"
+    },
+    {
+      "name": "Platform linux-musl-arm64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677250"
+    },
+    {
+      "name": "Platform windows-x64",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108783677255"
+    },
+    {
+      "name": "Package and deployment surfaces",
+      "conclusion": "success",
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/job/108790269799"
+    }
+  ],
+  "retainedArtifacts": [
+    {
+      "id": 10952040993,
+      "name": "ci-linux-musl-x64",
+      "bytes": 23056883,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10952040993"
+    },
+    {
+      "id": 10951856961,
+      "name": "ci-macos-arm64",
+      "bytes": 19611474,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10951856961"
+    },
+    {
+      "id": 10951761423,
+      "name": "ci-linux-x64",
+      "bytes": 21262782,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10951761423"
+    },
+    {
+      "id": 10951701418,
+      "name": "ci-linux-musl-arm64",
+      "bytes": 21831146,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10951701418"
+    },
+    {
+      "id": 10951691020,
+      "name": "ci-linux-arm64",
+      "bytes": 19968497,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10951691020"
+    },
+    {
+      "id": 10951592808,
+      "name": "ci-macos-x64",
+      "bytes": 21078897,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10951592808"
+    },
+    {
+      "id": 10951362957,
+      "name": "ci-windows-x64",
+      "bytes": 23794740,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10951362957"
+    },
+    {
+      "id": 10950744635,
+      "name": "ci-web-assets",
+      "bytes": 2429212,
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36376549126/artifacts/10950744635"
+    }
+  ],
+  "downloadedLinuxArchive": {
+    "name": "slskr-ci-29165746acc69e6318c45ae8a3624e23566dc47f-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "6a5e6fa4a2e5515620fca1cdf70a4beb3b52103c1459e9969fb9176b65d8341f",
+    "matchesRetainedChecksum": true
+  },
+  "laterFixes": "Gateway lifecycle and browser audit follow-up commits have separate local gates and pending hosted runs; this is the immutable ownership baseline, not their exact-tip release certification."
+}
