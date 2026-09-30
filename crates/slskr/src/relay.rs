@@ -1652,7 +1652,7 @@ mod tests {
 
     #[test]
     fn rejected_file_upload_consumes_token_and_wakes_its_waiter() {
-        let secret = "relay-test-secret-0123456789";
+        let secret = "test-token-relay-fixture";
         let settings = RelaySettings {
             enabled: true,
             mode: "controller".to_owned(),
