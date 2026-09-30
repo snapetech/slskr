@@ -23,7 +23,10 @@ if ! rg -n 'validate_webhook_url_for_registration\(&url\)' \
 fi
 
 for token in 'is_private' 'is_loopback' 'is_link_local' 'is_multicast' '2001:db8' 'SLSKR_WEBHOOK_ALLOW_CIDRS' 'SLSKR_WEBHOOK_DENY_CIDRS' 'localhost' '169.254.169.254'; do
-  if ! rg -n "$token" crates/slskr/src/webhooks.rs crates/slskr/src/utils.rs >/dev/null; then
+  if ! rg -n "$token" \
+    crates/slskr/src/webhooks.rs \
+    crates/slskr/src/webhooks_tests.rs \
+    crates/slskr/src/utils.rs >/dev/null; then
     printf 'webhook outbound policy check failed: expected webhook URL policy/test token missing: %s\n' "$token" >&2
     status=1
   fi
@@ -36,7 +39,8 @@ for token in '100, 64' '192, 0, 0' '192, 88, 99' '198, 18'; do
   fi
 done
 
-if ! rg -n --fixed-strings -- 'test_blocked_webhook_special_use_ip_ranges' crates/slskr/src/webhooks.rs >/dev/null; then
+if ! rg -n --fixed-strings -- 'test_blocked_webhook_special_use_ip_ranges' \
+  crates/slskr/src/webhooks.rs crates/slskr/src/webhooks_tests.rs >/dev/null; then
   printf 'webhook outbound policy check failed: special-use IP regression is missing\n' >&2
   status=1
 fi
@@ -62,7 +66,8 @@ if ! rg -n 'deliveries: Arc<Semaphore>' crates/slskr/src/webhooks.rs >/dev/null 
   status=1
 fi
 
-if ! rg -n --fixed-strings -- 'dispatch_does_not_spawn_when_delivery_pool_is_full' crates/slskr/src/webhooks.rs >/dev/null; then
+if ! rg -n --fixed-strings -- 'dispatch_does_not_spawn_when_delivery_pool_is_full' \
+  crates/slskr/src/webhooks.rs crates/slskr/src/webhooks_tests.rs >/dev/null; then
   printf 'webhook outbound policy check failed: pre-spawn delivery admission regression is missing\n' >&2
   status=1
 fi
