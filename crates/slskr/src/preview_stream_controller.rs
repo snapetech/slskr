@@ -486,9 +486,23 @@ pub(super) async fn open_application_dump_file(
     state: &AppState,
 ) -> Result<LocalStreamFile, String> {
     let state_dir = state.config.state_dir.clone();
-    tokio::task::spawn_blocking(move || create_application_dump_file(&state_dir))
-        .await
-        .map_err(|error| format!("application dump task failed: {error}"))?
+    run_application_dump_worker(move || create_application_dump_file(&state_dir)).await
+}
+
+async fn run_application_dump_worker<T: Send + 'static>(
+    worker: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    static DUMP_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let permit = DUMP_PERMITS
+        .try_acquire()
+        .map_err(|_| "application dump is already running".to_owned())?;
+    tokio::task::spawn_blocking(move || {
+        // Retain admission through the blocking work after requester cancellation.
+        let _permit = permit;
+        worker()
+    })
+    .await
+    .map_err(|error| format!("application dump task failed: {error}"))?
 }
 
 fn create_application_dump_file(state_dir: &Path) -> Result<LocalStreamFile, String> {
@@ -531,7 +545,7 @@ fn create_application_dump_file(state_dir: &Path) -> Result<LocalStreamFile, Str
         file,
         length: metadata.len(),
         content_type: "application/octet-stream".to_owned(),
-        cleanup_path: Some(output_path),
+        cleanup_path: Some(output_path.into()),
     })
 }
 
@@ -544,7 +558,8 @@ fn create_platform_core_dump(basename: &Path) -> Result<PathBuf, String> {
     let output_path = PathBuf::from(format!("{}.{pid}", basename.display()));
     // Start a shell blocked on stdin so Linux Yama can authorize only this
     // child PID before it execs gcore and attaches to this process.
-    let mut child = Command::new("/bin/sh")
+    let mut command = Command::new("/bin/sh");
+    command
         .arg("-c")
         .arg("read _; exec gcore \"$@\"")
         .arg("slskr-gcore")
@@ -553,57 +568,27 @@ fn create_platform_core_dump(basename: &Path) -> Result<PathBuf, String> {
         .arg(pid.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    crate::script_process_group::configure_blocking(&mut command);
+    let child = command
         .spawn()
         .map_err(|error| format!("application dump requires gcore: {error}"))?;
-    let ptrace_enabled = rustix::process::set_ptracer(rustix::process::PTracer::ProcessID(
-        rustix::process::Pid::from_child(&child),
-    ))
-    .is_ok();
-    let release = child
+    let mut owner = crate::core_dump_process::CoreDumpProcess::new(child, output_path.clone());
+    owner.authorize_ptrace()?;
+    owner
+        .child
         .stdin
         .take()
         .ok_or_else(|| "application dump child stdin unavailable".to_owned())
         .and_then(|mut stdin| {
             writeln!(stdin)
                 .map_err(|error| format!("application dump child release failed: {error}"))
-        });
-    if let Err(error) = release {
-        let _ = child.kill();
-        let _ = child.wait();
-        if ptrace_enabled {
-            let _ = rustix::process::set_ptracer(rustix::process::PTracer::None);
-        }
-        return Err(error);
-    }
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let status = loop {
-        match child
-            .try_wait()
-            .map_err(|error| format!("application dump wait failed: {error}"))?
-        {
-            Some(status) => break status,
-            None if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = fs::remove_file(&output_path);
-                if ptrace_enabled {
-                    let _ = rustix::process::set_ptracer(rustix::process::PTracer::None);
-                }
-                return Err("application dump timed out".to_owned());
-            }
-        }
-    };
-    if ptrace_enabled {
-        let _ = rustix::process::set_ptracer(rustix::process::PTracer::None);
-    }
+        })?;
+    let status = owner.wait_until(std::time::Instant::now() + Duration::from_secs(60))?;
     if !status.success() {
-        let _ = fs::remove_file(&output_path);
         return Err("gcore failed to create the application dump".to_owned());
     }
+    owner.keep_output();
     Ok(output_path)
 }
 
@@ -918,7 +903,7 @@ pub(super) async fn open_remote_mesh_preview_file(
         file,
         length: metadata.len(),
         content_type: ticket.content_type,
-        cleanup_path: Some(path),
+        cleanup_path: Some(path.into()),
     }))
 }
 
@@ -1048,7 +1033,7 @@ pub(super) async fn open_primary_stream_file(
                 return Ok(Some(LocalStreamFile {
                     file,
                     length: metadata.len(),
-                    content_type: preview_stream_content_type(&filename).to_owned(),
+                    content_type: primary_stream_content_type(&filename).to_owned(),
                     cleanup_path: None,
                 }));
             }
@@ -1089,7 +1074,7 @@ pub(super) async fn open_primary_stream_file(
     Ok(Some(LocalStreamFile {
         file,
         length: metadata.len(),
-        content_type: preview_stream_content_type(&transfer.filename).to_owned(),
+        content_type: primary_stream_content_type(&transfer.filename).to_owned(),
         cleanup_path: None,
     }))
 }
@@ -1134,6 +1119,18 @@ pub(super) fn open_shared_local_file_unix(
     Err("shared file path is empty".to_owned())
 }
 
+pub(super) fn primary_stream_content_type(path: &str) -> &'static str {
+    match path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+    {
+        Some(extension) if extension == "mp4" => "video/mp4",
+        Some(extension) if extension == "webm" => "video/webm",
+        Some(extension) if extension == "mkv" => "video/x-matroska",
+        _ => preview_stream_content_type(path),
+    }
+}
+
 pub(super) fn preview_stream_content_type(path: &str) -> &'static str {
     match path
         .rsplit_once('.')
@@ -1167,5 +1164,48 @@ fn mesh_preview_stream_content_type(path: &str) -> Option<&'static str> {
         Some(extension) if extension == "opus" => Some("audio/opus"),
         Some(extension) if extension == "wav" => Some("audio/wav"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod dump_worker_tests {
+    use super::run_application_dump_worker;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn canceled_request_retains_dump_admission_until_blocking_worker_finishes() {
+        let (started, started_rx) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let request = tokio::spawn(run_application_dump_worker(move || {
+            let _ = started.send(());
+            release_rx
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        }));
+        tokio::time::timeout(Duration::from_secs(5), started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        assert!(run_application_dump_worker(|| Ok(()))
+            .await
+            .unwrap_err()
+            .contains("already running"));
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match run_application_dump_worker(|| Ok(())).await {
+                    Ok(()) => break,
+                    Err(error) if error.contains("already running") => {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    Err(error) => panic!("unexpected dump worker failure: {error}"),
+                }
+            }
+        })
+        .await
+        .unwrap();
     }
 }

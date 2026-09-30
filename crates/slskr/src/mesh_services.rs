@@ -11,7 +11,7 @@ use slskr_client::overlay::{
 };
 use slskr_client::overlay_control::{send_udp_control, ControlEnvelope};
 use slskr_client::quic_control::send_quic_control;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
 use crate::config::TrustedMeshPeer;
@@ -21,7 +21,21 @@ const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
 const MAX_POD_MESSAGE_BYTES: usize = 16 * 1024;
 const CONTENT_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+const SHARE_BACKFILL_ITEM_LIMIT: usize = 64;
+const SHARE_BACKFILL_FILE_LIMIT: u64 = 256 * 1024 * 1024;
+const SHARE_BACKFILL_TOTAL_LIMIT: u64 = 512 * 1024 * 1024;
+const SHARE_BACKFILL_CHUNK_BYTES: u64 = 46_000;
+const SHARE_BACKFILL_CALL_INTERVAL: Duration = Duration::from_millis(125);
+const SHARE_BACKFILL_TOTAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const POD_MESSAGE_CALL_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ShareBackfillReceipt {
+    pub(crate) filename: String,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
+}
 
 struct StagingFileGuard {
     file: Option<tokio::fs::File>,
@@ -82,6 +96,302 @@ pub async fn fetch_content(
         output,
     )
     .await
+}
+
+/// Backfill an incoming share from its owner over the certificate-pinned
+/// MeshContent service. The caller supplies a peer from the local trust
+/// configuration; the announced HTTP owner endpoint is never used to choose
+/// a network destination.
+pub async fn backfill_share(
+    gateway: Option<&std::sync::Arc<crate::private_gateway::Gateway>>,
+    peer: &TrustedMeshPeer,
+    local_username: &str,
+    authentication_key: &SigningKey,
+    grant_id: &str,
+    token: &str,
+    downloads_dir: &Path,
+) -> Result<Vec<ShareBackfillReceipt>, String> {
+    validate_share_backfill_request(local_username, grant_id, token)?;
+    let mut hello = MeshHello::new(
+        local_username,
+        vec![FEATURE_MESH_SERVICE.to_owned()],
+        None,
+        None,
+        uuid::Uuid::new_v4().simple().to_string(),
+    )
+    .map_err(|error| format!("share backfill hello failed: {error}"))?;
+    hello
+        .authenticate(authentication_key, &peer.certificate_sha256)
+        .map_err(|error| format!("share backfill hello authentication failed: {error}"))?;
+    let mut client = connect_tls_overlay(peer.overlay_endpoint, peer.certificate_sha256, hello)
+        .await
+        .map_err(|error| format!("share backfill connection failed: {error}"))?;
+    if !client.remote_username.eq_ignore_ascii_case(&peer.username) {
+        return Err("share backfill mesh identity did not match the trusted peer".to_owned());
+    }
+    let _session_guard = if let Some(gateway) = gateway {
+        Some(
+            gateway
+                .register_outbound_guard(
+                    client.remote_username.clone(),
+                    peer.overlay_endpoint,
+                    client.remote_features.clone(),
+                    slskr_client::overlay::OVERLAY_VERSION,
+                    client.remote_certificate_sha256.map(hex::encode),
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
+
+    timeout(
+        SHARE_BACKFILL_TOTAL_TIMEOUT,
+        backfill_share_over_client(&mut client, grant_id, token, downloads_dir),
+    )
+    .await
+    .map_err(|_| "share backfill exceeded its time limit".to_owned())?
+}
+
+async fn backfill_share_over_client(
+    client: &mut slskr_client::overlay::TlsOverlayClient,
+    grant_id: &str,
+    token: &str,
+    downloads_dir: &Path,
+) -> Result<Vec<ShareBackfillReceipt>, String> {
+    let mut next_call_at = tokio::time::Instant::now();
+    let manifest_payload = serde_json::to_vec(&serde_json::json!({
+        "grantId": grant_id,
+        "token": token,
+    }))
+    .map_err(|error| format!("share backfill manifest request encode failed: {error}"))?;
+    let manifest_bytes = share_backfill_call(
+        client,
+        "GetShareBackfillManifest",
+        manifest_payload,
+        &mut next_call_at,
+    )
+    .await?;
+    let manifest =
+        serde_json::from_slice::<Vec<crate::share_backfill_controller::ShareBackfillItem>>(
+            &manifest_bytes,
+        )
+        .map_err(|error| format!("share backfill manifest is invalid: {error}"))?;
+    if manifest.len() > SHARE_BACKFILL_ITEM_LIMIT {
+        return Err("share backfill manifest exceeds the item limit".to_owned());
+    }
+
+    let mut seen_content_ids = std::collections::HashSet::with_capacity(manifest.len());
+    let mut total_bytes = 0_u64;
+    let mut completed = Vec::with_capacity(manifest.len());
+    for item in manifest {
+        validate_share_backfill_item(&item)?;
+        if !seen_content_ids.insert(item.content_id.clone()) {
+            return Err("share backfill manifest contains a duplicate content ID".to_owned());
+        }
+        total_bytes = total_bytes
+            .checked_add(item.size)
+            .filter(|total| *total <= SHARE_BACKFILL_TOTAL_LIMIT)
+            .ok_or_else(|| "share backfill manifest exceeds the byte limit".to_owned())?;
+        let filename = crate::share_backfill_controller::safe_backfill_filename(&item);
+        let final_path = crate::safe_download_path(downloads_dir, &filename)?;
+        crate::ensure_scoped_download_path(downloads_dir, &final_path.to_string_lossy())?;
+        match verify_existing_backfill_file(&final_path, item.size, &item.sha256).await? {
+            Some(true) => {
+                completed.push(ShareBackfillReceipt {
+                    filename,
+                    size: item.size,
+                    sha256: item.sha256,
+                });
+                continue;
+            }
+            Some(false) => {
+                return Err("share backfill destination exists with an invalid SHA-256".to_owned());
+            }
+            None => {}
+        }
+
+        let staging_path = downloads_dir.join(format!(
+            ".share-backfill-{}.part",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let file = options
+            .open(&staging_path)
+            .await
+            .map_err(|error| format!("share backfill staging create failed: {error}"))?;
+        let mut staging = StagingFileGuard::new(&staging_path, file);
+        let mut hasher = Sha256::new();
+        let mut offset = 0_u64;
+        while offset < item.size {
+            let length = (item.size - offset).min(SHARE_BACKFILL_CHUNK_BYTES);
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "grantId": grant_id,
+                "token": token,
+                "contentId": item.content_id,
+                "offset": offset,
+                "length": length,
+            }))
+            .map_err(|error| format!("share backfill range request encode failed: {error}"))?;
+            let bytes =
+                share_backfill_call(client, "GetShareBackfillRange", payload, &mut next_call_at)
+                    .await?;
+            if bytes.len() as u64 != length {
+                return Err("share backfill range length did not match the request".to_owned());
+            }
+            staging
+                .file_mut()?
+                .write_all(&bytes)
+                .await
+                .map_err(|error| format!("share backfill staging write failed: {error}"))?;
+            hasher.update(&bytes);
+            offset += length;
+        }
+        staging
+            .file_mut()?
+            .sync_all()
+            .await
+            .map_err(|error| format!("share backfill staging sync failed: {error}"))?;
+        if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&item.sha256) {
+            return Err("share backfill file failed SHA-256 verification".to_owned());
+        }
+        staging.file.take();
+        tokio::fs::hard_link(&staging_path, &final_path)
+            .await
+            .map_err(|_| {
+                "verified share backfill file could not be published without overwriting".to_owned()
+            })?;
+        tokio::fs::remove_file(&staging_path)
+            .await
+            .map_err(|error| format!("published share backfill staging cleanup failed: {error}"))?;
+        staging.commit();
+        sync_share_backfill_directory(downloads_dir).await?;
+        completed.push(ShareBackfillReceipt {
+            filename,
+            size: item.size,
+            sha256: item.sha256,
+        });
+    }
+    Ok(completed)
+}
+
+async fn share_backfill_call(
+    client: &mut slskr_client::overlay::TlsOverlayClient,
+    method: &str,
+    payload: Vec<u8>,
+    next_call_at: &mut tokio::time::Instant,
+) -> Result<Vec<u8>, String> {
+    tokio::time::sleep_until(*next_call_at).await;
+    let call = MeshServiceCall::new(
+        uuid::Uuid::new_v4().simple().to_string(),
+        "MeshContent",
+        method,
+        payload,
+    )
+    .map_err(|error| format!("share backfill request failed: {error}"))?;
+    let reply = bounded_mesh_operation(
+        client.call(&call),
+        "share backfill mesh call",
+        CONTENT_CALL_TIMEOUT,
+    )
+    .await?;
+    *next_call_at = tokio::time::Instant::now() + SHARE_BACKFILL_CALL_INTERVAL;
+    if reply.status_code != 0 {
+        return Err(format!(
+            "share backfill peer rejected the request with status {}: {}",
+            reply.status_code,
+            reply.error_message.as_deref().unwrap_or("remote error")
+        ));
+    }
+    Ok(reply.payload)
+}
+
+async fn verify_existing_backfill_file(
+    path: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<Option<bool>, String> {
+    let metadata = match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("existing share backfill metadata failed: {error}")),
+    };
+    if !metadata.file_type().is_file() || metadata.len() != expected_size {
+        return Err("share backfill destination already exists with different content".to_owned());
+    }
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| format!("existing share backfill open failed: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .await
+            .map_err(|error| format!("existing share backfill read failed: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(Some(
+        hex::encode(hasher.finalize()).eq_ignore_ascii_case(expected_sha256),
+    ))
+}
+
+async fn sync_share_backfill_directory(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    let directory = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| format!("share backfill download directory sync failed: {error}"))?;
+    #[cfg(unix)]
+    directory
+        .sync_all()
+        .await
+        .map_err(|error| format!("share backfill download directory sync failed: {error}"))?;
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+fn validate_share_backfill_request(
+    local_username: &str,
+    grant_id: &str,
+    token: &str,
+) -> Result<(), String> {
+    if local_username.trim().is_empty()
+        || grant_id.trim().is_empty()
+        || grant_id.len() > 256
+        || grant_id.chars().any(char::is_control)
+        || token.trim().is_empty()
+        || token.len() > 512
+        || token.chars().any(char::is_control)
+    {
+        return Err("share backfill request is invalid".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_share_backfill_item(
+    item: &crate::share_backfill_controller::ShareBackfillItem,
+) -> Result<(), String> {
+    if item.content_id.trim().is_empty()
+        || item.content_id.len() > MAX_CONTENT_ID_BYTES
+        || item.content_id.chars().any(char::is_control)
+        || item.filename.trim().is_empty()
+        || item.filename.len() > 4_096
+        || item.filename.chars().any(char::is_control)
+        || item.size == 0
+        || item.size > SHARE_BACKFILL_FILE_LIMIT
+        || item.sha256.len() != 64
+        || !item.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("share backfill manifest contains an invalid item".to_owned());
+    }
+    Ok(())
 }
 
 /// Deliver a PodCore message to a configured trusted mesh peer through the

@@ -26,6 +26,10 @@ use sqlx_sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+#[path = "relay_connection_cleanup.rs"]
+mod connection_cleanup;
+pub(crate) use connection_cleanup::ConnectionCleanup;
+
 use crate::config::{ControllerProfile, RelaySettings};
 
 const CHALLENGE_TTL_SECONDS: u64 = 10;
@@ -872,6 +876,44 @@ impl RuntimeState {
             .retain(|_, request| request.connection_id != connection_id);
     }
 
+    /// Remove live connection/request state while retaining durable uploads.
+    pub(crate) fn shutdown_connections(&mut self) {
+        let ids = self
+            .challenges
+            .keys()
+            .cloned()
+            .chain(
+                self.registered_agents
+                    .values()
+                    .map(|agent| agent.connection_id.clone()),
+            )
+            .chain(
+                self.pending_downloads
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .chain(
+                self.pending_file_info
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .chain(
+                self.pending_file_uploads
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .chain(
+                self.pending_share_uploads
+                    .values()
+                    .map(|request| request.connection_id.clone()),
+            )
+            .collect::<std::collections::BTreeSet<_>>();
+        for id in ids {
+            unregister_hub_connection(&id);
+            self.deregister_connection(&id);
+        }
+    }
+
     pub(crate) fn issue_share_upload_token(
         &mut self,
         agent_name: &str,
@@ -1280,6 +1322,11 @@ impl RuntimeState {
         } else {
             self.pending_file_uploads.remove(&key);
         }
+        if !valid && !share {
+            // An invalid attempt still consumes the one-use token. Wake its
+            // owner because this request can no longer complete successfully.
+            Self::fail_file_stream_token(token, "relay upload authorization failed".to_owned());
+        }
         valid.then_some(AuthorizedUpload {
             agent_name,
             filename: request.filename,
@@ -1602,6 +1649,89 @@ pub(crate) fn credential_for_test(secret: &str, agent_name: &str, token: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_file_upload_consumes_token_and_wakes_its_waiter() {
+        let secret = "test-token-relay-fixture";
+        let settings = RelaySettings {
+            enabled: true,
+            mode: "controller".to_owned(),
+            controller: crate::config::RelayControllerSettings {
+                address: String::new(),
+                ignore_certificate_errors: false,
+                pinned_spki: String::new(),
+                api_key: String::new(),
+                secret: String::new(),
+                downloads: false,
+            },
+            agents: BTreeMap::from([(
+                "edge".to_owned(),
+                crate::config::RelayAgentSettings {
+                    instance_name: "edge-one".to_owned(),
+                    secret: secret.to_owned(),
+                    cidr: "127.0.0.1/32".to_owned(),
+                },
+            )]),
+        };
+        let mut state = RuntimeState::new();
+        state.registered_agents.insert(
+            "edge-one".to_owned(),
+            AgentRegistration {
+                connection_id: "rejected-upload-test".to_owned(),
+                remote_ip: "127.0.0.1".parse().unwrap(),
+            },
+        );
+        for wrong_credentials in [true, false] {
+            let (token, mut receiver) = state
+                .begin_file_stream("edge-one", "file.flac", 0, 100)
+                .unwrap();
+            let valid_credential = credential_for_target(
+                ControllerProfile::Native,
+                secret,
+                "edge-one",
+                &token.to_string(),
+            );
+            let credential = if wrong_credentials {
+                "invalid"
+            } else {
+                &valid_credential
+            };
+            let filename = if wrong_credentials {
+                "file.flac"
+            } else {
+                "wrong.flac"
+            };
+            assert!(state
+                .validate_file_upload(
+                    &settings,
+                    CredentialScheme::NativeHmacBase64,
+                    token,
+                    filename,
+                    credential,
+                    100
+                )
+                .is_none());
+            assert!(receiver
+                .try_recv()
+                .expect("rejected upload wakes waiter")
+                .is_err());
+            assert!(!state.pending_file_uploads.contains_key(&token.to_string()));
+            assert!(!file_upload_waiters()
+                .lock()
+                .unwrap()
+                .contains_key(&token.to_string()));
+            assert!(state
+                .validate_file_upload(
+                    &settings,
+                    CredentialScheme::NativeHmacBase64,
+                    token,
+                    "file.flac",
+                    &valid_credential,
+                    100
+                )
+                .is_none());
+        }
+    }
 
     fn multipart_fixture(part_count: usize) -> Vec<u8> {
         let mut body = Vec::new();
@@ -2073,6 +2203,33 @@ mod tests {
         assert!(state
             .completed_share_uploads
             .contains_key(&format!("token-{MAX_RELAY_SHARE_UPLOAD_RECORDS:04}")));
+    }
+
+    #[test]
+    fn shutdown_connections_preserves_completed_share_uploads() {
+        let mut state = RuntimeState::new();
+        state.issue_challenge("stopped-connection", 100);
+        state.registered_agents.insert(
+            "stopped-agent".to_owned(),
+            AgentRegistration {
+                connection_id: "stopped-connection".to_owned(),
+                remote_ip: "127.0.0.1".parse().unwrap(),
+            },
+        );
+        state.completed_share_uploads.insert(
+            "durable-upload".to_owned(),
+            CompletedShareUpload {
+                agent_name: "stopped-agent".to_owned(),
+                share_count: 0,
+                shares: Vec::new(),
+                database_path: PathBuf::from("share.db"),
+                completed_at: 100,
+            },
+        );
+        state.shutdown_connections();
+        assert!(state.challenges.is_empty());
+        assert!(state.registered_agents.is_empty());
+        assert!(state.completed_share_uploads.contains_key("durable-upload"));
     }
 
     #[test]

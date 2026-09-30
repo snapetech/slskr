@@ -3,8 +3,8 @@
 This is an internal-only ownership decision record. It is not a performance or
 coverage claim.
 
-Inventory date: 2026-09-27
-Source commit: 0dfab48cd16e6e7910759fa7d60e5d21b7b28be1
+Inventory date: 2026-09-29
+Reviewed on top of commit: c76a255d
 
 ## Active ownership
 
@@ -23,15 +23,19 @@ Source commit: 0dfab48cd16e6e7910759fa7d60e5d21b7b28be1
 - `web/src/components/PortForwarding/PortForwarding.jsx` is a maintained
   compatibility import that re-exports the implementation owned by
   `web/src/components/Pods/PortForwarding.jsx`.
+- `dashboard/src/context/ApiContext.tsx` owns the dashboard API URL and key.
+  `AppContent` reads that context and passes values as page props; pages do not
+  maintain a competing copy. This keeps request ownership explicit and pages
+  straightforward to render in isolated tests.
 
-## Deferred legacy ownership
+## Retired legacy ownership
 
-- `web/src/components/Pods/Pods.jsx` has no production route import. Its
-  dedicated `Pods.test.jsx` coverage is retained while the old route-shaped
-  implementation remains available for an explicit removal/migration change.
-- The current decision is to defer deletion: removing the file in this
-  refactor would discard legacy behavior and its regression surface without a
-  replacement-coverage decision.
+- RF-064 removed the unreferenced `web/src/components/Pods/Pods.jsx`, its
+  route-only stylesheet and tests, plus `VpnGatewayConfig.jsx`, which had no
+  other import. The production `/pods` route already rendered `Messaging.jsx`;
+  the active workspace retains pod-list/detail/message error handling and
+  request-cancellation regressions. The `PortForwarding` compatibility import
+  and its independently tested implementation remain.
 - `web/eslint.config.mjs` disables `no-unused-vars` globally. This is a
   tooling debt item, not evidence that a particular module is unused; future
   tightening must be incremental and test-backed.

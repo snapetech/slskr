@@ -273,9 +273,15 @@ pub(super) async fn maybe_upload_ftp_completed_download(
         return;
     }
     let target = state.config.controller_profile;
-    tokio::spawn(async move {
-        if let Err(error) = ftp::upload_completed_file(&options, target, &local_path).await {
-            eprintln!("[FTP] Completed-download upload failed: {error}");
-        }
-    });
+    if !state
+        .ftp_uploads
+        .submit(&state.managed_background_tasks, async move {
+            if let Err(error) = ftp::upload_completed_file(&options, target, &local_path).await {
+                eprintln!("[FTP] Completed-download upload failed: {error}");
+            }
+        })
+        .await
+    {
+        eprintln!("[FTP] Completed-download upload admission rejected during daemon shutdown");
+    }
 }

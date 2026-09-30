@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "capturedUtc": "2026-09-28T00:28:07.283335+00:00",
+  "provider": "GitHub Actions",
+  "sourceSha": "47440cfb5d5060708040142ae427b70bb31672c7",
+  "runId": 36359792162,
+  "runUrl": "https://github.com/snapetech/slskr/actions/runs/36359792162",
+  "overallRunStatusAtCapture": "completed",
+  "overallRunConclusionAtCapture": "success",
+  "archiveMatrixPassed": true,
+  "jobs": [
+    {
+      "name": "Production web assets",
+      "jobId": 108734547039,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734547039",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:05Z",
+      "completedAt": "2026-09-27T23:46:29Z",
+      "steps": [
+        {
+          "name": "Build production web assets",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "Platform linux-x64",
+      "jobId": 108734614616,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614616",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:38Z",
+      "completedAt": "2026-09-27T23:57:50Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "Platform linux-musl-x64",
+      "jobId": 108734614632,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614632",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:37Z",
+      "completedAt": "2026-09-28T00:03:33Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "Platform linux-arm64",
+      "jobId": 108734614643,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614643",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:40Z",
+      "completedAt": "2026-09-27T23:58:39Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "Platform linux-musl-arm64",
+      "jobId": 108734614655,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614655",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:40Z",
+      "completedAt": "2026-09-28T00:04:40Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "Platform windows-x64",
+      "jobId": 108734614633,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614633",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:37Z",
+      "completedAt": "2026-09-28T00:12:45Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "Platform macos-x64",
+      "jobId": 108734614653,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614653",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:37Z",
+      "completedAt": "2026-09-28T00:22:14Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "Platform macos-arm64",
+      "jobId": 108734614696,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734614696",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:44Z",
+      "completedAt": "2026-09-28T00:07:39Z",
+      "steps": [
+        {
+          "name": "Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify release archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Windows archive smoke",
+          "conclusion": "skipped"
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 10944684938,
+      "name": "ci-web-assets",
+      "size_in_bytes": 2429212,
+      "digest": "sha256:06373a6b577b0c8cebda3f6e9999c7c8ae33b083d6ba08c91a3d861196805298",
+      "created_at": "2026-09-27T23:46:27Z",
+      "expires_at": "2026-10-04T23:46:26Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10944684938"
+    },
+    {
+      "id": 10945272041,
+      "name": "ci-linux-x64",
+      "size_in_bytes": 20936855,
+      "digest": "sha256:c6826c0ae64daa77515cbb19f36a52013be22be98ec7e4de8a18e4e2524bb28a",
+      "created_at": "2026-09-27T23:57:48Z",
+      "expires_at": "2026-10-04T23:57:47Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10945272041"
+    },
+    {
+      "id": 10945786442,
+      "name": "ci-linux-musl-x64",
+      "size_in_bytes": 22718520,
+      "digest": "sha256:bf5c68323dbe933d8518e12a259e57fb5a905501ff0e8a64d23b01d82e2e3f78",
+      "created_at": "2026-09-28T00:03:31Z",
+      "expires_at": "2026-10-05T00:03:29Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10945786442"
+    },
+    {
+      "id": 10945811912,
+      "name": "ci-linux-arm64",
+      "size_in_bytes": 19651038,
+      "digest": "sha256:a3aef2db2ead9ba30b8085d28310682104855da4a933478aabc97637f83c4fa5",
+      "created_at": "2026-09-27T23:58:37Z",
+      "expires_at": "2026-10-04T23:58:35Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10945811912"
+    },
+    {
+      "id": 10945144089,
+      "name": "ci-linux-musl-arm64",
+      "size_in_bytes": 21542595,
+      "digest": "sha256:47ad01fbffa2dc999f3242b86905f878296682cbaa71c13a191018af977d346d",
+      "created_at": "2026-09-28T00:04:38Z",
+      "expires_at": "2026-10-05T00:04:36Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10945144089"
+    },
+    {
+      "id": 10945199655,
+      "name": "ci-windows-x64",
+      "size_in_bytes": 23502704,
+      "digest": "sha256:8c3a5f301b68a3bfbf1289858161061e0c39a521d1548e0684e28df6611e61b8",
+      "created_at": "2026-09-28T00:12:36Z",
+      "expires_at": "2026-10-05T00:12:34Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10945199655"
+    },
+    {
+      "id": 10945942631,
+      "name": "ci-macos-x64",
+      "size_in_bytes": 20816035,
+      "digest": "sha256:cc467c130fff826ea9c91031c64e0501cb533d3c14e8a18c2f953cff97d8bfcf",
+      "created_at": "2026-09-28T00:22:09Z",
+      "expires_at": "2026-10-05T00:21:59Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10945942631"
+    },
+    {
+      "id": 10946050507,
+      "name": "ci-macos-arm64",
+      "size_in_bytes": 19342978,
+      "digest": "sha256:aa8547e2c8557e0501df38593e1787a36b99bc035d15f2e2e1087bc76491e912",
+      "created_at": "2026-09-28T00:07:34Z",
+      "expires_at": "2026-10-05T00:07:31Z",
+      "expired": false,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/artifacts/10946050507"
+    }
+  ],
+  "overallRunPassed": true,
+  "supportJobs": [
+    {
+      "name": "Linux AArch64",
+      "jobId": 108734547154,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734547154",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:07Z",
+      "completedAt": "2026-09-27T23:52:19Z"
+    },
+    {
+      "name": "rust",
+      "jobId": 108734547247,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108734547247",
+      "conclusion": "success",
+      "startedAt": "2026-09-27T23:46:05Z",
+      "completedAt": "2026-09-27T23:57:22Z"
+    },
+    {
+      "name": "Package and deployment surfaces",
+      "jobId": 108740781475,
+      "url": "https://github.com/snapetech/slskr/actions/runs/36359792162/job/108740781475",
+      "conclusion": "success",
+      "startedAt": "2026-09-28T00:24:33Z",
+      "completedAt": "2026-09-28T00:27:02Z"
+    }
+  ]
+}

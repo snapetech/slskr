@@ -25,8 +25,8 @@ require '`AppRouteTable.jsx`, which owns lazy page imports, route definitions, a
   "route-table ownership decision is recorded"
 require '`AppNavigationActivity.js` owns bounded room-activity storage, chat/room' "$inventory" \
   "navigation-activity ownership decision is recorded"
-require '`web/src/components/Pods/Pods.jsx` has no production route import.' "$inventory" \
-  "legacy Pods ownership decision is recorded"
+require 'RF-064 removed the unreferenced `web/src/components/Pods/Pods.jsx`' "$inventory" \
+  "retired Pods module ownership decision is recorded"
 require "import AppContext from './AppContext';" web/src/components/App.jsx \
   "App imports the active context"
 require "import AppRouteTable from './AppRouteTable';" web/src/components/App.jsx \
@@ -47,9 +47,16 @@ require "export { default } from '../Pods/PortForwarding';" \
   web/src/components/PortForwarding/PortForwarding.jsx \
   "historical PortForwarding import remains an explicit alias"
 
+if [[ -e web/src/components/Pods/Pods.jsx || -e web/src/components/Pods/VpnGatewayConfig.jsx ]]; then
+  printf 'FAIL retired Pods route modules are still present\n' >&2
+  failed=1
+else
+  printf 'PASS retired Pods route modules are absent\n'
+fi
+
 if rg -n "import .*Pods.* from .*Pods/Pods|from './Pods/Pods'" \
   web/src/components/App.jsx web/src/components/PortForwarding web/src/components/Pods \
-  --glob '!Pods.jsx' --glob '!Pods.test.jsx' >/dev/null; then
+  >/dev/null; then
   printf 'FAIL a production component still imports the legacy Pods route implementation\n' >&2
   failed=1
 else

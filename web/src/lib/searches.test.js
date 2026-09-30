@@ -118,6 +118,18 @@ describe('search status collections', () => {
       'Searches API returned an invalid search status response',
     );
   });
+
+  it('passes a caller cancellation signal to the status request', async () => {
+    const signal = new AbortController().signal;
+    api.get.mockResolvedValue({ data: { id: 'search-1' } });
+
+    await search.getStatus({ id: 'search-1', signal });
+
+    expect(api.get).toHaveBeenCalledWith(
+      '/searches/search-1?includeResponses=false',
+      { signal },
+    );
+  });
 });
 
 describe('filterResponse', () => {

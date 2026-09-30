@@ -12,12 +12,12 @@ use ring::{
 };
 
 const QUIC_V1_INITIAL_SALT: [u8; 20] = [
-    0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9d, 0xa6, 0xa4, 0xc8, 0x0c, 0xad,
+    0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad,
     0xcc, 0xbb, 0x7f, 0x0a,
 ];
 const QUIC_V2_INITIAL_SALT: [u8; 20] = [
     0x0d, 0xed, 0xe3, 0xde, 0xf7, 0x00, 0xa6, 0xdb, 0x81, 0x93, 0x81, 0xbe, 0x6e, 0x26, 0x9d, 0xcb,
-    0xf9, 0xbd, 0x2e, 0x09,
+    0xf9, 0xbd, 0x2e, 0xd9,
 ];
 const SAMPLE_LENGTH: usize = 16;
 const AEAD_TAG_LENGTH: usize = 16;
@@ -94,9 +94,14 @@ fn first_alpn_inner(datagram: &[u8]) -> Result<Option<String>, ()> {
     let initial_secret = hkdf::Salt::new(hkdf::HKDF_SHA256, salt).extract(dcid);
     let client_initial_secret = expand_bytes(&initial_secret, "client in", 32)?;
     let client_initial_prk = hkdf::Prk::new_less_safe(hkdf::HKDF_SHA256, &client_initial_secret);
-    let header_protection_key = expand_quic_key(&client_initial_prk, "quic hp")?;
-    let packet_key = expand_bytes(&client_initial_prk, "quic key", 16)?;
-    let packet_iv = expand_bytes(&client_initial_prk, "quic iv", 12)?;
+    let (hp_label, key_label, iv_label) = if version == 0x6b33_43cf {
+        ("quicv2 hp", "quicv2 key", "quicv2 iv")
+    } else {
+        ("quic hp", "quic key", "quic iv")
+    };
+    let header_protection_key = expand_quic_key(&client_initial_prk, hp_label)?;
+    let packet_key = expand_bytes(&client_initial_prk, key_label, 16)?;
+    let packet_iv = expand_bytes(&client_initial_prk, iv_label, 12)?;
 
     let mask = header_protection_key
         .new_mask(&datagram[sample_offset..sample_end])
@@ -313,8 +318,7 @@ mod tests {
         assert_eq!(first_alpn(&[0x40; 1_200]), None);
     }
 
-    #[test]
-    fn extracts_first_alpn_from_client_hello() {
+    fn data_client_hello() -> Vec<u8> {
         let mut body = Vec::new();
         body.extend_from_slice(&[0x03, 0x03]);
         body.extend_from_slice(&[0; 32]);
@@ -329,9 +333,67 @@ mod tests {
         body.extend_from_slice(alpn);
         let mut message = vec![TLS_CLIENT_HELLO, 0, 0, body.len() as u8];
         message.extend_from_slice(&body);
+        message
+    }
+
+    #[test]
+    fn extracts_first_alpn_from_client_hello() {
         assert_eq!(
-            extract_alpn_from_client_hello(&message).unwrap(),
+            extract_alpn_from_client_hello(&data_client_hello()).unwrap(),
             Some("slskdn-overlay-data".to_owned())
         );
+    }
+    fn rustls_initial(version: tokio_rustls::rustls::quic::Version) -> Vec<u8> {
+        use tokio_rustls::rustls::{crypto::ring::cipher_suite, quic::Keys, Side};
+        let suite = cipher_suite::TLS13_AES_128_GCM_SHA256.tls13().unwrap();
+        let dcid = [0x12; 8];
+        let keys = Keys::initial(version, suite, suite.quic.unwrap(), &dcid, Side::Client);
+        let (first, version_number) = match version {
+            tokio_rustls::rustls::quic::Version::V1 => (0xc3, 1_u32),
+            tokio_rustls::rustls::quic::Version::V2 => (0xd3, 0x6b33_43cf_u32),
+            _ => unreachable!(),
+        };
+        let mut header = vec![first];
+        header.extend_from_slice(&version_number.to_be_bytes());
+        header.push(8);
+        header.extend_from_slice(&dcid);
+        header.extend_from_slice(&[0, 0]); // empty source CID and token
+        let payload_length = 1200 - (header.len() + 2 + 4 + 16);
+        header.extend_from_slice(&((4 + payload_length + 16) as u16 | 0x4000).to_be_bytes());
+        let number_offset = header.len();
+        header.extend_from_slice(&[0; 4]);
+        let hello = data_client_hello();
+        let mut payload = vec![6, 0]; // CRYPTO at offset zero
+        payload.extend_from_slice(&(hello.len() as u16 | 0x4000).to_be_bytes());
+        payload.extend_from_slice(&hello);
+        payload.resize(payload_length, 0);
+        let tag = keys
+            .local
+            .packet
+            .encrypt_in_place(0, &header, &mut payload)
+            .unwrap();
+        let mut packet = header;
+        packet.extend_from_slice(&payload);
+        packet.extend_from_slice(tag.as_ref());
+        let sample = packet[number_offset + 4..number_offset + 20].to_vec();
+        let (header, number_and_payload) = packet.split_at_mut(number_offset);
+        keys.local
+            .header
+            .encrypt_in_place(&sample, &mut header[0], &mut number_and_payload[..4])
+            .unwrap();
+        packet
+    }
+
+    #[test]
+    fn decrypts_independent_rustls_v1_and_v2_initials_and_rejects_tampering() {
+        for version in [
+            tokio_rustls::rustls::quic::Version::V1,
+            tokio_rustls::rustls::quic::Version::V2,
+        ] {
+            let mut packet = rustls_initial(version);
+            assert_eq!(first_alpn(&packet).as_deref(), Some("slskdn-overlay-data"));
+            packet[100] ^= 1;
+            assert_eq!(first_alpn(&packet), None);
+        }
     }
 }

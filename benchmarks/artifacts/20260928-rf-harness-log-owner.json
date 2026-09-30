@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-28",
+  "rf": [
+    "RF-006",
+    "RF-066"
+  ],
+  "baseCommit": "bec60f7eb8ffd911609b118a01ed563d3c797d23",
+  "dirtyCandidate": true,
+  "sourceSha256": {
+    "web/e2e/harness/NodeProcessLogs.ts": "c19a5cfedf8f98938443f6349b6554acf45c9b7842a95896d22378224553320d",
+    "web/e2e/harness/SlskrNode.ts": "d224f4b67ee0dd822f914c3ae8338cc2bdfa7090c0d590b1f24619c91e0574c9",
+    "web/e2e/harness-lifecycle.spec.ts": "2d6b7587b45393813b876a9d6a7948ae1ac49d11417f583401924ac22f43fc91",
+    "web/e2e/multippeer-sharing.spec.ts": "aa3bf3f1d7fc5a2d1c024cf0021219c04c4eb461f87ee07b13f7c11f5a0c5a99",
+    "crates/slskr/src/focused_controller_tests/collaboration.rs": "629d5bc159d27b5b5c2a7c1a124615a539084fbdcce31e5cc37f90deb831e881"
+  },
+  "validation": {
+    "utility": "13 passed; actual log output and fd=-1 assertions",
+    "typeScript": "both media specs and ownership utilities passed",
+    "media": "8 passed (29.6s); no FileHandle GC or missed contacts response diagnostics",
+    "invalidPersistedLimit": "distinct recipient regression passed, independently of deduplication",
+    "ownedProcesses": "all local validation sessions reaped; pre-existing user daemon unchanged",
+    "laterHosted": "pending"
+  },
+  "evidenceSha256": {
+    "target/rf-harness-log-owner-utility.log": "23bb52b47fc5ca2766657720e58e82070ed3486d31fa9099adb2cff8b88a6720",
+    "target/rf-harness-log-owner-typescript.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/rf-harness-log-owner-eight-real-media.log": "4930cb181028f26f75f85569e282042c4ca3273115749ae24251eb9df2e5a6a3",
+    "target/rf-share-stream-limit-unique-invalid-record.log": "035be2dd84087b3c957582c04bb4d6002df80a6a95abe3c8de0cc61cc433b13f"
+  },
+  "remaining": [
+    "Actual recipient backfill",
+    "Filesystem blocking-worker shutdown joins",
+    "Fresh complete hosted matrix"
+  ]
+}

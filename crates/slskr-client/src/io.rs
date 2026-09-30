@@ -245,7 +245,21 @@ pub async fn write_obfuscated_init_frame<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    write_obfuscated_init_frame_with_key(writer, frame, rand::random()).await
+    let key = loop {
+        let key: u32 = rand::random();
+        if shared_port_init_key_is_unambiguous(key) {
+            break key;
+        }
+    };
+    write_obfuscated_init_frame_with_key(writer, frame, key).await
+}
+
+// A random initialization key shares its wire prefix with plain frame lengths
+// and mesh TLS records. Reserve both ranges so locally written frames cannot
+// be classified as another protocol on the shared port.
+fn shared_port_init_key_is_unambiguous(key: u32) -> bool {
+    let bytes = key.to_le_bytes();
+    key as usize > DEFAULT_MAX_FRAME_LEN && bytes[..2] != [0x16, 0x03]
 }
 
 pub async fn write_obfuscated_init_frame_with_key<W>(
@@ -666,8 +680,25 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::prefixed_frame_len;
+    use super::{prefixed_frame_len, shared_port_init_key_is_unambiguous, DEFAULT_MAX_FRAME_LEN};
     use crate::ClientError;
+
+    #[test]
+    fn shared_init_keys_exclude_plain_lengths_and_every_tls_prefix() {
+        for key in [0, 1, DEFAULT_MAX_FRAME_LEN as u32] {
+            assert!(!shared_port_init_key_is_unambiguous(key));
+        }
+        assert!(shared_port_init_key_is_unambiguous(
+            DEFAULT_MAX_FRAME_LEN as u32 + 1
+        ));
+        assert!(shared_port_init_key_is_unambiguous(u32::MAX));
+        for third in 0..=u8::MAX {
+            for fourth in 0..=u8::MAX {
+                let key = u32::from_le_bytes([0x16, 0x03, third, fourth]);
+                assert!(!shared_port_init_key_is_unambiguous(key));
+            }
+        }
+    }
 
     #[test]
     fn framed_allocation_length_rejects_prefix_overflow() {

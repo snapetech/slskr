@@ -1,0 +1,632 @@
+[
+  {
+    "route": "/searches",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 3159,
+      "loadEventMs": 3160,
+      "firstContentfulPaintMs": null,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/discovery-graph",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2798,
+      "loadEventMs": 2799,
+      "firstContentfulPaintMs": 3096,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/playlist-intake",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2790,
+      "loadEventMs": 2792,
+      "firstContentfulPaintMs": 3060,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/wishlist",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2802,
+      "loadEventMs": 2804,
+      "firstContentfulPaintMs": 3120,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/downloads",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2808,
+      "loadEventMs": 2810,
+      "firstContentfulPaintMs": 3104,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/uploads",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2786,
+      "loadEventMs": 2786,
+      "firstContentfulPaintMs": 3064,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/messages",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2788,
+      "loadEventMs": 2789,
+      "firstContentfulPaintMs": 3064,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/users",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2770,
+      "loadEventMs": 2771,
+      "firstContentfulPaintMs": 3032,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/contacts",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2773,
+      "loadEventMs": 2774,
+      "firstContentfulPaintMs": 3040,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/solid",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2772,
+      "loadEventMs": 2773,
+      "firstContentfulPaintMs": 3048,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/collections",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2777,
+      "loadEventMs": 2779,
+      "firstContentfulPaintMs": 3044,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/sharegroups",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2783,
+      "loadEventMs": 2784,
+      "firstContentfulPaintMs": 3056,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/shared",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2785,
+      "loadEventMs": 2785,
+      "firstContentfulPaintMs": 3060,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/browse",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2780,
+      "loadEventMs": 2781,
+      "firstContentfulPaintMs": 3052,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/system",
+    "viewport": "desktop",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2776,
+      "loadEventMs": 2777,
+      "firstContentfulPaintMs": 3044,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/searches",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2784,
+      "loadEventMs": 2785,
+      "firstContentfulPaintMs": 3064,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/discovery-graph",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2769,
+      "loadEventMs": 2769,
+      "firstContentfulPaintMs": 3048,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/playlist-intake",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2785,
+      "loadEventMs": 2786,
+      "firstContentfulPaintMs": 3048,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/wishlist",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2779,
+      "loadEventMs": 2780,
+      "firstContentfulPaintMs": null,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/downloads",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2778,
+      "loadEventMs": 2778,
+      "firstContentfulPaintMs": 3044,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/uploads",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2781,
+      "loadEventMs": 2783,
+      "firstContentfulPaintMs": 3052,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/messages",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2776,
+      "loadEventMs": 2777,
+      "firstContentfulPaintMs": 3056,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/users",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2784,
+      "loadEventMs": 2786,
+      "firstContentfulPaintMs": 3044,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/contacts",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2780,
+      "loadEventMs": 2782,
+      "firstContentfulPaintMs": 3040,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/solid",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2776,
+      "loadEventMs": 2778,
+      "firstContentfulPaintMs": null,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/collections",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2784,
+      "loadEventMs": 2786,
+      "firstContentfulPaintMs": 3072,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/sharegroups",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2779,
+      "loadEventMs": 2780,
+      "firstContentfulPaintMs": 3064,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/shared",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2799,
+      "loadEventMs": 2800,
+      "firstContentfulPaintMs": 3072,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/browse",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2785,
+      "loadEventMs": 2786,
+      "firstContentfulPaintMs": 3072,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  },
+  {
+    "route": "/system",
+    "viewport": "mobile",
+    "httpStatus": 200,
+    "cspNonceMatches": true,
+    "cspConsoleErrors": 0,
+    "axe": {
+      "violations": [],
+      "passes": 17,
+      "incomplete": 1
+    },
+    "performance": {
+      "domContentLoadedMs": 2863,
+      "loadEventMs": 2864,
+      "firstContentfulPaintMs": 3236,
+      "scriptRequests": 7,
+      "scriptTransferBytes": 347827,
+      "scriptDecodedBytes": 1112351
+    },
+    "browserErrors": 0
+  }
+]

@@ -1,0 +1,955 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "17e7cba4cf25822a616db3afcadc6cfd95831d0c",
+  "source": "crates/slskr-web/src/web_actions.rs",
+  "originalBytes": 133129,
+  "originalLines": 3630,
+  "originalSha256": "f159b1d7e9d02b46e46c7807d633b75b973e79cafcb10e3d0c3e39ee0706cf61",
+  "originalLibrarySha256": "c2f785d0ac14342723cc871d615857328ea83528efc8d3499bce167de2bb8d5f",
+  "librarySha256": "ea1721807b84acb386788e9e485593d6a21f728de4c721c601ee928d4aff1d2a",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 87,
+  "publicDeclarations": [
+    "AutomationRecipe",
+    "ExperiencePreference",
+    "PlayerRadioPlan",
+    "PlayerRadioQuery",
+    "SearchActionPreview",
+    "SearchCandidateRank",
+    "SearchDuplicateGroup",
+    "SimilarQueueCandidate",
+    "player_rating_key",
+    "player_rating_summary",
+    "player_stream_url"
+  ],
+  "owners": {
+    "crates/slskr-web/src/web_action_owners/experience_action_models.rs": {
+      "lines": 244,
+      "sha256": "bc48b3216c58cbcf544ead0dd373dd1fcd76cb681abdd615f9c6e6b7d6c215cc"
+    },
+    "crates/slskr-web/src/web_action_owners/native_action_execution.rs": {
+      "lines": 567,
+      "sha256": "75d69505383b8848198e9316caebea104e236fc8978beabf5709e1a811131ce6"
+    },
+    "crates/slskr-web/src/web_action_owners/native_action_projection.rs": {
+      "lines": 59,
+      "sha256": "af9cf55ca3603f938d551a77d67a5da1f76dafe39f338793b512da3c6d447ebe"
+    },
+    "crates/slskr-web/src/web_action_owners/native_form_values.rs": {
+      "lines": 518,
+      "sha256": "dfa6778ff8eb62fa412b70d9b6a1879af86aaaf21934f70ae7fd7b088ef9f25e"
+    },
+    "crates/slskr-web/src/web_action_owners/native_reference_controls.rs": {
+      "lines": 405,
+      "sha256": "bb52a8c317cce919d198e30d9d9e61079e03810ea51a10ae1d82662968be5864"
+    },
+    "crates/slskr-web/src/web_action_owners/native_row_context.rs": {
+      "lines": 249,
+      "sha256": "612d0c1405a2a941ccaa57fbcf94e8bd16d0876be800d6ead1c81478c405e869"
+    },
+    "crates/slskr-web/src/web_action_owners/native_share_access.rs": {
+      "lines": 326,
+      "sha256": "01a8a11bc6f7c598d5e2d87bb564e9b65be4e2f47a7c832a6d09cf4295a59fb5"
+    },
+    "crates/slskr-web/src/web_action_owners/native_table_filters.rs": {
+      "lines": 257,
+      "sha256": "37bc4c3224d5d39f127385e98a66003dd05d484fab4b2a36d915d30bf657e0fc"
+    },
+    "crates/slskr-web/src/web_action_owners/native_table_selection.rs": {
+      "lines": 315,
+      "sha256": "8034a7562490f8ac1ad634da87997aeaff8ffeb3c89c9db4ad83fa5249e5e03c"
+    },
+    "crates/slskr-web/src/web_action_owners/native_table_sorting.rs": {
+      "lines": 204,
+      "sha256": "9832230f7e09925638d0dd295cd8d79a5dcfaa3dd1c88b0e3e02e81567af8755"
+    },
+    "crates/slskr-web/src/web_action_owners/native_wishlist_actions.rs": {
+      "lines": 399,
+      "sha256": "8d3ee236ab6891152160805d6b9c90d784a57e5f6f7d19523167bba7b8f5e5f0"
+    },
+    "crates/slskr-web/src/web_action_owners/player_action_models.rs": {
+      "lines": 102,
+      "sha256": "e07f5d83e43c96cffc686ba23244a42b02e2630fd9ad26cf52e81e33d85a82de"
+    },
+    "crates/slskr-web/src/web_action_owners/search_action_models.rs": {
+      "lines": 27,
+      "sha256": "c72268c2a0e7a5d4da49597feb29dcdcb98f99bc0a5c2627f9057799b445897e"
+    }
+  },
+  "items": [
+    {
+      "kind": "fn",
+      "name": "transfer_attempts_response_html",
+      "owner": "native_action_projection",
+      "wasmOnly": false,
+      "originalBytes": 1266,
+      "originalSha256": "2c787e67f027e095b326d49acac8f9c6fbfc25ad6c85cb377f041e07b91cbea5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_private_message_auto_response_action",
+      "owner": "native_wishlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 2709,
+      "originalSha256": "cf098e8fef5f251702b5752281d9ee5d3830b65749232e2075e5eab10a34756f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_wishlist_policy_action",
+      "owner": "native_wishlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 5238,
+      "originalSha256": "c1c7965657f48aae5c9c4a801010e6ec1438c7973a7bb168dd19b27950c3766b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_wishlist_ignored_result_action",
+      "owner": "native_wishlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 4007,
+      "originalSha256": "d171be9463e51ded9e2393117abfd6bc6c0e48206a54d1d0b78f2cc50b89c702",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_row",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 538,
+      "originalSha256": "0c9960186e814845d0ccee8feb439c4dcaa5624970d19ce907cd4b921794ee7c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_selected_row_attribute",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 499,
+      "originalSha256": "78ccd4297414cd4b80e0adab2df2e649290b1fdbdd95468f067a10d89b6bd30e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_selected_context",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 971,
+      "originalSha256": "997151ae8750ec57866608af17aafc3ee9ca3a4f3ebf875483b35888abff9436",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_json_string_by_key",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 768,
+      "originalSha256": "13ebb4cd6de8b941920d9202c27279b043edc830af7bfb376cbe61f8dcb0ddb3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_set_action_status",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 174,
+      "originalSha256": "fb7a1a5cd4692dab0651f32502fa249db23be85b04d71efb6e7a81d92043781c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_copy_context",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 541,
+      "originalSha256": "af4ed07906e9811a20a643969ce2cfacf1461e0c46241a16f739f733ce899675",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_shared_grant_id",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 281,
+      "originalSha256": "00ab2e040b66ecb1e416dad922c52eb98d74612323cd48ac24c75fc9da534c48",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_shared_grant_is_selected",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 398,
+      "originalSha256": "56af201f510ecbe123c1b2b1c981dd9c483baadd73f95217b3913bfed567b0aa",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_shared_token_storage_key",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 148,
+      "originalSha256": "cbd672646387f72b9bf93d3bba946cab03787e4275de0f7ecd21c82e205cfe94",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_shared_token",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 420,
+      "originalSha256": "e599149c4cccfe811da82f9dc9062ee444b3e8acfc555facafedb0c40c14029c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_store_shared_token",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 280,
+      "originalSha256": "5a1e41faea13dbd1a83e1dd79d5414b7f78e09c80ad62f377ecbbe8285ea9c37",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_issue_shared_access_token",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 678,
+      "originalSha256": "2ad0a607d5e4d43e45c1865c6945ddcd659ef81d120da2e03576e6db821cffb1",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_issue_share_token",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 1254,
+      "originalSha256": "f8a2888d81b257c9153dcf1cef93fe4d18c17ebb898a37e34b6efdcab31edbd8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_copy_shared_manifest",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 1482,
+      "originalSha256": "6ba57cd7216b02275bdb24a824912cfccc899b64031464342c3ee2f69229dc8c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_stream_shared_manifest",
+      "owner": "native_share_access",
+      "wasmOnly": true,
+      "originalBytes": 7860,
+      "originalSha256": "0a5b92b9c4a49bcc2157cc8aaf0721f8d3c3a5dc2b89eea89e17c2b09ef91a60",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_fold_duplicate_rows",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 1856,
+      "originalSha256": "8f9207f64fb979a1a21f8897d73ac7cbcfd4ffcc8eed246746e35f8d97bba7b6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_import_wishlist_list",
+      "owner": "native_wishlist_actions",
+      "wasmOnly": true,
+      "originalBytes": 1913,
+      "originalSha256": "6ed3743a8a60016124235a634de739e20c8a8b0f6802eb251fcb342a8f2e1273",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_bulk_transfer_action",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 1022,
+      "originalSha256": "8d20ae7a6e0a0baf7516bb78d583fe6e83be952c8b6c9c3136b3cee3de551f00",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_open_search",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 616,
+      "originalSha256": "6882d68aa999e9dbd64665cf2e2c9845f195e0bbcbd642dd8c222237f0a544bb",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "handle_native_local_action",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 5997,
+      "originalSha256": "b67ffd0bfb791d9a9dd16a3ec398048a8768729ed675c4d1f27cc5c74ac2169e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "run_native_route_action",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 700,
+      "originalSha256": "d9064eb21e6dbf41bb55d7f7d3db65af5cf545ad2a952917e7194b2ece321468",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_requires_confirmation",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 283,
+      "originalSha256": "a4b7d207af128bb07e463bc6f6f4056d58f6275b1295d260ae4b3d6d63cf703e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "show_native_confirm_modal",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 3493,
+      "originalSha256": "d512a49a2f059dbb97d62d11e052dccd7ac369b7a341785ece02dbb7e6d7021e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "execute_native_route_action",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 2497,
+      "originalSha256": "4482d676c4f9648afb4fbeb588f8698a4a2d0ecd85a40ea5782af11c84a48099",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "download_body_with_selected_destination",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 826,
+      "originalSha256": "58ec4e8c9c86ac3711065cee883b071f665fe24416101f83afd0defac3776175",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_value",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 3934,
+      "originalSha256": "b6d582f63ec8d8904f3404a81d9bbf9de8a82c23ec9ac78ae7998d9505132380",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_value_selectors",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 2761,
+      "originalSha256": "a14495e60e627a3829bf2f804d9e0215fe993e17ce5c9903d664dc037f014607",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_generic_value_selectors",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 206,
+      "originalSha256": "9fc6adbf04c2dc22a11e9de1374031615b440d552455a2fb61997953dcef541b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_target",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 3093,
+      "originalSha256": "cacfe4f9e6a58234f4cc3483e3fb69acdf4446292e1ef3f51bcb1f4e9830b37b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_target_for_ui",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 2782,
+      "originalSha256": "1745c9a7517c894372d0bc22c7f25674913f13cbf5d451e1e5e87fd36ccff60e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_route_action_is_ready",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 2691,
+      "originalSha256": "377bea2651720e78e26f93aa2b8dfbf2d6b8184ceba6a67cd86308e27d47a959",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "route_target_segment",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 583,
+      "originalSha256": "2b1f58c408173138f7b5c49286fea358ed07c10f8f3caa914933120f772fb069",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_id",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 1396,
+      "originalSha256": "5a1a1302432543595995f830c108ae7f2566df10cdb45a0bd8cafa3e6eb9f9f4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "first_workspace_value",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 632,
+      "originalSha256": "83778d1e0498d1d28b945ce9e9c54b00061a3e5bd64de013bf608dfc33d2e435",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "selected_native_row_detail",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 360,
+      "originalSha256": "9c105071414589d5990428343b2e38f11562f3db3d6bfb914ff8835f04c2cd1c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "selected_native_row_title",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 358,
+      "originalSha256": "3019c14d21966925ed4c75855bd4ecfc067cb72199dcbac3ac13c7a4cd339d93",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "selected_native_row_titles",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 776,
+      "originalSha256": "6a4b443bd1a864c40b49cdb7922bf12806511451f01430d41b59856f3b1a09d4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "selected_native_row_attribute",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 363,
+      "originalSha256": "bf9f60f6b2ce359dfe582314012fee7134a7526222375f5d4839e74226f07465",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "selected_native_row_attribute_values",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 798,
+      "originalSha256": "aa7d9184a3f092ba36aaa2c30b8608f26b1411aa119c8e3c350fb1f54e50d20c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "selected_native_row_target",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 307,
+      "originalSha256": "f19c62d08cbd22ceb93b41eebc25284b793c552b14bcd7c59773cca61a771f32",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "button_native_row_target",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 535,
+      "originalSha256": "0141453628d44e173e22a9e801c874452c8232404e1d7baa3f78a5d5169278cf",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "button_native_row_attribute",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 324,
+      "originalSha256": "e4588b6f0d6a3114ae9b139d8203a52853b6f07dadc3f41e0908f496e093d0cc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "document_selected_native_row_title",
+      "owner": "native_row_context",
+      "wasmOnly": true,
+      "originalBytes": 366,
+      "originalSha256": "ac5e34699e9e61ed88d427a48f9b73240a3abd303861af02eeaf7aa98d135912",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_fallback",
+      "owner": "native_action_projection",
+      "wasmOnly": false,
+      "originalBytes": 957,
+      "originalSha256": "511ff6a457703d5a042528cd314bc560a87bccd8287972b2ec83baf57700ab7e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "form_control_value",
+      "owner": "native_form_values",
+      "wasmOnly": true,
+      "originalBytes": 473,
+      "originalSha256": "2fed4c82f649bd88e23437ecee4c8bc3f062f8a78a1694cdfac9b697513f9a23",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_native_filters",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 5636,
+      "originalSha256": "449a2544525543583567b3da6f79798eeb7a0c0062b32bb90a9faf61fea72bb2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "native_state_key",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 324,
+      "originalSha256": "a21b59161c9cc96b4ae584ee6c9842a08e2cd767b0029cd5a5d286100209cef3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "session_storage_for_workspace",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 289,
+      "originalSha256": "4d14e04508df3b7b57e6d5236d75dad64dd9ece8421ee8f56da9413e7744f66f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "restore_native_filter",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 703,
+      "originalSha256": "3c992592539cce02dd83acf8eaf0cdfd9279b96e3604d01b6e7e71767668c0dd",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_native_filter",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 419,
+      "originalSha256": "8801d6772aa277ba220b49fcb2454dc68ae4bec28c6576279bf840862c1c4756",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "reset_native_table_state",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 756,
+      "originalSha256": "f6e0cc8918e63c7db02692bdff8ab9bd2fb584e81e7d37862c0ea95a32c55f97",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "apply_native_filter",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 1270,
+      "originalSha256": "4f6887c463d80b1a9fe32e662f76f88b59a086be6606dbddaace1bb0f30a88fa",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_native_filter_count",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 299,
+      "originalSha256": "1adb530031ea2252e11ae0e887aa5931893793e8fd2ed720eb0d021b92eedf51",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "set_native_filter_count",
+      "owner": "native_table_filters",
+      "wasmOnly": true,
+      "originalBytes": 286,
+      "originalSha256": "535f6f559b18a0a0356bffb03704be37c50d19892f81ccd9758d3b374c14e63c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "select_visible_native_rows",
+      "owner": "native_table_selection",
+      "wasmOnly": true,
+      "originalBytes": 1481,
+      "originalSha256": "12f2598d69f3515070ad6aa438579a552827cac95c20eb15085fa9164c845a68",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "clear_native_selection",
+      "owner": "native_table_selection",
+      "wasmOnly": true,
+      "originalBytes": 912,
+      "originalSha256": "d9e99c8d68cad7cf69c825c79f2fdcb1204872cfe4493c27702a5a72960dcdb4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_native_selection_summary",
+      "owner": "native_table_selection",
+      "wasmOnly": true,
+      "originalBytes": 1124,
+      "originalSha256": "2af95d9580845c0a0c57a42f387c0b7ca9f1e03f4cad92d0b4abc1cbd30eaf1a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_native_inspector",
+      "owner": "native_table_selection",
+      "wasmOnly": true,
+      "originalBytes": 3299,
+      "originalSha256": "839c61f644771df9f755a705c208910ef34b128ce947b0b6f7d5c336dd0ba6ca",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_native_selection_preview",
+      "owner": "native_table_selection",
+      "wasmOnly": true,
+      "originalBytes": 2658,
+      "originalSha256": "a0a5f9106c8a989eed759782f3157f1b810261b55a12226dd98dd75980d21f5a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_native_sorters",
+      "owner": "native_table_sorting",
+      "wasmOnly": true,
+      "originalBytes": 855,
+      "originalSha256": "58cca84902d6b90791bad3f4fa69a3b2bb7ef83ac8c74cbb40690f13a59625b4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "sort_native_table",
+      "owner": "native_table_sorting",
+      "wasmOnly": true,
+      "originalBytes": 459,
+      "originalSha256": "b2f163c2c494074c6500ec6b510be406d9dfd11efca89f1e687acb7b972e43f7",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "apply_native_sort",
+      "owner": "native_table_sorting",
+      "wasmOnly": true,
+      "originalBytes": 2073,
+      "originalSha256": "0a6f57932fb072bd389bce70d04d80d8ac79237bb685d18ad28df1397ef154a2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "restore_native_sort",
+      "owner": "native_table_sorting",
+      "wasmOnly": true,
+      "originalBytes": 1210,
+      "originalSha256": "11d1489b567ba4200deb97d5512d5094d0eb268d21fb65dcf40d934a75c517cf",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "persist_native_sort",
+      "owner": "native_table_sorting",
+      "wasmOnly": true,
+      "originalBytes": 369,
+      "originalSha256": "cf64222fc201fc484ec230acd72227c7716a1b17f20193a7949c0a3725057541",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "reset_native_sort",
+      "owner": "native_table_sorting",
+      "wasmOnly": true,
+      "originalBytes": 1936,
+      "originalSha256": "5768131c3b44d49502f6378dbb49452f39c08af5d6198a9cebbfd162412049e0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "show_toast",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 855,
+      "originalSha256": "45148ccfcc7c2ac78606bfe831e668888a0183da3c1666e86f6ab45551c6bbd6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "select_native_row",
+      "owner": "native_table_selection",
+      "wasmOnly": true,
+      "originalBytes": 2112,
+      "originalSha256": "85ce125e562a300f21a7bec34eb6573934a1a517e1faffe087b732c6ed72478f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_live_controls",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 2562,
+      "originalSha256": "bb4ee3a69aaef79f2dd58d663742e731daffd8216ea88651f7c0e54bd3e42880",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "reference_action_value",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 1212,
+      "originalSha256": "840e102a53534c28d2377b722c59238ee2a480fa942e07ddfb636b7fc096c24c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "set_reference_status",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 416,
+      "originalSha256": "180e75177c9df5d603b8e04943c666d82475bef7e8965ca15ab7180fa7582171",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "copy_reference_text",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 589,
+      "originalSha256": "d521ef93c912498edb38dcf79c1f0d3e585b68edee66f2007ea814c1110e7dbc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_reference_actions",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 8205,
+      "originalSha256": "5552011565010ea5eebe0f2283cc801f20f906f92c750c6bd100588f96a87500",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_global_shortcuts",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 3807,
+      "originalSha256": "85cd2d339b7ea343385e3b4e9254aecc6b79a32e353c09fe9ac7159fe2241aed",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "keyboard_event_started_in_text_control",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 276,
+      "originalSha256": "776993c2e7ec840e60f22cf1d530b11958bd4100c185c9ae87c5b1af52f3f9b5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "focus_first_card_filter",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 416,
+      "originalSha256": "c19a6a363f7e33679d6dc2cd4d9a6b401c699e3f06a441d45614044b47f23550",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "clear_all_card_filters",
+      "owner": "native_reference_controls",
+      "wasmOnly": true,
+      "originalBytes": 1906,
+      "originalSha256": "f8665c162acb6a3e170ef1c0345111efb9f36f8a03502be6e65eb7e4e09d6ebd",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "set_live_status",
+      "owner": "native_action_execution",
+      "wasmOnly": true,
+      "originalBytes": 230,
+      "originalSha256": "b5cb684f79c99bab47387515b7114468ef8f4ee3ab68f8f941cac85d64bbb965",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_rating_key",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 1015,
+      "originalSha256": "6b7358466f668408cca55909ea04ae5b38c80b1c58aaa82c56d686bce5490f13",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "percent_encode_player_stream_component",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 343,
+      "originalSha256": "390c281d0b753c0e2d19d4b3940821dd784b1a98a6c1e4a47eba3747f1b489ef",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_stream_url",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 657,
+      "originalSha256": "ce9b04fb0d65955b57f27cb7143fead915e0bfc3f88ac7d4f85212faf1121eaf",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_rating_summary",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 219,
+      "originalSha256": "4f016d4524695ddac77c34623909c277359cc59bbeaeae98c8a04c6f4fba055d",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "PlayerRadioQuery",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 145,
+      "originalSha256": "a0ed1fc6147655e99b7b351f0a222f3d5d224367885358269c9d591ae3b2f0ff",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "PlayerRadioPlan",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 219,
+      "originalSha256": "6f244d2d6018bf24f153693b1b118cbdbab1f01324293f82d106c701bd1c8789",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SimilarQueueCandidate",
+      "owner": "player_action_models",
+      "wasmOnly": false,
+      "originalBytes": 148,
+      "originalSha256": "dedb6e5902666f04388db7e95ab57cd9ad0f8336e157dea52a7d8bd7b8b4fb34",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SearchCandidateRank",
+      "owner": "search_action_models",
+      "wasmOnly": false,
+      "originalBytes": 125,
+      "originalSha256": "38159643859cde27921e9235f6c4dc6ca42fc8361e989cc6089383482147f980",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SearchDuplicateGroup",
+      "owner": "search_action_models",
+      "wasmOnly": false,
+      "originalBytes": 222,
+      "originalSha256": "e0b16ecfb54e42424e50257bd7cc5da152ae13350aed1ead2c8f3c865079e4fb",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SearchActionPreview",
+      "owner": "search_action_models",
+      "wasmOnly": false,
+      "originalBytes": 350,
+      "originalSha256": "abbe5e27a39c594331e9084bc57898f562553a651559264291871498c7f55202",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "ExperiencePreference",
+      "owner": "experience_action_models",
+      "wasmOnly": false,
+      "originalBytes": 232,
+      "originalSha256": "6b1c44d796f3d6ebc1f0bca9af656aea0c3db8e38caae769cc56a93979cb1599",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "AutomationRecipe",
+      "owner": "experience_action_models",
+      "wasmOnly": false,
+      "originalBytes": 411,
+      "originalSha256": "f9b98d0381cbee803abc0ada4ed8be6073f4fe50bf05914ab6248112534e5f2c",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "experience_preferences",
+      "owner": "experience_action_models",
+      "wasmOnly": false,
+      "originalBytes": 3995,
+      "originalSha256": "990688dc92fa126ac28feb9a7692adab2060ce61f2c83768f7329959365c3d16",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "automation_recipes",
+      "owner": "experience_action_models",
+      "wasmOnly": false,
+      "originalBytes": 3693,
+      "originalSha256": "555676bb0c4063ca405208b765e213d6f80858c7911dd79e2b6b95be1eefeeca",
+      "relocations": 0
+    }
+  ],
+  "publicBindingsMatchOriginal": true,
+  "gates": [
+    {
+      "command": "cargo test -p slskr-web --lib",
+      "result": "passed",
+      "logSha256": "a402ef62572a08a4d225a6d7d491d1d9e40b3ed54e702eab8fda53c0f781133f"
+    },
+    {
+      "command": "cargo clippy -p slskr-web --all-targets -- -D warnings",
+      "result": "passed",
+      "logSha256": "d3e916c6cded1aff2120d7fac721ef0a5b11c05db3ab45ad02e611cd0060dd74"
+    },
+    {
+      "command": "cargo check --locked -p slskr-web --target wasm32-unknown-unknown",
+      "result": "passed",
+      "logSha256": "8506b3de01b4d2c5d6106b056479cd5338086216691238465f73048951632aea"
+    }
+  ]
+}

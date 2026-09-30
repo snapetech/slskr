@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "5941b0349c79eb4035d1f08cc1ac0fc40c7c3d58",
+  "source": "crates/slskr-web/static/styles.css",
+  "originalBytes": 57794,
+  "originalLines": 3316,
+  "originalSha256": "c538f439895b881ddcd60d10b15bdd361f4c11c22a021cd4e0c1a340ae704a9f",
+  "exactSourceReconstruction": true,
+  "cascadeOrderPreserved": true,
+  "rulesPreserved": 456,
+  "owners": [
+    {
+      "path": "crates/slskr-web/static/style_parts/shell_base.css",
+      "originalStartLine": 1,
+      "lines": 378,
+      "bytes": 6325,
+      "sha256": "df755b4bd76a7126de71cf21d176c446396e15aa0c8cc87bbf7dbe471606741a"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/workspace_tables.css",
+      "originalStartLine": 379,
+      "lines": 403,
+      "bytes": 6929,
+      "sha256": "1d54ea4c89c2980aba561ba74f12fb1c272a1444b3274f32a4cefb238c76a678"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/player_visualizer.css",
+      "originalStartLine": 782,
+      "lines": 160,
+      "bytes": 2762,
+      "sha256": "c44670d4ed98a7e1353977b684e625555bdf2b779e5b5e0f2899f4cdad65e30a"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/route_reference_workflows.css",
+      "originalStartLine": 942,
+      "lines": 228,
+      "bytes": 3810,
+      "sha256": "7e22e1be7e10c80c6871380d9a9b664e717034d0d2d8cece6ed039bfd7c908fa"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_workspace.css",
+      "originalStartLine": 1170,
+      "lines": 212,
+      "bytes": 3607,
+      "sha256": "33d24c1a533e6af030c50f1c092b010db1525549c39c5cdb11a3f96c156e7cae"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/wishlist_rules.css",
+      "originalStartLine": 1382,
+      "lines": 252,
+      "bytes": 4993,
+      "sha256": "c9d3330ec0a886ecb9a88bf6b2c37acc05c9fe37edfc3871b76eb9a0259e59ed"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/transfer_policies.css",
+      "originalStartLine": 1634,
+      "lines": 251,
+      "bytes": 4591,
+      "sha256": "20f786f5e0ef47d603a09a3bd1211186e6b926afb974cf2e6accf746b51a07f5"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/wishlist_history.css",
+      "originalStartLine": 1885,
+      "lines": 91,
+      "bytes": 1868,
+      "sha256": "7f9c8c2afea0bdf1ad39d9abf57ea7e47a0716cc134ac141eb0cb9a5267c04ea"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_table_projection.css",
+      "originalStartLine": 1976,
+      "lines": 376,
+      "bytes": 6507,
+      "sha256": "5cdc4f3e984e2183fb0357f104c92b97755bf8d641413e2fb0857ab749695a92"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_editors_messaging.css",
+      "originalStartLine": 2352,
+      "lines": 226,
+      "bytes": 4079,
+      "sha256": "5b7533567a4d35faf54f6ba651e1a3047da92c24175517de707ff3b1e61d42dc"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_selection_dialogs.css",
+      "originalStartLine": 2578,
+      "lines": 169,
+      "bytes": 2805,
+      "sha256": "da3d5ff7b4d4c983b6f8e861c0c8b842904ae63e849fe27e078e6912a114002f"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/native_domain_workflows.css",
+      "originalStartLine": 2747,
+      "lines": 362,
+      "bytes": 6008,
+      "sha256": "c33b1892113580b98b02ba3b970b835d0864ea3d38426269d4456c77a27c8807"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/local_preferences.css",
+      "originalStartLine": 3109,
+      "lines": 117,
+      "bytes": 1790,
+      "sha256": "c0451b06495f0f948108b7cff50c486dd42b5cd1b8de4849273690107389d1b2"
+    },
+    {
+      "path": "crates/slskr-web/static/style_parts/responsive_layout.css",
+      "originalStartLine": 3226,
+      "lines": 91,
+      "bytes": 1720,
+      "sha256": "8337ce39262b9c7e7cd4322809ea4b966eab6af9ff5183c4d63ee1bd68463c81"
+    }
+  ],
+  "manifest": "crates/slskr-web/static/styles.manifest.json",
+  "builtStylesheetSha256": "c538f439895b881ddcd60d10b15bdd361f4c11c22a021cd4e0c1a340ae704a9f",
+  "singlePublicStylesheet": "styles.css",
+  "validation": {
+    "webTests": {
+      "passed": true,
+      "sha256": "97927ddd05c0007dd458238ad98bab82115e8d970c62143ffe97203451ab2486"
+    },
+    "strictClippy": {
+      "passed": true,
+      "sha256": "78ff8b5a82c1038828962c4ffd7b8009a2f053b7c3033523b63a6ccf47874d1c"
+    },
+    "wasmCheck": {
+      "passed": true,
+      "sha256": "9ddcb7a97f3589835ba8f354c41d25b0a805bd5f85ddbccaff009e6f6dc7236c"
+    },
+    "bundleTests": {
+      "passed": true,
+      "sha256": "62cfbeb2911bb226088bfb0918eb4b05008ea70b20bce854ee2ca8a564bd37a5"
+    },
+    "releaseBuild": {
+      "passed": true,
+      "sha256": "a881f5922389c4a5fe2b484ff745352816380a47d4ff5fb51e9cec6f536942cf"
+    },
+    "auditTooling": {
+      "passed": true,
+      "sha256": "e0093eab2793d4f2dbda84fefa10b6222e960251e0a14c268c3ce06c9ec62042"
+    }
+  },
+  "builderSha256": "86e9d2f9d08a984bdb46917206e8964f9c0b7cc7b350b663cc341ad31e271d74"
+}

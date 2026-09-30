@@ -118,3 +118,11 @@ The harness validates fixtures on startup:
 - Verifies every manifest file has the expected SHA-256 digest
 
 If validation fails, tests abort immediately with clear error messages.
+
+### Build command ownership
+
+The native harness shares only builds that are currently running. Each Cargo or
+npm command has a ten-minute deadline. Stopping the last node waiting for a build
+cancels the owned command tree and waits for its child to close. Stopping one node
+leaves a build running when another node still needs it. Native TCP, DHT, and
+control/data QUIC use one numeric peer port per node.

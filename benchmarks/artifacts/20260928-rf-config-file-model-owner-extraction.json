@@ -1,0 +1,1412 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "bd61a807e44e259587d2b3df7c2337def8b51cb9",
+  "source": "crates/slskr/src/config_file.rs",
+  "originalBytes": 123927,
+  "originalLines": 3231,
+  "originalSha256": "25bb362b60012e838e5112e82c359410a59070f8d2111deb3f97942d4bc185cc",
+  "exactSourceReconstruction": true,
+  "reversedVisibilityRelocationsMatchOriginal": true,
+  "visibilityPolicy": "moved pub(super) members retain crate::config scope; moved private members retain file_config scope",
+  "preservedFunctionAndMethodDeclarations": 22,
+  "registryLines": 210,
+  "registrySha256": "aa3c29e028c0563f2b274abdaacbd657493642aa6497808c307a9dc87fa8c2f8",
+  "owners": {
+    "crates/slskr/src/config_file_parts/federation_membership.rs": {
+      "lines": 227,
+      "sha256": "549416d6dee9e67e08ca18620518a99449cc395faef35a08a63fd5f401a37238"
+    },
+    "crates/slskr/src/config_file_parts/filters_shares.rs": {
+      "lines": 59,
+      "sha256": "d4ba10ccec84bc3152595f26a2228a3156050e8c9d6c6561fda32d6add43e915"
+    },
+    "crates/slskr/src/config_file_parts/foundation.rs": {
+      "lines": 106,
+      "sha256": "45ad26ebc0c592dc63e3f17a0ad766d6270d8f0c54022665cb6c7eb55abc1751"
+    },
+    "crates/slskr/src/config_file_parts/integrations.rs": {
+      "lines": 194,
+      "sha256": "2a4f41ec5e98f592eca65c1eba7b4a4ae78e73acb8fdd2f705a5b2b943940c80"
+    },
+    "crates/slskr/src/config_file_parts/media_services.rs": {
+      "lines": 350,
+      "sha256": "c4724f7c8539a88913c33525e19afe066ba359fd8f67f42525c0c69c220797cc"
+    },
+    "crates/slskr/src/config_file_parts/network_security.rs": {
+      "lines": 863,
+      "sha256": "4f5bdf4a0606876c945399a34bf53e077d28928d09fca9b5a7a24ae6e26ed7d4"
+    },
+    "crates/slskr/src/config_file_parts/peer_transport.rs": {
+      "lines": 344,
+      "sha256": "2614231310f0d746f136cfa595f531f9d04abc6756031254201e91d07607fb60"
+    },
+    "crates/slskr/src/config_file_parts/signal_policy.rs": {
+      "lines": 198,
+      "sha256": "0949d4e622439355417e38d16123779b972d854736f843e8a68a1588766e447b"
+    },
+    "crates/slskr/src/config_file_parts/transfer_policy.rs": {
+      "lines": 711,
+      "sha256": "79b885bf9fdb62a1d0fb1fb63e9f61be120e41c25d57e14e53fa7ffbc77bb001"
+    },
+    "crates/slskr/src/config_file_parts/web_security.rs": {
+      "lines": 122,
+      "sha256": "55b28c4572c7e3b432f4257cebef27b217b7ec56bdd74dce2e1d8b1bff75d5ce"
+    }
+  },
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 13,
+      "originalSha256": "df1fb510b21459d3fb842c16a1910a058db28e02e19475bbcccf08b6ca3a0600",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "FileConfig",
+      "owner": "registry",
+      "originalBytes": 2838,
+      "originalSha256": "b64cdd739d3808be8215e4df2e20c6bcc73e1edd6f312b5006de3703b6ed5d08",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SocialFederationFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 1025,
+      "originalSha256": "b69bb7cc00e9dc612f583817d3cb096605d8a3066f2eeb01c096639e07ea2acc",
+      "visibilityRelocations": 10
+    },
+    {
+      "kind": "struct",
+      "name": "FederationPublishingFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 1013,
+      "originalSha256": "03535c2e2a84b1c69920aa11597a6f4c41b1446cbf7f8308f4706a9f2088037b",
+      "visibilityRelocations": 8
+    },
+    {
+      "kind": "struct",
+      "name": "RealmSettings",
+      "owner": "federation_membership",
+      "originalBytes": 333,
+      "originalSha256": "ad2c7610fb50c576a098882f6aba1b5c817b3977e6fb84af1253351473f4ff89",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "RealmSettings",
+      "owner": "federation_membership",
+      "originalBytes": 2762,
+      "originalSha256": "d9c7f67bdb93031134d8adca74b5e99ee332f1a26e63efa684030ffcb90c903f",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "RealmFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 391,
+      "originalSha256": "7591b5a8693c1090e5cc0412915e9f726b845c256399201ec593c6c829732206",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "impl",
+      "name": "RealmFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 318,
+      "originalSha256": "97f1de27112f5d6b50a00709622010ec02899777d82cd91cad11971eab76161c",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "RealmPoliciesFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 344,
+      "originalSha256": "17359195abbbfe444ecd93ccf6337d027314960b65ad64b85237b93a54c242ea",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "impl",
+      "name": "RealmPoliciesFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 289,
+      "originalSha256": "3855bbd7fe6e9272cbcbe0bd612c5013a92c4c77fa9ce92a0b3f74870f564eea",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "MultiRealmFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 286,
+      "originalSha256": "110cc205e0320c2ba11fa288d4aacc6979540dfa5f858a1482fe67fea91b3865",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "MultiRealmBridgeFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 273,
+      "originalSha256": "df444bf57d97e4bc66d342032af1d752336fd0c605db464093550397847732dd",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "DiagnosticsFileConfig",
+      "owner": "web_security",
+      "originalBytes": 212,
+      "originalSha256": "a13924907469455f17b6f8376e79c46076da2b429a6425ba646508e0cbe4b46d",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "WebFileConfig",
+      "owner": "web_security",
+      "originalBytes": 616,
+      "originalSha256": "f83b7efb5b768e0796284812fa17db3eeb1bf0b562c76719b88a90b3e77b13a9",
+      "visibilityRelocations": 11
+    },
+    {
+      "kind": "struct",
+      "name": "HttpsFileConfig",
+      "owner": "web_security",
+      "originalBytes": 318,
+      "originalSha256": "50919c58af4e3dda93a25555f801d911f37cd3d9a30922e2c7f40d0083ab281d",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "HttpsCertificateFileConfig",
+      "owner": "web_security",
+      "originalBytes": 199,
+      "originalSha256": "45b2bb5661dbffa74d544088267cfa4fd4e25e704c1cd67ca1ec8c44b4e3f355",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "WebCorsFileConfig",
+      "owner": "web_security",
+      "originalBytes": 333,
+      "originalSha256": "ac8b1575e7d04351f70eb922cab15aa8e6892c790eb2f55898ab55e1403aebd8",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "WebRateLimitingFileConfig",
+      "owner": "web_security",
+      "originalBytes": 472,
+      "originalSha256": "96891322628fae7de433571a05ea5a96964a9090539423694bd1f865724ba21b",
+      "visibilityRelocations": 7
+    },
+    {
+      "kind": "struct",
+      "name": "ControllerFlagsFileConfig",
+      "owner": "foundation",
+      "originalBytes": 785,
+      "originalSha256": "32e925bbcc5c96e37415ebedeca84b1161702ce9ff2956f286b9527464868404",
+      "visibilityRelocations": 14
+    },
+    {
+      "kind": "struct",
+      "name": "LoggerFileConfig",
+      "owner": "foundation",
+      "originalBytes": 222,
+      "originalSha256": "0d02da33f45744d50a29d5bbf51250c5c0891b3d9c6889debb8f3c7ab5ce5211",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "PermissionsFileConfig",
+      "owner": "foundation",
+      "originalBytes": 164,
+      "originalSha256": "884af4f9e14740f48e6d8994faa6c01b04ad4eac918a0a3e0e6499b02ce0d54e",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "FilePermissionsFileConfig",
+      "owner": "foundation",
+      "originalBytes": 157,
+      "originalSha256": "110a59cb4101d59c3deed073eb509a49057a2af88e2e1b2b979e8a5fd2bb74cb",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "TelemetryFileConfig",
+      "owner": "foundation",
+      "originalBytes": 166,
+      "originalSha256": "7a0b56d58ba9680b8e975ca014301ebb6fecaf1d6f7765346a390c7ca2b5866f",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "TelemetryTracingFileConfig",
+      "owner": "foundation",
+      "originalBytes": 335,
+      "originalSha256": "f61e118bc2740a8d5c8997129b6f16b74bc4b9bbcb0ddb372c501294d3d6a762",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "RetentionFileConfig",
+      "owner": "foundation",
+      "originalBytes": 286,
+      "originalSha256": "24d5f8ba747770cb4ab9121e402e945729a7ba17a68cdb2fd6bee71cfd9b13ae",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "TransferRetentionFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 236,
+      "originalSha256": "125a0e3f13445996342ff12bc36160dd133eb77ad67cc64974cbcc8fb8f2a990",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "TransferTypeRetentionFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 277,
+      "originalSha256": "4a9153e2ee28f939bd7db9f51760884d6e29f787ef118c82e30cd34d9c4bfe00",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "FileRetentionFileConfig",
+      "owner": "foundation",
+      "originalBytes": 196,
+      "originalSha256": "e5136f3519cfdde1a3153d13a8c97969224cbcbcf8635ce9295e5d824b89fc1a",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "FiltersFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 272,
+      "originalSha256": "503a54e2a1f9d5e66bf4bd6d6b11d5107417119b591ac5d7fcdd078f50d450cc",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "SearchFiltersFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 155,
+      "originalSha256": "82b7eea8bb4fd374b4e9fe9f5092fc7ca9e97dc8d1f7d295a925bfbe33ee434f",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "SearchRetentionFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 257,
+      "originalSha256": "345336ebf1e14432c5cb9c587466af631648a41d10f8621f1f393db164d5f6d8",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "DownloadFiltersFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 157,
+      "originalSha256": "8eff5dfd1983618d278e750a1bbb02ac2039316b791a0ff087b02d00cd1a5689",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "GroupsFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 360,
+      "originalSha256": "43981c8047527c3c9abb6f0791d1c81740d95e94c7c761eb717bd2ddd937225e",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "TransferGroupFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 236,
+      "originalSha256": "469d3162f699b116a78da5bef22034116df96e038065abb823fdf272c918f0ad",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "LeecherTransferGroupFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 298,
+      "originalSha256": "611c2d4a8eb78d16a5facaed6f9cb660e8600869850c68fc5bb9d85c39a2d117",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "UserDefinedTransferGroupFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 284,
+      "originalSha256": "6d565978061678d832ee14510646f0fbfe9a736bea3970cd13ace15dbef6bcdd",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "TransferGroupUploadFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 430,
+      "originalSha256": "f9f96c27f375d1d065d5e582e424692425ec0e5a820cb4ec23400219513860cb",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "LeecherThresholdFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 204,
+      "originalSha256": "043f27484411856713bd0de0006c6ceefb9bb82c197d8bf9ec07eea0ec15ae67",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "TransferLimitsFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 308,
+      "originalSha256": "38bb2de3864c9582f756581b8d09d0121f703bdafd2dd066bc54cd34234f2b3a",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "impl",
+      "name": "TransferLimitsFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 239,
+      "originalSha256": "1171df366e1394ed4c54a3fde75ecc0cf7a2f52f77dc5f171d929bb1fbf48308",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "enum",
+      "name": "NullableConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 124,
+      "originalSha256": "82c0dfc6a8e3d7cf4c68f14a1ab1a1063c58c91562c1bf322f797c07b1a1c0e6",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "NullableConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 368,
+      "originalSha256": "586f7856e9d2760e1dfc31ac53ba1bb3f1ebdef105ba8d7f9c732119b4958fdb",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "TransferLimitFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 237,
+      "originalSha256": "81a9f45bac34828e94014f53625bf7c37e8c25a0d8b3e9613f2bc7fdb8ed86e2",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "UserBlacklistFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 235,
+      "originalSha256": "76ce5f703ab12e39b5f15e7cc1a911c210f0e0b1daf2e66ed3a18f71e0975683",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "FeatureFileConfig",
+      "owner": "media_services",
+      "originalBytes": 1528,
+      "originalSha256": "1f5d32c073f90f109f2536fd51158837a5f73c6ecdcfadebb02b546bc939e5c4",
+      "visibilityRelocations": 17
+    },
+    {
+      "kind": "struct",
+      "name": "ScenePodBridgeFileConfig",
+      "owner": "media_services",
+      "originalBytes": 330,
+      "originalSha256": "ed93beb98b4f1aea64c1a4859ee975675c57029b58989af347ef271ca560e016",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "PlayerFileConfig",
+      "owner": "media_services",
+      "originalBytes": 183,
+      "originalSha256": "2fbb914b253a9c2e97e9c2ffb5a67374222f27954b2ed3dfcd72682978fe4dd9",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "PlayerExternalVisualizerFileConfig",
+      "owner": "media_services",
+      "originalBytes": 339,
+      "originalSha256": "4c19fd8ad0d9e8c661ef74b5006b7b618a0740f1071bb84f04a5778d32af28b7",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "SolidFileConfig",
+      "owner": "media_services",
+      "originalBytes": 728,
+      "originalSha256": "a603fc52f717135c89c090c37bdcae92b8f0b4d0ca57357969eca34b3b5ccbab",
+      "visibilityRelocations": 7
+    },
+    {
+      "kind": "struct",
+      "name": "SongIdFileConfig",
+      "owner": "media_services",
+      "originalBytes": 162,
+      "originalSha256": "d38b3c36a482cd4c7da17ec6a04292619bfe7e3ea189b348b8cc3c25e99c62f1",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindFileConfig",
+      "owner": "media_services",
+      "originalBytes": 271,
+      "originalSha256": "11a34e0fbafeb1e884cbdc29ed0a7342a3be8908bb0548d7b186f76c68a86761",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindBridgeFileConfig",
+      "owner": "media_services",
+      "originalBytes": 504,
+      "originalSha256": "b3f941fc9d2e74b4b3f46705a914826b6758097b3a1fbce8945e56fc76e8ba95",
+      "visibilityRelocations": 8
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindDisasterModeFileConfig",
+      "owner": "media_services",
+      "originalBytes": 469,
+      "originalSha256": "7803fe06b829277c01f696a9086724a38a624d8a1556cd5fd2e3f3526792ad9b",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "MetricsFileConfig",
+      "owner": "web_security",
+      "originalBytes": 250,
+      "originalSha256": "15cf0e636c5dcbb5571906f63bae99e18c175cdbe515060f7154e475242299c4",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "MetricsAuthenticationFileConfig",
+      "owner": "web_security",
+      "originalBytes": 247,
+      "originalSha256": "39fdc9023e4367fd12e685901902c372f826415852f71552d38c6328b1c5dba8",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "ManagedBlacklistFileConfig",
+      "owner": "foundation",
+      "originalBytes": 197,
+      "originalSha256": "43fcddeedee68a0453025c3ef1e74dba676cae6589ab23876f98bab61cbd9dc3",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "CompatibilityFileConfig",
+      "owner": "foundation",
+      "originalBytes": 291,
+      "originalSha256": "a0ee67fdab11514260cacd1be33b6e0efc7e808ff5f1aded300dd11623ee1acd",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "VirtualSoulfindV2FileConfig",
+      "owner": "media_services",
+      "originalBytes": 160,
+      "originalSha256": "e1af043337128289bd66291f1372f9f3c54c4b528aae0a902d2c26f79f5b48b3",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "DhtFileConfig",
+      "owner": "network_security",
+      "originalBytes": 867,
+      "originalSha256": "faf2d165ab9c304b5c4d3c2b2e1176373abc0cf0429ae8d3b11efc0472fb2876",
+      "visibilityRelocations": 15
+    },
+    {
+      "kind": "struct",
+      "name": "MeshFileConfig",
+      "owner": "network_security",
+      "originalBytes": 891,
+      "originalSha256": "1d4dc533ba98a9b305b3284fa2ce3a79c65556395fd908f4dd88ef615db4a7dd",
+      "visibilityRelocations": 12
+    },
+    {
+      "kind": "struct",
+      "name": "MeshGatewayFileConfig",
+      "owner": "network_security",
+      "originalBytes": 1736,
+      "originalSha256": "ae22f41194b3be2fa0b5de757c581a44f05e70577e8e8f31663c8b660b316060",
+      "visibilityRelocations": 15
+    },
+    {
+      "kind": "struct",
+      "name": "MeshDhtFileConfig",
+      "owner": "network_security",
+      "originalBytes": 159,
+      "originalSha256": "7331294f401f2ebfcc5b7738531cf2bd574b7d037d22634c1ffd6fb8550fa00e",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "MeshPortsFileConfig",
+      "owner": "network_security",
+      "originalBytes": 191,
+      "originalSha256": "4ff14f131492ddc99ab7ff6d456ec1ed49a48b312751b3e4784c76d3598d456f",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "MeshSecurityFileConfig",
+      "owner": "network_security",
+      "originalBytes": 258,
+      "originalSha256": "946ba51cabe1199debc3c6a7561ff502de332f7309251e965e3fd0e16018d522",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "MeshSyncRootFileConfig",
+      "owner": "network_security",
+      "originalBytes": 175,
+      "originalSha256": "c9210ac5d3add0a263a0d4bf4444a55027894570c482ba12f78df1c795cddfa4",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "MeshSyncSecurityFileConfig",
+      "owner": "network_security",
+      "originalBytes": 903,
+      "originalSha256": "9d555d29d434ac1689eebf6c307f925d30cdd4f98cab7a58068210a3dee76fe7",
+      "visibilityRelocations": 12
+    },
+    {
+      "kind": "struct",
+      "name": "SignalSystemFileConfig",
+      "owner": "signal_policy",
+      "originalBytes": 690,
+      "originalSha256": "be69dc70b7385d7eddb4612c0f7ff5a8098c2ac1990dadc57671a1623b419fd6",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "SignalChannelFileConfig",
+      "owner": "signal_policy",
+      "originalBytes": 382,
+      "originalSha256": "36f35cf469002e9fd4c1c4c5bc1e7a71de9a6dcbd1d17a15aaf93e2afc2ada6f",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "enum",
+      "name": "SignalDurationFileValue",
+      "owner": "signal_policy",
+      "originalBytes": 123,
+      "originalSha256": "1460f557253d27936afd842755f82ad5824e3d8aef1c64d84f655d8960550c21",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "impl",
+      "name": "SignalSystemSettings",
+      "owner": "signal_policy",
+      "originalBytes": 4246,
+      "originalSha256": "7f7e587bc956fc2e825a13c8fc4a6daa5981f78042e5cd7d1f93e68047e75f17",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "signal_duration_from_seconds",
+      "owner": "signal_policy",
+      "originalBytes": 221,
+      "originalSha256": "0924db3c8ac57ce1a9e132a38108b080f974e6706a33eb6d34e36c9696c600ce",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "parse_signal_duration",
+      "owner": "signal_policy",
+      "originalBytes": 1432,
+      "originalSha256": "16095c3741a071ccc8e3251909af3b535f8160c4a9f15eb69d57b7904c4add49",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "MeshSyncSecurityFileConfig",
+      "owner": "network_security",
+      "originalBytes": 785,
+      "originalSha256": "ad55202809b5f4ae531465214909ae370bf40313839b15f7e9d353e2facf9309",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "OverlayFileConfig",
+      "owner": "network_security",
+      "originalBytes": 459,
+      "originalSha256": "33b5ed87f7119814dd65673bd27239e317c54c6b2bc93cfca3c5aa71046d836b",
+      "visibilityRelocations": 7
+    },
+    {
+      "kind": "struct",
+      "name": "OverlayDataFileConfig",
+      "owner": "network_security",
+      "originalBytes": 702,
+      "originalSha256": "e9770bfb033bd82eebaa8f14cf41674d095e69e525ec35aa38e3acaabc470524",
+      "visibilityRelocations": 11
+    },
+    {
+      "kind": "struct",
+      "name": "RelayFileConfig",
+      "owner": "network_security",
+      "originalBytes": 302,
+      "originalSha256": "7ee41a10e4bf4a67608ad3b9ffed4da6690860a1640c8671381e1dbf44b5d545",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "RelayControllerFileConfig",
+      "owner": "network_security",
+      "originalBytes": 379,
+      "originalSha256": "0d33469073f293c8173429922345a2874119247edc4915447f42c34b043b0ae6",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "RelayAgentFileConfig",
+      "owner": "network_security",
+      "originalBytes": 210,
+      "originalSha256": "6bdc29f1b6b5ee7195379c909f7691c9cb0e93cbb36e5cb7348f68f8052f5a1f",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "SecurityFileConfig",
+      "owner": "network_security",
+      "originalBytes": 520,
+      "originalSha256": "981aa162175886c0712a3ff801075f050c515168bb0b6d6d0cf02b0c69cec2bf",
+      "visibilityRelocations": 8
+    },
+    {
+      "kind": "struct",
+      "name": "NetworkGuardFileConfig",
+      "owner": "network_security",
+      "originalBytes": 364,
+      "originalSha256": "06ef597aec669d98a701dc933aee35af7938e8944d3123c75ba54b47b486b90c",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "PathGuardFileConfig",
+      "owner": "network_security",
+      "originalBytes": 245,
+      "originalSha256": "3033d6798c939dc80e121d1c63bc55b4967f43a6d0032ce659fe2cee63503d05",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "ContentSafetyFileConfig",
+      "owner": "network_security",
+      "originalBytes": 359,
+      "originalSha256": "9c80b2c92e1b32fa39133f7d308e1793eb048307818b63a3a67e788bfa113f18",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "PeerReputationFileConfig",
+      "owner": "network_security",
+      "originalBytes": 251,
+      "originalSha256": "c150d385c2c2d5b6fc0edfa0bdd6df8e850c5812036d2ccd38a616f1beff3714",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "ViolationTrackerFileConfig",
+      "owner": "network_security",
+      "originalBytes": 270,
+      "originalSha256": "0fb33359e8d837672f4102d3e1b3a7e05c772da09a0184ca8fbe60f9da774092",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "AdversarialFileConfig",
+      "owner": "network_security",
+      "originalBytes": 304,
+      "originalSha256": "289f6da50932928bab8661f3bf1a4c0fd3a4c2a672a6a5d58412b52990af4297",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "AdversarialPrivacyFileConfig",
+      "owner": "network_security",
+      "originalBytes": 253,
+      "originalSha256": "85e5d2b335f1edff4d624717ec4530182abb808c0349e1cb2b671338be389e7f",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "AdversarialPaddingFileConfig",
+      "owner": "network_security",
+      "originalBytes": 297,
+      "originalSha256": "16bdd8be47155f3c9be2edbd67fa3a1c1efad4eb8c2decc259f4cc48dedcbe10",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "AdversarialAnonymityFileConfig",
+      "owner": "network_security",
+      "originalBytes": 260,
+      "originalSha256": "fc96d9b144987f43599c4f06f12866d9acad50b9ae15b9ba88afd5fb01e44023",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "AdversarialRelayOnlyFileConfig",
+      "owner": "network_security",
+      "originalBytes": 315,
+      "originalSha256": "ca7fd6a652902b0a41ef6803762367d315f76e84c90b49f11aad8ab63be7f72b",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "AdvancedNetworkingFileOverlay",
+      "owner": "network_security",
+      "originalBytes": 779,
+      "originalSha256": "9d8ad8b484f046284bc31e05eb1dba1f092444747f28e2f3d3d514392aea2126",
+      "visibilityRelocations": 10
+    },
+    {
+      "kind": "struct",
+      "name": "MediaAdvancedServiceFileOverlay",
+      "owner": "media_services",
+      "originalBytes": 446,
+      "originalSha256": "15c24175034cce60b8c3c7eed14534d154d4b996ebdccb691c3063432ebc0bcb",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "TrustedMeshPeerInput",
+      "owner": "peer_transport",
+      "originalBytes": 467,
+      "originalSha256": "291da61df616a67d7d56593df532f9de579cda722161fd3de6d9d2abea4e5637",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "PodCoreFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 435,
+      "originalSha256": "527e068e20dbb2761795e30e7f84eafb8cdc9026dd47be1c2a9ce3c258264d67",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "PodJoinFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 197,
+      "originalSha256": "5dd60e8f27de4fb3d81b9c362e08b7d7c1390ea2b92208de4a27db7b36ecc1a0",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "PodSecurityFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 201,
+      "originalSha256": "eb3ea1e7219a8427f54a667dc5f9b0d21398e2f5cde3a4606c58e6210ecef745",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "GoldStarClubFileConfig",
+      "owner": "federation_membership",
+      "originalBytes": 230,
+      "originalSha256": "eacadf454f73798fe6e5ea458e23549c94caa112a7c6dce3498ce30f312613dd",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "AdvancedNetworkingSettings",
+      "owner": "network_security",
+      "originalBytes": 23914,
+      "originalSha256": "7608dc03808508fa3b5c81aef4770c07f8004664b3afb24fe260256d3d8ccac7",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "MediaAdvancedServiceSettings",
+      "owner": "media_services",
+      "originalBytes": 9540,
+      "originalSha256": "f70db58d3a5230a78695c4f1397f14c3b8448ac5c7443e77637a8990b57ac284",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "validate_certificate_pins",
+      "owner": "network_security",
+      "originalBytes": 608,
+      "originalSha256": "df770d658f253d651715481ac1d03468714450611ff2a79f96341fce9caf326c",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "AppFileConfig",
+      "owner": "foundation",
+      "originalBytes": 407,
+      "originalSha256": "c3a27b452640b4258862e1438190c1989ee451154f72888db11f8fa7f58530a1",
+      "visibilityRelocations": 7
+    },
+    {
+      "kind": "struct",
+      "name": "NetworkFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 647,
+      "originalSha256": "110bce37a6ffb4104ea2f690b75eb9c68eba03ac62d377faadbed951a6789a9d",
+      "visibilityRelocations": 10
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekDistributedFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 291,
+      "originalSha256": "e8f427cd2d36ab4ae8fa5d50fc2db15c77aa4ff923e07ec320ce44f74bca7882",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekConnectionFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 425,
+      "originalSha256": "735e5d6883e06c70876b7b540f352de0ec35bd06b5568f9236f483a7ef5173e8",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekConnectionTimeoutFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 245,
+      "originalSha256": "1646eec6cf1214dbe1cc0a4c5f0c7fea8bc4cd3f5e40d90237f86a12dc8c973b",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekConnectionBufferFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 285,
+      "originalSha256": "30e24c8bbad3476e3babb9d2db56968d7025b6b99f4b23bda7d349a3b98010e8",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekProxyFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 312,
+      "originalSha256": "3e293df405f81fdc3a7b8c9811a2f0c6a3dbdbf3d7e36cfac7e1086dc1364dc7",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "SoulseekObfuscationFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 298,
+      "originalSha256": "3888d1e57ea2b87c369abbad84507b01ae5f32d5bbfbd18b0ce5845789717bd3",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "PrivateMessageAutoResponseFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 255,
+      "originalSha256": "0ec66207afe19e8a7f40325960dbe6ff9399d1de4afc80d2f644c5e09d792a04",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "ListenerFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 352,
+      "originalSha256": "dc56ae1682d2de04315125aa996b6fa1fee3f5e9fa688bce9591fea8b5a811eb",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "ProfileFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 274,
+      "originalSha256": "1a19d3bb2c64906d632af77b4dd3c9534f475bfa3ce8b3831ddc4c89866e8ac7",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "TimeoutFileConfig",
+      "owner": "peer_transport",
+      "originalBytes": 163,
+      "originalSha256": "7259b5b35d8efffdd68f3bf72a57d1763dd2a6dd2d11a0a053c868731b116667",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "ShareFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 503,
+      "originalSha256": "984976091fc0b432fee30399f5b7d10bc7887fc1ed8f026f25526a6deba8a01c",
+      "visibilityRelocations": 9
+    },
+    {
+      "kind": "struct",
+      "name": "ShareCacheFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 238,
+      "originalSha256": "cc6204d0b44678f22e6e12eba29bff4fb7cd9538c0d034846d80e8306ce4c751",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "TransferFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 593,
+      "originalSha256": "e3233b34ceb2e2b6b648ebde72e27203dac9db37a46f546c2f593153ab74cba3",
+      "visibilityRelocations": 10
+    },
+    {
+      "kind": "struct",
+      "name": "AutoReplaceFileConfig",
+      "owner": "filters_shares",
+      "originalBytes": 257,
+      "originalSha256": "40a271997dd566d646be6fa4fe8a6dc3161f9316c68d1e03d45e27e750056834",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "TransferUploadFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 259,
+      "originalSha256": "56e6eb380698a5c75f851e784a9544241ab41e87b4cd5c065f7472411bf70e8e",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "TransferDownloadFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 684,
+      "originalSha256": "43d063df4195f4d99d4100371003395ec07fa5bff1e3d163aa9e60e947c49eaa",
+      "visibilityRelocations": 11
+    },
+    {
+      "kind": "struct",
+      "name": "TransferDownloadRetryFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 321,
+      "originalSha256": "290ebe0fbe246fa05644edc5442f80ca579d20c7fc1f430cb161d6c6419f4b44",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "TransferDownloadDestinationFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 291,
+      "originalSha256": "c2154181302a43308821ecdadf3ed93251c0508076f72fac7475e61dde480dee",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "TransferDownloadPermissionsFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 169,
+      "originalSha256": "7c5a85b856d2149626e8c90a4f9c3ba2492e79398a3c13ce4d80f99ed28bf0c0",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "SoulseekConnectionSettings",
+      "owner": "peer_transport",
+      "originalBytes": 7487,
+      "originalSha256": "87feeffe216031948a2d3de575fc61f73035b5b9b757e76a0bf80b1c2eb5cbdd",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "TransferLimitSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 584,
+      "originalSha256": "c1f7c07d9cf66f14d725a71c3353bd388e9e4e0f53b2b73194960cff57be9fef",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "TransferLimitsSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 1117,
+      "originalSha256": "347e3ae4e02094246aa1939a3feff4819ce220ff01ccc907534e2cbae2af89b7",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "TransferGroupUploadSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 1608,
+      "originalSha256": "6a77944e95edc596863ac6a73b6032832841f39859ba834b1bf004b5a95d7976",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "TransferGroupsSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 4340,
+      "originalSha256": "0a715ff4f491bb81dd7462bec22eeb7a58740450910e067d36352c56b965bac4",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "groups_file_config_is_empty",
+      "owner": "transfer_policy",
+      "originalBytes": 1091,
+      "originalSha256": "46046580b27c82c252ed89d128c9c445ef9b43cd7be621c86316eb8fb720a9ea",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "TransferUploadSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 1226,
+      "originalSha256": "8528c34a2f1252949902e50d53bd0dc5dd2e1b77eef6ace306622a861f12db55",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "TransferDownloadSettings",
+      "owner": "transfer_policy",
+      "originalBytes": 9394,
+      "originalSha256": "0fdf67303b3392ae30489ae7df57cc2e29007b65b03776bd18384bcfbcebcc3e",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "TransferAutoRetryFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 663,
+      "originalSha256": "89c81cd226ce8c0563fd01e90b8962b52dddee98fd059e0d4c046afc0985beaa",
+      "visibilityRelocations": 10
+    },
+    {
+      "kind": "struct",
+      "name": "TransferRescueFileConfig",
+      "owner": "transfer_policy",
+      "originalBytes": 585,
+      "originalSha256": "185a7c299b22fbe28355290a6d4b62c8a1d2538ba7d03c2c90f2ab60b8cba158",
+      "visibilityRelocations": 9
+    },
+    {
+      "kind": "struct",
+      "name": "AuthFileConfig",
+      "owner": "web_security",
+      "originalBytes": 731,
+      "originalSha256": "acba50cbbeb1da627dce623062e6ee000400ba5bf5a74a9ff8ffd566704aa865",
+      "visibilityRelocations": 13
+    },
+    {
+      "kind": "struct",
+      "name": "ControllerApiKeyFileConfig",
+      "owner": "web_security",
+      "originalBytes": 209,
+      "originalSha256": "3d20053496a46ee7d17d1ec41b8ebe87f731e32dbc8bc3b7a5ebbfe290fa6b17",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "impl",
+      "name": "ControllerApiKeyFileConfig",
+      "owner": "web_security",
+      "originalBytes": 213,
+      "originalSha256": "a845cd65172f0135c96a0649ace09a94306b5d1198bf046063f21c3acffb6a40",
+      "visibilityRelocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "AuthJwtFileConfig",
+      "owner": "web_security",
+      "originalBytes": 181,
+      "originalSha256": "2ca352d80be29439f63ed0f29c8f3cc69fc1beb6424da562afe67a2a014c26b8",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "PersistenceFileConfig",
+      "owner": "foundation",
+      "originalBytes": 154,
+      "originalSha256": "b1776bcceec3d571b460874e509ab3d85cdd5da96e30a271aaa4f3d1704efee3",
+      "visibilityRelocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "IntegrationsFileConfig",
+      "owner": "integrations",
+      "originalBytes": 1028,
+      "originalSha256": "b130a3aba604db8d938b25e9364b13d16f0cd1255ca1260dca0e0d8075db1cd9",
+      "visibilityRelocations": 16
+    },
+    {
+      "kind": "struct",
+      "name": "ChromaprintFileConfig",
+      "owner": "integrations",
+      "originalBytes": 472,
+      "originalSha256": "9fd8172aaccbbf361417ddac6cb3f2f93fe886b91affd4fceeaaf5eb249e10df",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "AcoustIdFileConfig",
+      "owner": "integrations",
+      "originalBytes": 321,
+      "originalSha256": "b1d26aeba31970243a655d3610998912668e8da890075b7a347e1c8809878d9a",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "MusicBrainzFileConfig",
+      "owner": "integrations",
+      "originalBytes": 432,
+      "originalSha256": "482954b1d85aed4477ff45c5d7a3a4bdb5fd5b7290d5e4ce52f4443b9bf53343",
+      "visibilityRelocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "NtfyFileConfig",
+      "owner": "integrations",
+      "originalBytes": 389,
+      "originalSha256": "db085c75627bdc046b80e8038a83942418f38a404d3a21548ef8bbc7181e4ba1",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "PushoverFileConfig",
+      "owner": "integrations",
+      "originalBytes": 391,
+      "originalSha256": "fa62e976d8297f73e2682f1bab25d2ab19539de8bc9e63540244ab935f12c85c",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "PushbulletFileConfig",
+      "owner": "integrations",
+      "originalBytes": 446,
+      "originalSha256": "fbfe808c38ff1c2508ab6df10e8226833b499effa6a6171196563b51d5868776",
+      "visibilityRelocations": 7
+    },
+    {
+      "kind": "struct",
+      "name": "FtpFileConfig",
+      "owner": "integrations",
+      "originalBytes": 591,
+      "originalSha256": "58070db33f95872d9e4b6bb7890fffc60c64ab44db281277187b32e311f11004",
+      "visibilityRelocations": 11
+    },
+    {
+      "kind": "struct",
+      "name": "VpnFileConfig",
+      "owner": "integrations",
+      "originalBytes": 329,
+      "originalSha256": "41c58fdaf58d1a9d1c441f8d80928d3cb25d7d11bab4b33595acb824c88e3769",
+      "visibilityRelocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "GluetunFileConfig",
+      "owner": "integrations",
+      "originalBytes": 344,
+      "originalSha256": "9072c8e5a75ee59d39b1eb3919e3f834a14c354e4a93ed4b73715ed9908d9ed1",
+      "visibilityRelocations": 6
+    },
+    {
+      "kind": "struct",
+      "name": "SourceFeedApiKeyFileConfig",
+      "owner": "integrations",
+      "originalBytes": 199,
+      "originalSha256": "0dc8a4878c244a0bec8b1a5f7353cbc20259c2b0af4f31882d8eadab94884915",
+      "visibilityRelocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "SpotifyFileConfig",
+      "owner": "integrations",
+      "originalBytes": 456,
+      "originalSha256": "2ce8826e699fe388e09274185a0bcb1f3f0c80e870b6b4ab0629fa7f5d4cc697",
+      "visibilityRelocations": 8
+    },
+    {
+      "kind": "struct",
+      "name": "LidarrFileConfig",
+      "owner": "integrations",
+      "originalBytes": 1200,
+      "originalSha256": "abb1d44359abb64fcaff6f2e6a2335e837da0d182457b82acfca36d4fa319f43",
+      "visibilityRelocations": 22
+    },
+    {
+      "kind": "struct",
+      "name": "BridgeFileConfig",
+      "owner": "integrations",
+      "originalBytes": 220,
+      "originalSha256": "55c9e24aa509352a5490791dce2ce577660e84f72a31c7efb8c05cf4440425d8",
+      "visibilityRelocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "ExternalVisualizerFileConfig",
+      "owner": "integrations",
+      "originalBytes": 208,
+      "originalSha256": "52e8b87d1e3df91462bd66404eba64c21068bf04cd1c4d356d9ff5065e628ea3",
+      "visibilityRelocations": 2
+    }
+  ],
+  "preservedPublicAndConfigurationScopedDeclarationNames": [
+    "FileConfig",
+    "SocialFederationFileConfig",
+    "FederationPublishingFileConfig",
+    "RealmSettings",
+    "RealmFileConfig",
+    "RealmPoliciesFileConfig",
+    "MultiRealmFileConfig",
+    "MultiRealmBridgeFileConfig",
+    "DiagnosticsFileConfig",
+    "WebFileConfig",
+    "HttpsFileConfig",
+    "HttpsCertificateFileConfig",
+    "WebCorsFileConfig",
+    "WebRateLimitingFileConfig",
+    "ControllerFlagsFileConfig",
+    "LoggerFileConfig",
+    "PermissionsFileConfig",
+    "FilePermissionsFileConfig",
+    "TelemetryFileConfig",
+    "TelemetryTracingFileConfig",
+    "RetentionFileConfig",
+    "TransferRetentionFileConfig",
+    "TransferTypeRetentionFileConfig",
+    "FileRetentionFileConfig",
+    "FiltersFileConfig",
+    "SearchFiltersFileConfig",
+    "SearchRetentionFileConfig",
+    "DownloadFiltersFileConfig",
+    "GroupsFileConfig",
+    "TransferGroupFileConfig",
+    "LeecherTransferGroupFileConfig",
+    "UserDefinedTransferGroupFileConfig",
+    "TransferGroupUploadFileConfig",
+    "LeecherThresholdFileConfig",
+    "TransferLimitsFileConfig",
+    "NullableConfig",
+    "TransferLimitFileConfig",
+    "UserBlacklistFileConfig",
+    "FeatureFileConfig",
+    "ScenePodBridgeFileConfig",
+    "PlayerFileConfig",
+    "PlayerExternalVisualizerFileConfig",
+    "SolidFileConfig",
+    "SongIdFileConfig",
+    "VirtualSoulfindFileConfig",
+    "VirtualSoulfindBridgeFileConfig",
+    "VirtualSoulfindDisasterModeFileConfig",
+    "MetricsFileConfig",
+    "MetricsAuthenticationFileConfig",
+    "ManagedBlacklistFileConfig",
+    "CompatibilityFileConfig",
+    "VirtualSoulfindV2FileConfig",
+    "DhtFileConfig",
+    "MeshFileConfig",
+    "MeshGatewayFileConfig",
+    "MeshDhtFileConfig",
+    "MeshPortsFileConfig",
+    "MeshSecurityFileConfig",
+    "MeshSyncRootFileConfig",
+    "MeshSyncSecurityFileConfig",
+    "SignalSystemFileConfig",
+    "SignalChannelFileConfig",
+    "SignalDurationFileValue",
+    "OverlayFileConfig",
+    "OverlayDataFileConfig",
+    "RelayFileConfig",
+    "RelayControllerFileConfig",
+    "RelayAgentFileConfig",
+    "SecurityFileConfig",
+    "NetworkGuardFileConfig",
+    "PathGuardFileConfig",
+    "ContentSafetyFileConfig",
+    "PeerReputationFileConfig",
+    "ViolationTrackerFileConfig",
+    "AdversarialFileConfig",
+    "AdversarialPrivacyFileConfig",
+    "AdversarialPaddingFileConfig",
+    "AdversarialAnonymityFileConfig",
+    "AdversarialRelayOnlyFileConfig",
+    "AdvancedNetworkingFileOverlay",
+    "MediaAdvancedServiceFileOverlay",
+    "TrustedMeshPeerInput",
+    "PodCoreFileConfig",
+    "PodJoinFileConfig",
+    "PodSecurityFileConfig",
+    "GoldStarClubFileConfig",
+    "AppFileConfig",
+    "NetworkFileConfig",
+    "SoulseekDistributedFileConfig",
+    "SoulseekConnectionFileConfig",
+    "SoulseekConnectionTimeoutFileConfig",
+    "SoulseekConnectionBufferFileConfig",
+    "SoulseekProxyFileConfig",
+    "SoulseekObfuscationFileConfig",
+    "PrivateMessageAutoResponseFileConfig",
+    "ListenerFileConfig",
+    "ProfileFileConfig",
+    "TimeoutFileConfig",
+    "ShareFileConfig",
+    "ShareCacheFileConfig",
+    "TransferFileConfig",
+    "AutoReplaceFileConfig",
+    "TransferUploadFileConfig",
+    "TransferDownloadFileConfig",
+    "TransferDownloadRetryFileConfig",
+    "TransferDownloadDestinationFileConfig",
+    "TransferDownloadPermissionsFileConfig",
+    "groups_file_config_is_empty",
+    "TransferAutoRetryFileConfig",
+    "TransferRescueFileConfig",
+    "AuthFileConfig",
+    "ControllerApiKeyFileConfig",
+    "AuthJwtFileConfig",
+    "PersistenceFileConfig",
+    "IntegrationsFileConfig",
+    "ChromaprintFileConfig",
+    "AcoustIdFileConfig",
+    "MusicBrainzFileConfig",
+    "NtfyFileConfig",
+    "PushoverFileConfig",
+    "PushbulletFileConfig",
+    "FtpFileConfig",
+    "VpnFileConfig",
+    "GluetunFileConfig",
+    "SourceFeedApiKeyFileConfig",
+    "SpotifyFileConfig",
+    "LidarrFileConfig",
+    "BridgeFileConfig",
+    "ExternalVisualizerFileConfig"
+  ],
+  "namespaceBindingsMatchOriginal": true,
+  "gates": [
+    {
+      "command": "cargo test -p slskr --lib config::tests",
+      "result": "passed",
+      "logSha256": "f65628bcd4dcf4f6d948ceac83d61e0fbbb5e4b34f9c9cb1cf2e3ee1b436f901"
+    },
+    {
+      "command": "cargo test -p slskr --lib",
+      "result": "passed",
+      "logSha256": "23df9074de03ae3b5141e29a522efa6d533fed2891aa3ec5ae5c2ac8cc882599"
+    },
+    {
+      "command": "cargo clippy -p slskr --all-targets -- -D warnings",
+      "result": "passed",
+      "logSha256": "1ef4285669975fdfa5a91a90e9fde8c0521ba4a90372b26292e4d352f6288a4d"
+    },
+    {
+      "command": "cargo check -p slskr --all-targets --features full-controller-tests,legacy-route-dispatch",
+      "result": "passed",
+      "logSha256": "c511372ee947b6011f295733c69f12f93b92ca53a7798e816c9226eaa268a015"
+    }
+  ]
+}

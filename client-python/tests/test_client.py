@@ -2,7 +2,10 @@ import asyncio
 import inspect
 import json
 from pathlib import Path
+import socket
 import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -10,6 +13,26 @@ import pytest
 from slskr import BatchClient, BatchBuilder, SlskrClient, WebSocketClient
 from slskr.batch import BatchOperation, BatchResponse, BatchResult
 from slskr.exceptions import ApiError, NetworkError, ResponseContractError, TimeoutError
+
+
+def _shared_sdk_http_contract():
+    path = Path(__file__).resolve().parents[2] / "testdata" / "sdk-http-contract.json"
+    return json.loads(path.read_text())
+
+
+def _start_shared_contract_server(handler):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://127.0.0.1:{server.server_port}"
+
+
+def _stop_shared_contract_server(server, thread):
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2)
+    if thread.is_alive():
+        raise AssertionError("shared SDK HTTP fixture server did not stop")
 
 
 def test_client_url_and_path_segments_are_safe():
@@ -1142,3 +1165,85 @@ async def test_python_client_retains_retries_for_reads():
 
     assert await client._request("GET", "/api/health") is None
     assert session.request.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_python_client_matches_shared_live_http_contract():
+    fixture = _shared_sdk_http_contract()
+    attempts = {"error": 0, "read": 0, "mutation": 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == fixture["api_error"]["path"]:
+                attempts["error"] += 1
+                body = json.dumps(fixture["api_error"]["body"]).encode()
+                self.send_response(fixture["api_error"]["status"])
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if self.path != fixture["retry"]["path"]:
+                self.send_error(404)
+                return
+
+            attempts["read"] += 1
+            if (
+                attempts["read"]
+                <= fixture["retry"]["transport_failures_before_success"]
+            ):
+                self.close_connection = True
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                self.connection.close()
+                return
+
+            body = json.dumps(fixture["retry"]["success_body"]).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            if self.path != fixture["retry"]["mutation_path"]:
+                self.send_error(404)
+                return
+            attempts["mutation"] += 1
+            self.close_connection = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
+
+        def log_message(self, _format, *_args):
+            return
+
+    server, thread, base_url = _start_shared_contract_server(Handler)
+    client = SlskrClient(
+        base_url,
+        "fixture-token",
+        retries=fixture["retry"]["configured_retries"],
+        retry_delay=0,
+    )
+    try:
+        with pytest.raises(ApiError) as raised:
+            await client.get_config()
+        assert raised.value.status == fixture["api_error"]["status"]
+        assert raised.value.code == fixture["api_error"]["body"]["error"]
+        assert raised.value.details == fixture["api_error"]["body"]["details"]
+        assert attempts["error"] == fixture["api_error"]["expected_attempts"]
+
+        assert await client.health() == fixture["retry"]["success_body"]
+        assert attempts["read"] == fixture["retry"]["get_attempts"]["python"]
+
+        with pytest.raises(NetworkError):
+            await client.create_search("fixture")
+        assert attempts["mutation"] == fixture["retry"]["mutation_attempts"]["python"]
+    finally:
+        await client.close()
+        _stop_shared_contract_server(server, thread)

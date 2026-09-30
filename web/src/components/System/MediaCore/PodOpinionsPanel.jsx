@@ -31,7 +31,7 @@ const opinionQueryKey = (podId, contentId) =>
   JSON.stringify([podId.trim(), contentId.trim()]);
 
 const PodOpinionsPanel = ({ visible = true }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

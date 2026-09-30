@@ -1,0 +1,1043 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "cf3f68d66698798d0d7c7569ab3f9e32c9392702",
+  "source": "crates/slskr/src/private_gateway.rs",
+  "originalBytes": 131592,
+  "originalLines": 3524,
+  "originalSha256": "c6d24dbf176db63c3e4a6f7b1d2c437b9d0c31bf1dbbf55bdf7eb97b70f72dfb",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 119,
+  "registrySha256": "3a97e94226e9c23c536f2c9d17173ff5a46e8442254e2fae322ec1429bdccbea",
+  "registryLines": 144,
+  "owners": {
+    "crates/slskr/src/private_gateway_owners/gateway_identity.rs": {
+      "lines": 159,
+      "sha256": "5d3f8606325e45ec2f7d74608996a28e4259b3f9eae2f5b67ca7d4d49a7b6fcf"
+    },
+    "crates/slskr/src/private_gateway_owners/gateway_models.rs": {
+      "lines": 135,
+      "sha256": "a45e3092f9b5e385612db9adf94d2791b5e4ecaf8393d4278ea733e831bd1087"
+    },
+    "crates/slskr/src/private_gateway_owners/gateway_services.rs": {
+      "lines": 784,
+      "sha256": "36dce6e09ae26a171540caa6e49ef732417da9ac330e8d5d9d9a4d3c100b6438"
+    },
+    "crates/slskr/src/private_gateway_owners/gateway_transport.rs": {
+      "lines": 999,
+      "sha256": "cd178ab38ddf14d1dfa07b1deec25a0348058ef8d7299ed59ecdcfc1b7f284fd"
+    },
+    "crates/slskr/src/private_gateway_owners/mesh_content_projection.rs": {
+      "lines": 187,
+      "sha256": "005058af9cb5f42f93016cd17349bd78841adea5e61d5debc623bf8320e9f9b6"
+    },
+    "crates/slskr/src/private_gateway_owners/peer_authentication.rs": {
+      "lines": 121,
+      "sha256": "d09e613e6daf7fcb30150923e8666d5aeabb9b5c80b40d730b02e3f320e4b58c"
+    },
+    "crates/slskr/src/private_gateway_owners/pod_request_models.rs": {
+      "lines": 37,
+      "sha256": "036896291c94f9bf92da0f830e367c03908b1dbdd5f26963093ac6b611f439e7"
+    },
+    "crates/slskr/src/private_gateway_owners/quic_proxy.rs": {
+      "lines": 220,
+      "sha256": "3bc2b7e020fe07c342577a5e8ba38d2eace02c00b6aa45b99d115d67c1891970"
+    },
+    "crates/slskr/src/private_gateway_owners/quic_relay.rs": {
+      "lines": 123,
+      "sha256": "81286dfd8738f17f8e93a70021b036b802a88d757ea3bf0f3d2510f5e4f3ebe3"
+    },
+    "crates/slskr/src/private_gateway_owners/service_policy.rs": {
+      "lines": 75,
+      "sha256": "df0f355b6309c5f081d7d2e12842bd3a33cb7fb76f9ba0d0eb92760c7c72b417"
+    },
+    "crates/slskr/src/private_gateway_owners/tests.rs": {
+      "lines": 612,
+      "sha256": "c11725404cf0a0b869740595f8dfa46626f7b9536a42fa3afc486e368540859b"
+    }
+  },
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 354,
+      "originalSha256": "36d7f690bfadfe072330f302711ce3f0ad6c8d7bf2cef3cf02bf18e7bac5ec80",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 47,
+      "originalSha256": "478962a2738c4dbff18c4a491eca93e98682fe04b50002e574b4aac284d6ba25",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 22,
+      "originalSha256": "adc81c732c114b3eaf21b625b87aa1b9d9d80086d336cb152cd10c0b4cb0c725",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 72,
+      "originalSha256": "467cfb7f4fca1a4c86ab649777bbe0596f0be12cc2adf6921e58e029d59b79ce",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 40,
+      "originalSha256": "18c555ae1c4aa1a4f565c705f3b19c9c09438d2e23ed2d0fa56de7f2fda579b7",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 28,
+      "originalSha256": "9f9f6123cd1f4f2131a6d8f63273937a011ae6560bd787a14a625644bc3eb892",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 433,
+      "originalSha256": "3754c6f0b6a634b3938c064f9d2c1e3827debfee645462f2e127f25124b3a002",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 52,
+      "originalSha256": "edee1393fb008afa0e15d5f48e6e167fb7388c9407dedefec7696710887374ae",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 94,
+      "originalSha256": "153d1df94b278ab64e98edbb0bee210fe37c943747e365c3fe0447deefc0ebdd",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 159,
+      "originalSha256": "2d392e4cd3f66f581d972bf2268f1f8bdf9605d0719566d74de3206049d5ab90",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 232,
+      "originalSha256": "020a8e2ce8026ada0866c5d3cdfa1b0f847672fbf5a7a09e4c6075594da3c069",
+      "relocations": 0
+    },
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "originalBytes": 140,
+      "originalSha256": "758810467852d23e1089aa6c7c947b63127230b04be1420bebe128c7cd92425a",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_GATEWAY_CONNECTIONS",
+      "owner": "registry",
+      "originalBytes": 45,
+      "originalSha256": "2652f9fbd51e51de827be3ee85f4e5298553d9cd093e6fa89d495e9c4e2c3b7e",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_OVERLAY_METADATA_USERNAME_BYTES",
+      "owner": "registry",
+      "originalBytes": 56,
+      "originalSha256": "be8939a2c97cc647aa4cefc8e3268a68f5086798450570f3239242bc833df42c",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_OVERLAY_METADATA_FEATURES",
+      "owner": "registry",
+      "originalBytes": 49,
+      "originalSha256": "d5622e83bb1270485528fac45abf0b328ba019e84fcc1a631352e2710a45a4b5",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_OVERLAY_METADATA_FEATURE_BYTES",
+      "owner": "registry",
+      "originalBytes": 54,
+      "originalSha256": "fb600377ebb79a95e18713cf266318d6a4f48bb9c357f65888f605cabbbb758d",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_OVERLAY_METADATA_THUMBPRINT_BYTES",
+      "owner": "registry",
+      "originalBytes": 58,
+      "originalSha256": "08cbfb0d65f34b90f2abde46d3cef4a4a9722d7da2f2c6e31ee570ae9d3fae35",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_TUNNELS",
+      "owner": "registry",
+      "originalBytes": 32,
+      "originalSha256": "d7c5b4a761f2890955c727c3ba96b99b5f8d1fa824d0299f866fc3c008c43b83",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_TUNNELS_PER_PEER",
+      "owner": "registry",
+      "originalBytes": 40,
+      "originalSha256": "f7a7410b4df695c8189c83448e21dbaf467763d698f2e9ce5309976be5d73eb4",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_REPLAY_NONCES",
+      "owner": "registry",
+      "originalBytes": 40,
+      "originalSha256": "fc0e9be6cf9387f78304b88feb5510fb61f0e2ead0384c4fc23fb54b4ede6042",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_REPLAY_NONCES_PER_PEER",
+      "owner": "registry",
+      "originalBytes": 47,
+      "originalSha256": "9078dd5707cf6f90dadce1c90a4fd0f33fd4d4b6d049635d1a06cabae5881c7c",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_POD_ID_BYTES",
+      "owner": "registry",
+      "originalBytes": 37,
+      "originalSha256": "2873c4514337bf9cc4bfe7fd38629d6f86e7354c1540d881e93a1aeb5855fc36",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_DESTINATION_HOST_BYTES",
+      "owner": "registry",
+      "originalBytes": 47,
+      "originalSha256": "edc9cad5bf69ec4552ffc201fe8e25ee21e71cc52ccdf8e85178a729052cb632",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_SERVICE_NAME_BYTES",
+      "owner": "registry",
+      "originalBytes": 43,
+      "originalSha256": "d703b8442e93ec4b10d42552b1620e8bed043c59716933d0deb8a90509b3d022",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_REQUEST_NONCE_BYTES",
+      "owner": "registry",
+      "originalBytes": 43,
+      "originalSha256": "7dff157583f84bb583eb9922ba95300c6a350fc7fb4f6aea3e4833e10fb6fc7e",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_CERTIFICATE_BYTES",
+      "owner": "registry",
+      "originalBytes": 46,
+      "originalSha256": "89f98b88ed6d423c1adb16fc869bb3278203f4fa7a48fd66ff88c6b618f0223a",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_PRIVATE_KEY_BYTES",
+      "owner": "registry",
+      "originalBytes": 46,
+      "originalSha256": "50c9db34be7e66aae5c68d2a120ac91e0512581273cce517e24ce87fc75ecc21",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "REQUEST_FRESHNESS_SECONDS",
+      "owner": "registry",
+      "originalBytes": 44,
+      "originalSha256": "f6a9d52919f63308fe8700ce0f779587f90c4d229f69af4d3d6c19ba90d1d27c",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "DESTINATION_RESOLVE_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 70,
+      "originalSha256": "965b4e85cd721e02baa397fb0345c2352bd31d8031f86093798e6a16de231ceb",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "DESTINATION_CONNECT_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 71,
+      "originalSha256": "7c7027571fe20daafbfa85f72d456e0d47146b15839e728b9089dd51abb15c3e",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "DESTINATION_WRITE_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 69,
+      "originalSha256": "dec136fb2dad7a315a6493d07bdff7f55f647251aa3232b8c2b80b974c2a9dd9",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "OVERLAY_MESSAGE_READ_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 72,
+      "originalSha256": "b1a8e7221ce544aa63bb1d6e5a408ab73a580580ffdbc34bb1d2b901b1e68c2a",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "OVERLAY_KEEPALIVE_INTERVAL",
+      "owner": "registry",
+      "originalBytes": 74,
+      "originalSha256": "71efd04c94fe6dedc8d0e2b91c8e96442802547e7f954dcde703ed2a9af2a72f",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "OVERLAY_IDLE_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 68,
+      "originalSha256": "43c4fcc4e78b4c2f4b3d86aeecabe215253bce2c126d5487a290450b1e9c7b3f",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_DATA_READ_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 66,
+      "originalSha256": "44d65999184bb52a8f138acf31d0af13d670b2e72902fed75642b49d696df81c",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "INBOUND_BUFFER_CHUNKS",
+      "owner": "registry",
+      "originalBytes": 41,
+      "originalSha256": "53e6ee6e2d699a7c0eda06aff99e8bcfe361b66548f8f347f57dc9952635ba14",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "TUNNEL_CHUNK_BYTES",
+      "owner": "registry",
+      "originalBytes": 44,
+      "originalSha256": "311f05f66db8f5ce59aa488ea249683a06cc9288e71e3edd520346525ba55ce8",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_POD_MESSAGE_BODY_BYTES",
+      "owner": "registry",
+      "originalBytes": 52,
+      "originalSha256": "c3e2ba035d8be9bb132dabee097f0c6b3cdfd3df5c70dbfcb0e38aa0cf5d94d3",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_DATA_MAX_PAYLOAD_BYTES",
+      "owner": "registry",
+      "originalBytes": 95,
+      "originalSha256": "f1ca970189007963c5f369ef22afd02b184ca7605aa73d7623604034f5105195",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_MAX_SESSIONS",
+      "owner": "registry",
+      "originalBytes": 44,
+      "originalSha256": "7ea88fc14bcaec7c1d1a2fa3b09c34e131679bba90c130ff9adc1e06e8688cd1",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_PREFIX_SESSION_LIMIT",
+      "owner": "registry",
+      "originalBytes": 50,
+      "originalSha256": "306e37192ddfc4f84c92a792daaaffa38ae76681b826de81e1d31dafe9885953",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_GLOBAL_ATTEMPT_LIMIT",
+      "owner": "registry",
+      "originalBytes": 51,
+      "originalSha256": "7d5a60c7cb369d16d704d0bce63424eea6c7f88ee7aebc0e03eb6cea5526ef08",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_PREFIX_ATTEMPT_LIMIT",
+      "owner": "registry",
+      "originalBytes": 50,
+      "originalSha256": "ef57b5b0f8e24baff37cb03c55cb375d60bc56471bba577cf5fae438e3f27f18",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_ATTEMPT_WINDOW",
+      "owner": "registry",
+      "originalBytes": 69,
+      "originalSha256": "b9701dc4986a7b8b6d25b0766cd9b93f0febae268977edd501a666ee5f0a65af",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_IDLE_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 68,
+      "originalSha256": "165ce20c15ba7adea407b1836f95f8f2e513dc36e721f55b35af6f4f074c744d",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "QUIC_PROXY_PENDING_TIMEOUT",
+      "owner": "registry",
+      "originalBytes": 70,
+      "originalSha256": "53b12e6565784e0dc6218206524c9196785341cb9d911bba4ffed3714c1b2834",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "OverlayLiveness",
+      "owner": "gateway_models",
+      "originalBytes": 79,
+      "originalSha256": "0340e415cfcaba57cadab0fbad41b4066442ba43b47f21e8e05e62df748482ec",
+      "relocations": 3
+    },
+    {
+      "kind": "impl",
+      "name": "OverlayLiveness",
+      "owner": "gateway_models",
+      "originalBytes": 673,
+      "originalSha256": "dda3b6f6bd8ea32c81013d5db523dc1c5b86426f58f69555953acb5eedbb2cf9",
+      "relocations": 5
+    },
+    {
+      "kind": "const",
+      "name": "MAX_MESH_CONTENT_BYTES",
+      "owner": "registry",
+      "originalBytes": 49,
+      "originalSha256": "8cef19357f3e50a05196b171ce9a4a7680026d787d0de1435d357258c29f9990",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_CONTENT_ID_BYTES",
+      "owner": "registry",
+      "originalBytes": 41,
+      "originalSha256": "3cba7cba344b697a80b819b9a959885376368c3d1f57ea6c90f3bf50657075a2",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_SHADOW_MBID_BYTES",
+      "owner": "registry",
+      "originalBytes": 42,
+      "originalSha256": "cb0f4fd14600f04f98c6f9090a608eddb020a88d9009eb281479e7e00056f3db",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "MAX_SHADOW_BATCH",
+      "owner": "registry",
+      "originalBytes": 36,
+      "originalSha256": "7cd45549ed037385f0c4fc6e23d727bffeec51e1f5da64ab6d02329080ff22b0",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "QuicDataPolicy",
+      "owner": "gateway_models",
+      "originalBytes": 268,
+      "originalSha256": "494de89867e2bc653473c5b9378669e4f935b29fff0fde09ea201142530ce60d",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "Gateway",
+      "owner": "gateway_models",
+      "originalBytes": 955,
+      "originalSha256": "8189822f077e80ee78deb61bd5f15abb1acc5a97b05181d42372e6be694856e4",
+      "relocations": 20
+    },
+    {
+      "kind": "impl",
+      "name": "Gateway",
+      "owner": "gateway_models",
+      "originalBytes": 489,
+      "originalSha256": "7dda502fd147ff8544d5fb78e4c6c079d9e82cd46dccfe4c3ffdd7ddb55b62f3",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "overlay_service_enabled",
+      "owner": "service_policy",
+      "originalBytes": 844,
+      "originalSha256": "9d665a2cabd1477346dc25d4bf32f2b4edf9bde1b85f7647084086cfb8fa2a9e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "local_service_enabled",
+      "owner": "service_policy",
+      "originalBytes": 343,
+      "originalSha256": "cec78ffaa9487aa92ae7d292e1aaaa6cf7d0fb64a5bf4d3d0700852e805d340d",
+      "relocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "Gateway",
+      "owner": "gateway_transport",
+      "originalBytes": 38278,
+      "originalSha256": "a24371efad2e63226036c0d731e636b598e0b20df5c6fa1e2fe6d498ebaae7da",
+      "relocations": 15
+    },
+    {
+      "kind": "struct",
+      "name": "QuicProxySession",
+      "owner": "quic_proxy",
+      "originalBytes": 186,
+      "originalSha256": "39cffd0409dd48cbe3b8880e51ca3ced15031baa5c06a8080831e75d4ef9625f",
+      "relocations": 5
+    },
+    {
+      "kind": "impl",
+      "name": "QuicProxySession",
+      "owner": "quic_proxy",
+      "originalBytes": 2106,
+      "originalSha256": "bdcf7ae9367a251f528457b10e0ba0ec11445c8802a2b24bd3a98c5d037521b5",
+      "relocations": 4
+    },
+    {
+      "kind": "fn",
+      "name": "prune_quic_proxy_sessions",
+      "owner": "quic_proxy",
+      "originalBytes": 445,
+      "originalSha256": "e7e8e1d26f13b14dfe7fbbaf9b804780292259a6ef49dd83ff9c0da1609bff25",
+      "relocations": 2
+    },
+    {
+      "kind": "fn",
+      "name": "is_dht_packet",
+      "owner": "quic_proxy",
+      "originalBytes": 87,
+      "originalSha256": "07f54a947a3bf05ec83775e8ef58c81727717062822a78a1344e03811bebf2eb",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "overlay_datagram_limiter_id",
+      "owner": "quic_proxy",
+      "originalBytes": 94,
+      "originalSha256": "c97fa6010d00afbe950bcccb9325f1d2c247402f1c82d6d437c059c3d7f1b7a8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "forward_dht_responses",
+      "owner": "quic_proxy",
+      "originalBytes": 990,
+      "originalSha256": "057d6b81609d602cde7612fca7502298424e97c2fbc21f0312e788392eae2428",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_quic_initial_packet",
+      "owner": "quic_proxy",
+      "originalBytes": 368,
+      "originalSha256": "82b1dd7a1c7fc239d61cc0ff2c1eb34e6b8aaa5e4694e23e6870e0369f9a3264",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "select_quic_proxy_backend",
+      "owner": "quic_proxy",
+      "originalBytes": 362,
+      "originalSha256": "f9cacba35207498e8ae70077bae152580f7f3bbcfcf1edca0063dd755e9c045e",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "QuicProxyAdmissionGate",
+      "owner": "quic_proxy",
+      "originalBytes": 112,
+      "originalSha256": "e89ca7fadec7abd7a9ef0b4422e0f69d690b8c03404340f9a2e4d49808acef4c",
+      "relocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "QuicProxyAdmissionState",
+      "owner": "quic_proxy",
+      "originalBytes": 175,
+      "originalSha256": "85601aa549ec6c49d826aba4b181cf1ee6333f6172af1fbbd5b4d9e6aaa7e25d",
+      "relocations": 4
+    },
+    {
+      "kind": "impl",
+      "name": "QuicProxyAdmissionGate",
+      "owner": "quic_proxy",
+      "originalBytes": 1896,
+      "originalSha256": "35331d8747dbb966caacc529c006bd9228913fb7b9cdc338eeea8255c5e01f10",
+      "relocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "QuicProxyAdmissionLease",
+      "owner": "quic_proxy",
+      "originalBytes": 107,
+      "originalSha256": "0d3f81ee370e7517e5fe7b0f1f85513c7c595196652bc83c37d02bd334ede962",
+      "relocations": 3
+    },
+    {
+      "kind": "impl",
+      "name": "QuicProxyAdmissionLease",
+      "owner": "quic_proxy",
+      "originalBytes": 209,
+      "originalSha256": "af1b1cb22ef0a20f49e606abd8e701892c295f6a20170913edf71945231b7ed2",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "quic_proxy_network_prefix",
+      "owner": "quic_proxy",
+      "originalBytes": 594,
+      "originalSha256": "f00e0654f0886c96aeeb8ef337ff79dfe9bfa0ec015dbe3f8142f94594eba295",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_quic_data_command_line",
+      "owner": "quic_relay",
+      "originalBytes": 530,
+      "originalSha256": "98f86a87f774d4d3351151be3edd608be27c7e061345bdf698513215fe946d7a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_quic_data_command_line_with_timeout",
+      "owner": "quic_relay",
+      "originalBytes": 299,
+      "originalSha256": "a169599071418fb33f536a54f3310c5eb63b0bbe78a0cf3289e56b83465abe75",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "write_quic_data_error",
+      "owner": "quic_relay",
+      "originalBytes": 339,
+      "originalSha256": "30d6ffaccbdc5f1561165c109c0377f4903de088506f78919e8917b09fc64c24",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "relay_authentication_valid",
+      "owner": "quic_relay",
+      "originalBytes": 577,
+      "originalSha256": "62ff3d40b01f3f5997f7be1934411da6847e9fb3aab9d675909ed6ed5b8e6742",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "allowed_relay_destination",
+      "owner": "quic_relay",
+      "originalBytes": 350,
+      "originalSha256": "4545ee0b036f128642dab586a9893463d72159c7d1f2d7b46ffe65ae8d6363fb",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "copy_quic_to_tcp",
+      "owner": "quic_relay",
+      "originalBytes": 774,
+      "originalSha256": "8d51b1297de6ec6e89276820a40963254415f6632bacc0aceda454f6d5fe01ea",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "copy_tcp_to_quic",
+      "owner": "quic_relay",
+      "originalBytes": 787,
+      "originalSha256": "1d21394b256713d9ddbe947e7c51dba4fc007c301044f3b9c580113427e62781",
+      "relocations": 1
+    },
+    {
+      "kind": "impl",
+      "name": "Gateway",
+      "owner": "gateway_services",
+      "originalBytes": 33292,
+      "originalSha256": "d180fe3265934e9f9a6d5547e29593e95eaf56a0b0ebf5ab240b96ab8eeb86e8",
+      "relocations": 34
+    },
+    {
+      "kind": "struct",
+      "name": "Tunnel",
+      "owner": "gateway_models",
+      "originalBytes": 326,
+      "originalSha256": "d3af58d5997d897936d277df7d2688cec18ab0a1170852eb68ed1dea9c5837d1",
+      "relocations": 7
+    },
+    {
+      "kind": "impl",
+      "name": "Tunnel",
+      "owner": "gateway_models",
+      "originalBytes": 92,
+      "originalSha256": "083519a9952c3a3e5d2b0077f4dabd43d1eaceed0c67ee83c368dc86bd4eb7ee",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "OverlayConnectionMetadata",
+      "owner": "gateway_models",
+      "originalBytes": 378,
+      "originalSha256": "36c8e85fcd56b19fb6d015c9b77e65144364bc2b636dd5a324f888bfcdd0077c",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "OutboundOverlayGuard",
+      "owner": "gateway_models",
+      "originalBytes": 91,
+      "originalSha256": "e858b970f57110e375e2260632362685c9664d2342f86cc546a8dd4760c11842",
+      "relocations": 2
+    },
+    {
+      "kind": "impl",
+      "name": "OutboundOverlayGuard",
+      "owner": "gateway_models",
+      "originalBytes": 372,
+      "originalSha256": "79af250f204b6338812066a241fad106f525d8ff41515d84aba56bb3ac777f81",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "overlay_timestamp",
+      "owner": "mesh_content_projection",
+      "originalBytes": 114,
+      "originalSha256": "0e9d86b553eddbb3123f91210282c5df4be046a2c7e7c8b7a0e7241415267ae5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mesh_search_file_dto",
+      "owner": "mesh_content_projection",
+      "originalBytes": 892,
+      "originalSha256": "801112d462c015ec374c4a8a5edcce6f325e5f5f4605158cf89326e625187367",
+      "relocations": 2
+    },
+    {
+      "kind": "fn",
+      "name": "mesh_search_error_response",
+      "owner": "mesh_content_projection",
+      "originalBytes": 275,
+      "originalSha256": "1656517a7864ca2911875c6c0b66769f69c21d22541429b230e4713736af2520",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mesh_search_codec",
+      "owner": "mesh_content_projection",
+      "originalBytes": 454,
+      "originalSha256": "b32949ac2fe590a4afe3d086c79b1ec58a2adf511e2f3edcb084db77fd2bc6c8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mesh_search_media_kinds",
+      "owner": "mesh_content_projection",
+      "originalBytes": 766,
+      "originalSha256": "56d22f5b995b0c35bc186f8f62670f2509906c606aad0532e89c3028c72bda02",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "service_reply",
+      "owner": "service_policy",
+      "originalBytes": 396,
+      "originalSha256": "cc964cfe7e035cfb03102aae6c6179991bfdd7c274989ae20d5aac54f4d03cf9",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "parse_payload",
+      "owner": "service_policy",
+      "originalBytes": 189,
+      "originalSha256": "7d4d691d2e9f2e1bfbb0504cd507262044d8a34a7ead81ef0e6d1101b6e210be",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "ShadowQueryRequest",
+      "owner": "mesh_content_projection",
+      "originalBytes": 131,
+      "originalSha256": "3acc9703d1fdfb1c2ac55c1f698e1e19e638d86aaf313392078029d49ea62035",
+      "relocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "ShadowBatchRequest",
+      "owner": "mesh_content_projection",
+      "originalBytes": 139,
+      "originalSha256": "d8953505dc772ab6821f7e2f6738c3341dce2ce5b9be88d01c9226ceffa5aad5",
+      "relocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "MeshContentRequest",
+      "owner": "mesh_content_projection",
+      "originalBytes": 240,
+      "originalSha256": "d9959ca06a056a186bfcaf678d415b206cfe514ca78f923b336f8386b2af1481",
+      "relocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "MeshContentRange",
+      "owner": "mesh_content_projection",
+      "originalBytes": 198,
+      "originalSha256": "5a7a417c7b1f49209cfb7dc5bf47756a3a995ccbe762efef5520c35307260ce7",
+      "relocations": 3
+    },
+    {
+      "kind": "fn",
+      "name": "valid_shadow_mbid",
+      "owner": "mesh_content_projection",
+      "originalBytes": 355,
+      "originalSha256": "625423c87c328eb25784c497ec7985877121227bb69175b37b204a3e5e21393d",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "shadow_index_result",
+      "owner": "mesh_content_projection",
+      "originalBytes": 1364,
+      "originalSha256": "57393585e84ef8ccbe798f0640629110c667bcd8f5ba3c32a25055ebbb9a1e88",
+      "relocations": 2
+    },
+    {
+      "kind": "fn",
+      "name": "mesh_content_range",
+      "owner": "mesh_content_projection",
+      "originalBytes": 923,
+      "originalSha256": "d15c35f8b75d75b3c3262914ee91c084c581f1252f298d941d867d2c1745443a",
+      "relocations": 1
+    },
+    {
+      "kind": "struct",
+      "name": "PodIdRequest",
+      "owner": "pod_request_models",
+      "originalBytes": 112,
+      "originalSha256": "71a03f8b40c0f5fd1007b2cbcc28485aeba5eed61b08931d12a4dfec26b357e1",
+      "relocations": 2
+    },
+    {
+      "kind": "struct",
+      "name": "PodMessageRequest",
+      "owner": "pod_request_models",
+      "originalBytes": 296,
+      "originalSha256": "2fb4a4bfad1d0e49ece32425cd962d6b5541018d972994bce71fc1d16a5b857b",
+      "relocations": 5
+    },
+    {
+      "kind": "struct",
+      "name": "PodControlMessage",
+      "owner": "pod_request_models",
+      "originalBytes": 333,
+      "originalSha256": "19351c9c3149be01748eb101adcc946dd6d7ca41fbe0b05356efd83abdd0e58f",
+      "relocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "PodMessagesRequest",
+      "owner": "pod_request_models",
+      "originalBytes": 258,
+      "originalSha256": "6c9b56815afcb8f2fd41a247c8f433719ebeb6b5af53caac33419a96de38a8f2",
+      "relocations": 4
+    },
+    {
+      "kind": "fn",
+      "name": "bounded_required",
+      "owner": "service_policy",
+      "originalBytes": 278,
+      "originalSha256": "05e8878eebde9982b83b3bb5d7d7724a563723514a7536f05b2c87d6f8244fc8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "valid_service_call",
+      "owner": "service_policy",
+      "originalBytes": 138,
+      "originalSha256": "5b55c3645e13f33b1adc15049b63dcef1662959f2cca2f8d4638ca6cedea8e64",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "gateway_peer_identity",
+      "owner": "peer_authentication",
+      "originalBytes": 90,
+      "originalSha256": "58c7684fe4e213517f2e3b1972fed361a37a1de148620ea59e6f3360ac3dd38a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "gateway_replay_nonce_key",
+      "owner": "peer_authentication",
+      "originalBytes": 138,
+      "originalSha256": "c4bb5a88dfb3a76268a60f2a1aae41ffbfe4fadb4794719143f7ba9c271d3bd4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "valid_open_tunnel_request",
+      "owner": "peer_authentication",
+      "originalBytes": 604,
+      "originalSha256": "14f22f5b295dfe6f076f647a90c40ee45b8f9e4c7da8135a6055f755e1836d26",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_destination",
+      "owner": "peer_authentication",
+      "originalBytes": 485,
+      "originalSha256": "b4364eca5372dc782add0a7213f1267f2c16b7c2419feeb8cb62b62c49635bbc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "resolve_public_relay_destination",
+      "owner": "peer_authentication",
+      "originalBytes": 495,
+      "originalSha256": "05986030eff4e9581a973c3ca8f848c057837b936dfccf0e83c876a5588b7c0f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "authenticate_overlay_peer",
+      "owner": "peer_authentication",
+      "originalBytes": 1333,
+      "originalSha256": "de139b54e30b7bd982018a2d682a2713744e7e7c9455d34493f3c72d48ec8f10",
+      "relocations": 4
+    },
+    {
+      "kind": "fn",
+      "name": "verify_overlay_peer_authentication",
+      "owner": "peer_authentication",
+      "originalBytes": 345,
+      "originalSha256": "874d4a42b3dcddbdeaeef0d4374a235ea627a6ed0a35c8a0157f84a67e843108",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "valid_destination_ip",
+      "owner": "peer_authentication",
+      "originalBytes": 602,
+      "originalSha256": "62e278b582151356aa724c39f4d055062a194916dcdc8dfcdb729ce355e79d72",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "valid_public_relay_ip",
+      "owner": "peer_authentication",
+      "originalBytes": 233,
+      "originalSha256": "010e394752c64439864878362fb67573680a45eb75a1461739c59ce061945f38",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "load_or_create_certificate",
+      "owner": "gateway_identity",
+      "originalBytes": 1710,
+      "originalSha256": "77496977a5afaeaedbd11685a317e3fc94dacb1c1bdfee73e31b7a6e3b2fabc2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "write_new_identity",
+      "owner": "gateway_identity",
+      "originalBytes": 540,
+      "originalSha256": "f2304c6618fa20ba87e5c0e3a6e4fd307076a1ea2dcbc11dd22db698e20a0a2b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_identity_file",
+      "owner": "gateway_identity",
+      "originalBytes": 2174,
+      "originalSha256": "030e3aa3afa7c304a272420659dd55d52b4776686fcf963f14f1fcf1ade3cf2f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "write_secret",
+      "owner": "gateway_identity",
+      "originalBytes": 1149,
+      "originalSha256": "556b36c7564dda85e592bde8e9fd8c2bd495d24db13d98eab3d7e9c794c19534",
+      "relocations": 1
+    },
+    {
+      "kind": "other",
+      "name": null,
+      "owner": "tests",
+      "originalBytes": 22283,
+      "originalSha256": "547acd44ad04bea5a6e7a6d38e01cf601e76e83083a111888bde63de09711f7e",
+      "relocations": 0
+    }
+  ],
+  "preservedTestDeclarations": 25,
+  "testWrapper": {
+    "bodyBounds": [
+      109334,
+      131590
+    ],
+    "bodySha256": "52a024bda97fa82c0a8c572e54b32520cee510e0ca659d2e42ab786ba7a494e4",
+    "moduleDeclarationRelocatedToRegistry": true,
+    "testNamesMatchOriginal": true
+  },
+  "publicDeclarations": [
+    "Gateway",
+    "OutboundOverlayGuard",
+    "OverlayConnectionMetadata",
+    "QuicDataPolicy"
+  ],
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "04e6c14e9471bd8cb400956bb8fceaf34d6809a89abfe5216d68c64e044989af"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "1f66b2ae29e356aba4619602da2d0e1d998319f20bd934dffb5fd19cca16092a"
+    },
+    "features": {
+      "passed": true,
+      "sha256": "e31ac6b875805ded5a7dd294a402180dc9aa9240609ee98382188f47b3ce5b8d"
+    }
+  }
+}

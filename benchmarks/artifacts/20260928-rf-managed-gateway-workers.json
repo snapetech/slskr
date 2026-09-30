@@ -1,0 +1,27 @@
+{
+  "scope": "RF-006 gateway handler and service worker ownership",
+  "gates": {
+    "daemonLibTests": 664,
+    "strictAllTargetsClippy": "passed",
+    "fullControllerAndLegacyAllTargetsCompile": "passed"
+  },
+  "regressions": [
+    "stalled TLS handshake socket closes after joined daemon shutdown",
+    "TLS handler after shutdown rejected and socket closed",
+    "connection admission released when task cancelled",
+    "connection admission released when task never admitted"
+  ],
+  "managedWorkers": [
+    "accepted TLS handler",
+    "UDP control listener",
+    "QUIC control listener and accepted handlers",
+    "QUIC data listener and accepted handlers",
+    "DHT response forwarding"
+  ],
+  "portsAdded": 0,
+  "remainingScope": [
+    "tunnel reader and QUIC proxy session cancellation/join ownership",
+    "outbound metadata guard asynchronous cleanup",
+    "broader managed service clean-runner evidence"
+  ]
+}

@@ -1,5 +1,9 @@
 use super::*;
 
+fn checked_distributed_depth(value: i64) -> Result<u32, Box<dyn std::error::Error>> {
+    Ok(u32::try_from(value)?)
+}
+
 impl DatabaseManager {
     /// Load wishlist scheduler state
     pub async fn load_wishlist_scheduler_state(
@@ -11,9 +15,16 @@ impl DatabaseManager {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(result.map(|(next_index, server_interval)| {
-            (next_index as usize, server_interval.map(|secs| secs as u64))
-        }))
+        result
+            .map(
+                |(next_index, server_interval)| -> Result<_, Box<dyn std::error::Error>> {
+                    Ok((
+                        usize::try_from(next_index)?,
+                        server_interval.map(u64::try_from).transpose()?,
+                    ))
+                },
+            )
+            .transpose()
     }
 
     /// Save wishlist scheduler state
@@ -30,8 +41,8 @@ impl DatabaseManager {
             VALUES (1, ?, ?, ?)
             "#,
         )
-        .bind(next_index as i64)
-        .bind(server_interval_seconds.map(|secs| secs as i64))
+        .bind(i64::try_from(next_index)?)
+        .bind(server_interval_seconds.map(i64::try_from).transpose()?)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -49,9 +60,12 @@ impl DatabaseManager {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(result.map(|(branch_level, branch_root, parent_username)| {
-            (branch_level as u32, branch_root, parent_username)
-        }))
+        result
+            .map(|(branch_level, branch_root, parent_username)| {
+                checked_distributed_depth(branch_level)
+                    .map(|level| (level, branch_root, parent_username))
+            })
+            .transpose()
     }
 
     /// Load the distributed tree and child state from one read snapshot.
@@ -68,16 +82,18 @@ impl DatabaseManager {
         .fetch_optional(&mut *transaction)
         .await?
         .map(|(branch_level, branch_root, parent_username)| {
-            (branch_level as u32, branch_root, parent_username)
-        });
+            checked_distributed_depth(branch_level)
+                .map(|level| (level, branch_root, parent_username))
+        })
+        .transpose()?;
         let children = query_as::<_, (String, i64)>(
             "SELECT username, depth FROM distributed_children ORDER BY username",
         )
         .fetch_all(&mut *transaction)
         .await?
         .into_iter()
-        .map(|(username, depth)| (username, depth as u32))
-        .collect();
+        .map(|(username, depth)| checked_distributed_depth(depth).map(|depth| (username, depth)))
+        .collect::<Result<Vec<_>, _>>()?;
         transaction.commit().await?;
         Ok((tree_state, children))
     }
@@ -162,10 +178,12 @@ impl DatabaseManager {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|(username, depth)| (username, depth as u32))
-            .collect())
+            .map(|(username, depth)| {
+                checked_distributed_depth(depth).map(|depth| (username, depth))
+            })
+            .collect()
     }
 
     /// Save distributed children

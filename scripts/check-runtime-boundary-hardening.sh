@@ -6,8 +6,10 @@ cd "$repo_root"
 
 source_files=(
   crates/slskr/src/lib.rs
+  crates/slskr/src/app_state.rs
   crates/slskr/src/activitypub_controller.rs
   crates/slskr/src/session_runtime.rs
+  crates/slskr/src/session_runtime_owners/*.rs
   crates/slskr/src/security_controller.rs
   crates/slskr/src/quarantine_controller.rs
   crates/slskr/src/misc_controller_mutations.rs
@@ -18,6 +20,11 @@ source_files=(
   crates/slskr/src/musicbrainz_controller.rs
   crates/slskr/src/virtual_soulfind_v2_controller.rs
   crates/slskr/src/daemon_serve.rs
+  crates/slskr/src/external_visualizer_processes.rs
+  crates/slskr/src/core_dump_process.rs
+  crates/slskr/src/local_stream_file.rs
+  crates/slskr/src/script_process_group.rs
+  crates/slskr/src/share_stream_limits.rs
   crates/slskr/src/soulfind_bridge_runtime.rs
   crates/slskr/src/legacy_route_dispatch.rs
   crates/slskr/src/legacy_route_dispatch_group_00.rs
@@ -32,6 +39,7 @@ source_files=(
   crates/slskr/src/legacy_route_dispatch_group_09.rs
   crates/slskr/src/legacy_route_dispatch_group_10.rs
   crates/slskr/src/controller_tests.rs
+  crates/slskr/src/controller_tests/*.rs
   crates/slskr/src/destination_state.rs
   crates/slskr/src/database_maintenance.rs
   crates/slskr/src/event_store.rs
@@ -41,6 +49,7 @@ source_files=(
   crates/slskr/src/mediacore_controller.rs
   crates/slskr/src/extended_controller.rs
   crates/slskr/src/file_transfer_runtime.rs
+  crates/slskr/src/file_transfer_runtime_owners/*.rs
   crates/slskr/src/peer_transport.rs
   crates/slskr/src/peer_message_runtime.rs
   crates/slskr/src/http_connection.rs
@@ -86,6 +95,7 @@ source_files=(
   crates/slskr/src/route_dispatch_group_7_network_admin.rs
   crates/slskr/src/route_request_entry.rs
   crates/slskr/src/focused_controller_tests.rs
+  crates/slskr/src/focused_controller_tests/*.rs
   crates/slskr/src/contact_state.rs
   crates/slskr/src/collection_store.rs
   crates/slskr/src/controller_feature_state.rs
@@ -114,6 +124,7 @@ source_files=(
   crates/slskr/src/library_store.rs
   crates/slskr/src/local_file_hash.rs
   crates/slskr/src/managed_tasks.rs
+  crates/slskr/src/lifecycle_controller.rs
   crates/slskr/src/rate_limit.rs
   crates/slskr/src/oauth_state.rs
   crates/slskr/src/preview_stream_state.rs
@@ -157,8 +168,8 @@ source_files=(
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
-config_source="crates/slskr/src/config.rs"
-config_tests_source="crates/slskr/src/config_tests.rs"
+config_sources=(crates/slskr/src/config.rs crates/slskr/src/config_parts/*.rs)
+config_tests_sources=(crates/slskr/src/config_tests.rs crates/slskr/src/config_tests/*.rs)
 client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
 client_peer_cache_source="crates/slskr-client/src/peer_cache.rs"
@@ -199,6 +210,14 @@ for anchor in \
   'browse_errors_redact_internal_details' \
   'browse_failure_events_redact_internal_details' \
   'external_visualizer_launch_errors_redact_command_details' \
+  'external visualizer admission is closed' \
+  'visualizer_children.shutdown().await' \
+  'caps_children_and_joins_them_before_rejecting_late_launch' \
+  'completed_and_failed_children_release_capacity' \
+  'cancelled_stream_task_releases_its_lease' \
+  'unconfigured_streams_count_when_an_explicit_limit_is_added' \
+  'maxConcurrentStreams must be null or an integer from 1 through 64' \
+  'explicit_share_stream_limits_migrate_persist_reset_and_rollback' \
   'options_config_location_is_the_confined_compatibility_file' \
   'toml_config_sanitizes_secrets_and_storage_paths' \
   'lidarr_projections_redact_endpoint_and_errors' \
@@ -537,7 +556,7 @@ done
 for anchor in \
   'file.take(MAX_CONFIG_FILE_BYTES + 1)' \
   'HTTP API token must not be empty or whitespace-only'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$config_source" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "${config_sources[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
     status=1
   fi
@@ -547,7 +566,7 @@ for anchor in \
   'api_token_rejects_blank_env_and_file_values' \
   'config_file_reader_rejects_symlinks' \
   'config_file_reader_rejects_oversized_files'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$config_tests_source" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "${config_tests_sources[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
     status=1
   fi
@@ -556,5 +575,140 @@ done
 if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
+
+# Gateway children belong to local cancellation owners and the daemon join set.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/private_gateway_owners/gateway_models.rs \
+  crates/slskr/src/private_gateway_owners/gateway_services.rs \
+  crates/slskr/src/private_gateway_owners/gateway_transport.rs \
+  crates/slskr/src/private_gateway_owners/gateway_udp_runtime.rs \
+  crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs \
+  crates/slskr/src/private_gateway_owners/quic_proxy.rs; then
+  printf 'runtime boundary hardening failed: detached gateway task\n' >&2
+  exit 1
+fi
+
+# CLI live-soak workers remain bounded and owned by their enclosing scopes.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/cli_smoke_soak_owners/live_peer_runtime.rs \
+  crates/slskr/src/cli_smoke_soak_owners/live_server_runtime.rs \
+  crates/slskr/src/cli_smoke_soak_owners/live_soak_entry.rs; then
+  printf 'runtime boundary hardening failed: detached live-soak task\n' >&2
+  exit 1
+fi
+
+# Short-lived CLI fixture and accept tasks have cancellation owners too.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/cli_smoke_soak_owners/fixture_transfers.rs \
+  crates/slskr/src/cli_smoke_soak_owners/peer_probe_operations.rs \
+  crates/slskr/src/cli_smoke_soak_owners/peer_smoke_scenarios.rs \
+  crates/slskr/src/cli_smoke_soak_owners/server_smoke_scenarios.rs \
+  crates/slskr/src/cli_smoke_soak_owners/transfer_smoke_scenarios.rs; then
+  printf 'runtime boundary hardening failed: detached CLI probe task\n' >&2
+  exit 1
+fi
+
+# Administrative jobs share daemon shutdown ownership; forwarding has one
+# explicitly owned listener task and a bounded child join set.
+if rg -n 'tokio::(task::)?spawn\(' \
+  crates/slskr/src/route_dispatch.rs \
+  crates/slskr/src/route_dispatch_group_1_events.rs \
+  crates/slskr/src/route_dispatch_group_3_admin_controls.rs \
+  crates/slskr/src/transfer_completion.rs \
+  crates/slskr/src/virtual_soulfind_v2_controller.rs \
+  crates/slskr/src/webhooks.rs \
+  crates/slskr/src/scripts.rs; then
+  printf 'runtime boundary hardening failed: detached administrative worker\n' >&2
+  exit 1
+fi
+python3 - <<'PYFORWARD'
+from pathlib import Path
+source = Path('crates/slskr/src/port_forwarding.rs').read_text()
+if source.count('tokio::spawn(') != 1 or 'Some(ListenerTask(task))' not in source:
+    raise SystemExit('runtime boundary hardening failed: forwarding listener ownership changed')
+for anchor in ('connections.spawn(', 'connections.shutdown().await', 'impl Drop for ListenerTask', 'impl Drop for ActiveConnection'):
+    if anchor not in source:
+        raise SystemExit(f'runtime boundary hardening failed: missing forwarding owner {anchor}')
+PYFORWARD
+
+# WebSocket readers stay inside their connection future, including cancellation.
+python3 - <<'PYWS'
+from pathlib import Path
+for name in ('events_ws.rs', 'signalr_ws.rs', 'relay_ws.rs'):
+    path = Path('crates/slskr/src') / name
+    production = path.read_text().split('#[cfg(test)]', 1)[0]
+    if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
+        raise SystemExit(f'runtime boundary hardening failed: detached WebSocket reader in {path}')
+    if 'tokio::pin!(reader_task,' not in production:
+        raise SystemExit(f'runtime boundary hardening failed: missing scoped reader in {path}')
+PYWS
+
+python3 - <<'PYFTP'
+from pathlib import Path
+source = Path('crates/slskr/src/ftp_upload_queue.rs').read_text()
+for anchor in ('MAX_ADMITTED_UPLOADS: usize = 64', 'MAX_ACTIVE_UPLOADS: usize = 4',
+               'tasks.try_spawn(', 'impl Drop for FtpUploadQueue'):
+    if anchor not in source:
+        raise SystemExit(f'runtime boundary hardening failed: missing FTP admission {anchor}')
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('self.ftp_uploads.close()') > state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: FTP admission must close before joining workers')
+PYFTP
+
+python3 - <<'PYRELAY'
+from pathlib import Path
+cleanup = Path('crates/slskr/src/relay_connection_cleanup.rs').read_text()
+for anchor in ('MAX_PENDING_CLEANUPS: usize = 256', 'reserve_owned()',
+               'permit.send(', 'impl Drop for ConnectionLease', 'Arc::downgrade(state)',
+               'managed_background_tasks.try_spawn('):
+    if anchor not in cleanup:
+        raise SystemExit(f'runtime boundary hardening failed: missing relay cleanup owner {anchor}')
+if 'tokio::spawn(' in cleanup or 'tokio::task::spawn(' in cleanup:
+    raise SystemExit('runtime boundary hardening failed: detached relay cleanup worker')
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('self.relay_cleanup.close()') > state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: relay cleanup admission must close before shutdown')
+if 'protocol.shutdown_connections()' not in state:
+    raise SystemExit('runtime boundary hardening failed: relay registrations must clear after shutdown')
+PYRELAY
+
+python3 - <<'PYWEBHOOK'
+from pathlib import Path
+state = Path('crates/slskr/src/app_state.rs').read_text().split('async fn shutdown_managed_tasks', 1)[1]
+if state.index('fail_unconfirmed_webhook_logs(') < state.index('self.managed_background_tasks.shutdown()'):
+    raise SystemExit('runtime boundary hardening failed: webhook outcomes must reconcile after joining workers')
+startup = Path('crates/slskr/src/daemon_serve.rs').read_text()
+if 'fail_unconfirmed_webhook_logs(' not in startup:
+    raise SystemExit('runtime boundary hardening failed: missing interrupted webhook recovery')
+schema = Path('crates/slskr/src/persistence.rs').read_text()
+if 'idx_webhook_logs_queued' not in schema:
+    raise SystemExit('runtime boundary hardening failed: missing queued webhook reconciliation index')
+PYWEBHOOK
+
+# Delayed lifecycle commands share joined daemon ownership.
+python3 - <<'PYLIFECYCLE'
+from pathlib import Path
+root = Path('crates/slskr/src/lib.rs').read_text()
+owner = Path('crates/slskr/src/lifecycle_controller.rs').read_text()
+if 'fn schedule_lifecycle_command(' in root or 'tokio::spawn(' in root:
+    raise SystemExit('runtime boundary hardening failed: detached lifecycle command in crate root')
+if 'state.managed_background_tasks.try_spawn(' not in owner or 'tokio::spawn(' in owner:
+    raise SystemExit('runtime boundary hardening failed: unowned lifecycle command')
+if 'Duration::from_millis(100)' not in owner:
+    raise SystemExit('runtime boundary hardening failed: missing lifecycle response-flush delay')
+PYLIFECYCLE
+
+# One-shot QUIC operations finish cleanup in their caller's scope.
+python3 - <<'PYCODE'
+from pathlib import Path
+for name in ('quic_control.rs', 'quic_data.rs', 'shared_udp.rs', 'shared_quic_server.rs'):
+    path = Path('crates/slskr-client/src') / name
+    production = path.read_text().split('#[cfg(test)]', 1)[0]
+    if 'tokio::spawn(' in production or 'tokio::task::spawn(' in production:
+        raise SystemExit(f'runtime boundary hardening failed: detached QUIC worker in {path}')
+route = Path('crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs').read_text()
+if 'first_alpn(' in route:
+    raise SystemExit('runtime boundary hardening failed: native QUIC must negotiate ALPN after reassembly')
+PYCODE
 
 printf 'runtime boundary hardening check passed\n'

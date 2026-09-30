@@ -216,6 +216,139 @@ fn shared_wire_bytes_can_form_valid_plain_and_obfuscated_init_frames() {
 }
 
 #[tokio::test]
+async fn shared_demux_rejects_dual_valid_init_prefix() {
+    let obfuscated_message = InitMessage::PeerInit {
+        username: "a".repeat(252),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+    let wire = encode_rotated(&obfuscated_message.encode().unwrap().encode().unwrap(), 5);
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+
+    let error = demux_shared_incoming(server).await.unwrap_err();
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::AmbiguousInitFrame
+    ));
+}
+
+#[tokio::test]
+async fn shared_demux_prefers_known_obfuscated_init_over_opaque_unknown_collision() {
+    let known = InitMessage::PeerInit {
+        username: "a".repeat(252),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+    // The obfuscated prefix also advertises a bounded plain unknown frame.
+    let wire = encode_rotated(&known.encode().unwrap().encode().unwrap(), 0x42);
+    let plain_length = u32::from_le_bytes(wire[..4].try_into().unwrap()) as usize;
+    let plain_end = 4 + plain_length;
+    let plain = InitFrame::decode(&wire[..plain_end]).unwrap();
+    assert!(matches!(
+        InitMessage::decode(plain).unwrap(),
+        InitMessage::Unknown { .. }
+    ));
+    let obfuscated = InitFrame::decode(&decode_rotated(&wire).unwrap()).unwrap();
+    assert_eq!(InitMessage::decode(obfuscated).unwrap(), known);
+
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+    let incoming = demux_shared_incoming(server).await.unwrap();
+    assert!(matches!(
+        incoming,
+        IncomingConnection::ObfuscatedPeerMessages(_)
+    ));
+}
+
+#[tokio::test]
+async fn shared_demux_rejects_nested_collision_before_reading_body() {
+    let message = InitMessage::PeerInit {
+        username: "a".repeat(248),
+        connection_type: "F".to_owned(),
+        token: 0,
+    };
+    let inner = message.encode().unwrap().encode().unwrap();
+    let nested = InitFrame::new(inner[0], inner[1..].to_vec());
+    let wire = encode_rotated(&nested.encode().unwrap(), 5);
+    assert!(matches!(
+        InitMessage::decode(InitFrame::decode(&wire[..9]).unwrap()).unwrap(),
+        InitMessage::PierceFirewall { .. }
+    ));
+
+    // The same complete wire is a supported nested obfuscated file init.
+    let (mut writer, reader) = duplex(512);
+    writer.write_all(&wire).await.unwrap();
+    assert!(matches!(
+        demux_obfuscated_incoming(reader).await.unwrap(),
+        IncomingConnection::PeerInit {
+            token: 0,
+            kind: ConnectionKind::FileTransfer,
+            obfuscated: true,
+            ..
+        }
+    ));
+
+    // Keep the sender open: reject at nine bytes, without waiting for a body.
+    let (mut writer, reader) = duplex(64);
+    writer.write_all(&wire[..9]).await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(reader))
+        .await
+        .expect("ambiguous header must not wait for its body");
+    assert!(matches!(result, Err(ClientError::AmbiguousInitFrame)));
+}
+
+#[tokio::test]
+async fn shared_demux_preserves_unambiguous_nested_file_init_and_following_bytes() {
+    let message = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "F".to_owned(),
+        token: 42,
+    };
+    let inner = message.encode().unwrap().encode().unwrap();
+    let nested = InitFrame::new(inner[0], inner[1..].to_vec());
+    let wire = encode_rotated(&nested.encode().unwrap(), 0x8000_0000);
+    let (mut writer, reader) = duplex(512);
+    writer.write_all(&wire).await.unwrap();
+    writer.write_all(b"sentinel").await.unwrap();
+    let IncomingConnection::PeerInit {
+        token,
+        mut stream,
+        kind: ConnectionKind::FileTransfer,
+        obfuscated: true,
+        ..
+    } = demux_shared_incoming(reader).await.unwrap()
+    else {
+        panic!("expected nested obfuscated file init");
+    };
+    assert_eq!(token, 42);
+    let mut following = [0u8; 8];
+    stream.read_exact(&mut following).await.unwrap();
+    assert_eq!(&following, b"sentinel");
+}
+
+#[tokio::test]
+async fn obfuscated_init_writer_avoids_plain_length_and_tls_prefixes() {
+    let frame = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "P".to_owned(),
+        token: 0,
+    }
+    .encode()
+    .unwrap();
+
+    for _ in 0..32 {
+        let (mut writer, mut reader) = duplex(128);
+        write_obfuscated_init_frame(&mut writer, &frame)
+            .await
+            .unwrap();
+        let key = reader.read_u32_le().await.unwrap();
+        assert!(key as usize > slskr_client::io::DEFAULT_MAX_FRAME_LEN);
+        assert_ne!(key.to_le_bytes()[..2], [0x16, 0x03]);
+    }
+}
+
+#[tokio::test]
 async fn dedicated_listener_accepts_raw_connection_kind() {
     let listener = Listener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -314,7 +447,10 @@ async fn shared_mesh_listener_routes_tls_without_consuming_record_bytes() {
     let address = listener.local_addr().unwrap();
     let client_task = tokio::spawn(async move {
         let mut stream = TcpStream::connect(address).await.unwrap();
-        stream.write_all(&[0x16, 0x03]).await.unwrap();
+        stream
+            .write_all(&[0x16, 0x03, 0x01, 0x00, 0x04, 0x01])
+            .await
+            .unwrap();
         stream
     });
 
@@ -323,9 +459,9 @@ async fn shared_mesh_listener_routes_tls_without_consuming_record_bytes() {
     let SharedIncomingConnection::MeshOverlay(mut stream) = incoming else {
         panic!("expected mesh overlay connection");
     };
-    let mut prefix = [0_u8; 2];
+    let mut prefix = [0_u8; 6];
     stream.read_exact(&mut prefix).await.unwrap();
-    assert_eq!(prefix, [0x16, 0x03]);
+    assert_eq!(prefix, [0x16, 0x03, 0x01, 0x00, 0x04, 0x01]);
     drop(stream);
     client_task.await.unwrap();
 }
@@ -355,6 +491,38 @@ async fn shared_mesh_listener_preserves_soulseek_demux() {
             ..
         })
     ));
+    client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_mesh_listener_accepts_plain_frame_with_tls_like_first_two_bytes() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let username = "p".repeat(776);
+    let expected_username = username.clone();
+    let client_task = tokio::spawn(async move {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let init = InitMessage::PeerInit {
+            username,
+            connection_type: "P".to_owned(),
+            token: 0,
+        };
+        let frame = init.encode().unwrap();
+        assert_eq!(&frame.encode().unwrap()[..2], &[0x16, 0x03]);
+        write_init_frame(&mut stream, &frame).await.unwrap();
+    });
+
+    let (incoming, _) = listener.accept_shared_mesh().await.unwrap();
+    let SharedIncomingConnection::Soulseek(IncomingConnection::PeerInit {
+        username,
+        kind: ConnectionKind::PeerMessages,
+        obfuscated: false,
+        ..
+    }) = incoming
+    else {
+        panic!("expected plain peer init on the shared listener");
+    };
+    assert_eq!(username, expected_username);
     client_task.await.unwrap();
 }
 
@@ -655,4 +823,162 @@ async fn tcp_pair() -> (TcpStream, TcpStream) {
     let address = listener.local_addr().unwrap();
     let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
     (client.unwrap(), accepted.unwrap().0)
+}
+
+#[tokio::test]
+async fn shared_demux_rejects_unknown_fallback_after_consuming_alternate_frame() {
+    let unknown = InitMessage::Unknown {
+        code: 0x42,
+        payload: vec![0x55; 6],
+    };
+    let wire = encode_rotated(&unknown.encode().unwrap().encode().unwrap(), 5);
+    // Both interpretations are valid unknown init frames of different lengths.
+    let plain = InitFrame::decode(&wire[..9]).unwrap();
+    assert!(matches!(
+        InitMessage::decode(plain).unwrap(),
+        InitMessage::Unknown { .. }
+    ));
+    let obfuscated = InitFrame::decode(&decode_rotated(&wire).unwrap()).unwrap();
+    assert_eq!(InitMessage::decode(obfuscated).unwrap(), unknown);
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+    let error = demux_shared_incoming(server).await.unwrap_err();
+    assert!(matches!(error, ClientError::AmbiguousInitFrame));
+}
+
+#[tokio::test]
+async fn shared_demux_preserves_unambiguous_unknown_frame_and_following_bytes() {
+    let unknown = InitMessage::Unknown {
+        code: 0x42,
+        payload: vec![0x55; 6],
+    };
+    let wire = encode_rotated(&unknown.encode().unwrap().encode().unwrap(), 0x8000_0000);
+    let (mut client, server) = tcp_pair().await;
+    client.write_all(&wire).await.unwrap();
+    client.write_all(b"sentinel").await.unwrap();
+    let IncomingConnection::UnknownInit {
+        code,
+        payload,
+        mut stream,
+    } = demux_shared_incoming(server).await.unwrap()
+    else {
+        panic!("expected unambiguous unknown init");
+    };
+    assert_eq!(code, 0x42);
+    assert_eq!(payload, vec![0x55; 6]);
+    let mut following = [0u8; 8];
+    stream.read_exact(&mut following).await.unwrap();
+    assert_eq!(&following, b"sentinel");
+}
+
+#[tokio::test]
+async fn shared_demux_rejects_oversized_firewall_init_before_buffering_body() {
+    let length = slskr_client::io::DEFAULT_MAX_FRAME_LEN;
+    let mut plain_header = (length as u32).to_le_bytes().to_vec();
+    plain_header.extend_from_slice(&[InitCode::PierceFirewall.as_u8(), 0, 0, 0]);
+    let obfuscated_header = encode_rotated(&plain_header[..5], 0x8000_0000);
+    for header in [plain_header, obfuscated_header] {
+        let (mut client, server) = duplex(64);
+        client.write_all(&header).await.unwrap();
+        // Keep the sender open with no body: rejection must use only the header.
+        let error = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+            .await
+            .expect("reject firewall header without waiting for body")
+            .unwrap_err();
+        assert!(
+            matches!(error, ClientError::FrameTooLarge { length: actual, max: 5 } if actual == length)
+        );
+    }
+}
+
+#[tokio::test]
+async fn shared_demux_bounds_unknown_initialization_before_buffering_body() {
+    let length = slskr_client::io::DEFAULT_MAX_FRAME_LEN;
+    let mut plain_header = (length as u32).to_le_bytes().to_vec();
+    plain_header.extend_from_slice(&[0x42, 0, 0, 0]);
+    let obfuscated_header = encode_rotated(&plain_header[..5], 0x8000_0000);
+    for header in [plain_header, obfuscated_header] {
+        let (mut client, server) = duplex(64);
+        client.write_all(&header).await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+            .await
+            .expect("reject unknown init header without reading body")
+            .unwrap_err();
+        assert!(
+            matches!(error, ClientError::FrameTooLarge { length: actual, max: MAX_PEER_INIT_FRAME_LEN } if actual == length)
+        );
+    }
+}
+
+#[tokio::test]
+async fn shared_demux_concurrently_rejects_oversized_unknown_headers_without_body() {
+    const CONNECTIONS: usize = 64;
+    let length = slskr_client::io::DEFAULT_MAX_FRAME_LEN;
+    let mut clients = Vec::with_capacity(CONNECTIONS);
+    let mut tasks = tokio::task::JoinSet::new();
+
+    for index in 0..CONNECTIONS {
+        let (mut client, server) = tcp_pair().await;
+        let mut plain_header = (length as u32).to_le_bytes().to_vec();
+        plain_header.extend_from_slice(&[0x42, 0, 0, 0]);
+        let header = if index % 2 == 0 {
+            plain_header
+        } else {
+            encode_rotated(&plain_header[..5], 0x8000_0000)
+        };
+        client.write_all(&header).await.unwrap();
+        clients.push(client);
+
+        tasks.spawn(async move {
+            tokio::time::timeout(Duration::from_secs(1), demux_shared_incoming(server))
+                .await
+                .expect("oversized unknown header is rejected before waiting for its body")
+                .unwrap_err()
+        });
+    }
+
+    for _ in 0..CONNECTIONS {
+        let error = tasks
+            .join_next()
+            .await
+            .expect("one parser task remains")
+            .expect("parser task did not panic");
+        assert!(matches!(
+            error,
+            ClientError::FrameTooLarge {
+                length: actual,
+                max: MAX_PEER_INIT_FRAME_LEN
+            } if actual == length
+        ));
+    }
+
+    drop(clients);
+}
+
+#[tokio::test]
+async fn shared_demux_accepts_unknown_extensions_at_initialization_bound() {
+    let unknown = InitMessage::Unknown {
+        code: 0x42,
+        payload: vec![0x55; MAX_PEER_INIT_FRAME_LEN - 1],
+    };
+    let plain = unknown.encode().unwrap().encode().unwrap();
+    let obfuscated = encode_rotated(&plain, 0x8000_0000);
+    for wire in [plain, obfuscated] {
+        let (mut client, server) = tcp_pair().await;
+        client.write_all(&wire).await.unwrap();
+        client.write_all(b"sentinel").await.unwrap();
+        let IncomingConnection::UnknownInit {
+            code,
+            payload,
+            mut stream,
+        } = demux_shared_incoming(server).await.unwrap()
+        else {
+            panic!("expected bounded unknown initialization");
+        };
+        assert_eq!(code, 0x42);
+        assert_eq!(payload.len(), MAX_PEER_INIT_FRAME_LEN - 1);
+        let mut following = [0; 8];
+        stream.read_exact(&mut following).await.unwrap();
+        assert_eq!(&following, b"sentinel");
+    }
 }

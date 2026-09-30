@@ -55,12 +55,25 @@ CI runs login, local peer, private-message, and room-message probes and uploads
 `target/live-interop`; when the secret is absent, it uploads an explicit skipped
 TSV artifact.
 
-The live slskd automation-client compatibility smoke is opt-in because it starts
-a local daemon and may install the Python `slskd-api` package:
+The daily/manual `React Nightly Audit` runs the React UI against deterministic
+mock responses and retains browser reports, screenshots, and source-bound
+receipts for 30 days. It verifies desktop/mobile rendering and four workflow
+scenarios; deployed-device and credentialed interop evidence are separate.
+
+To validate a released Chocolatey package on a clean Windows runner without
+publishing it, dispatch the existing workflow with `publish=false`:
 
 ```sh
-SLSKR_RUN_SLSKD_API_COMPAT_SMOKE=1 scripts/run-release-gate.sh
+tag="$(git describe --tags --match 'release-v*' --abbrev=0)"
+gh workflow run publish-chocolatey.yml --ref main -f tag="$tag" -f publish=false
 ```
+
+The command selects the newest release tag reachable from the current checkout;
+set `tag` directly to inspect another release. The workflow verifies the
+downloaded release asset against `SHA256SUMS.txt`, packs and checks the nupkg,
+and retains the package and a source-bound receipt for 30 days. The default
+`publish=true` preserves the manual publication flow and requires configured
+credentials.
 
 ## Local Archive
 

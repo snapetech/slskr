@@ -1,9 +1,9 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, as of 2026-09-27; RF-002, RF-024, RF-032, and RF-036 are verified locally through batch 385. The live/hosted evidence items listed below remain in progress.
+Status: active whole-project implementation plan, with all 73 RF implementation rows marked Verified as of 2026-09-29 UTC. The latest full implementation matrix passed on source 69cf4141: GitHub CI run 36613453093 passed all 11 jobs, including every supported platform and Package and deployment surfaces; GitLab pipeline 162 also passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; the RF-059 route and bundle work is verified and its deployed CSP finding is cleared, with no claim of physical-device performance. Release publication for a version remains a separate operation.
 
 
-Audit baseline date: 2026-09-15; evidence addenda through 2026-09-27
+Audit baseline date: 2026-09-15; evidence addenda through 2026-09-29 UTC
 Baseline HEAD: `0dfab48cd16e6e7910759fa7d60e5d21b7b28be1` (local evidence; the
 working tree contains the implementation batch described in the status column).
 
@@ -20,9 +20,10 @@ implementation swath rather than the whole project. The current audit found:
 
 - One confirmed shared-listener ambiguity: the same 274 wire bytes decode as
   both a valid 9-byte plain `PierceFirewall` frame and a valid type-1
-  `PeerInit` frame. The current shortest-valid-candidate policy can therefore
-  misclassify obfuscated traffic; resolving intent requires a wire discriminator
-  or separate-port policy.
+  `PeerInit` frame. The shared listener now rejects prefixes that advertise
+  both known init forms before handing off the stream. Ordinary plain and
+  obfuscated traffic continues on one port. Extension and nested-form
+  ambiguity still requires a coordinated wire policy.
 - Multiple asynchronous lock guards held across persistence, authentication,
   network, and logging awaits in current route/lifecycle code.
 - A remaining unbatched search persistence helper that omits persisted search
@@ -86,22 +87,22 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-001 | `crates/slskr-client/src/listener.rs` shared demux previously classified the first byte as a raw connection kind before parsing a frame. Bounded plain/obfuscated candidate validation and TCP coverage for `P`, `F`, and `D` collisions are in place. `crates/slskr-client/tests/listener.rs::shared_wire_bytes_can_form_valid_plain_and_obfuscated_init_frames` proves one wire buffer decodes both as a 9-byte plain `PierceFirewall` frame and as a 274-byte type-1 `PeerInit` frame. | A valid obfuscated init can be returned as a shorter valid plain frame, leaving the rest of the stream desynchronized. | The 27 listener tests pass, including the dual-valid fixture. Raw `P`/`F`/`D` traffic remains intentionally dedicated-port only. No local parser can infer intent from a dual-valid stream; resolution requires a coordinated wire discriminator or separate-port policy. | In progress, confirmed protocol ambiguity |
+| RF-001 | `crates/slskr-client/src/listener.rs` shared demux previously classified the first byte as a raw connection kind before parsing a frame. Bounded plain/obfuscated candidate validation and TCP coverage for `P`, `F`, and `D` collisions are in place. `crates/slskr-client/tests/listener.rs::shared_wire_bytes_can_form_valid_plain_and_obfuscated_init_frames` proves one wire buffer decodes both as a 9-byte plain `PierceFirewall` frame and as a 274-byte type-1 `PeerInit` frame. | A valid obfuscated init could be returned as a shorter valid plain frame, leaving the stream desynchronized. | The shared listener rejects prefixes that advertise both known init forms and plausible nested init interpretations. Unambiguous unknown extensions preserve subsequent bytes. A regression demonstrates unknown-versus-known ambiguity: a local strict-rejection experiment also rejected existing valid obfuscated-key vectors because extension payloads are opaque. The single-port policy is explicit: a recognized init wins over an opaque unknown candidate to preserve peer interoperability, while known-known and unsafe nested candidates are rejected. Both interpretations cannot be distinguished without a negotiated wire marker. All 38 listener tests pass, including the ambiguity regression. All peer traffic continues over the shared port. | Verified locally; shared-port ambiguity policy documented |
 | RF-002 | `crates/slskr/src/route_dispatch_group_3.rs`, `group_4.rs`, and `group_5.rs` held write guards across `persist_*`, auth, or other async calls; `group_6.rs` had the same class. Route groups 2-6 now snapshot/drop guards on migrated paths; group 7 wishlist writes also release the store guard during persistence. Lidarr manual import shares a runtime-persistence gate, writes its library item and only its own compatibility counter in one SQLite transaction, and releases state guards during persistence. Pod update/delete persist the parent before channel cleanup, restore parent state on cleanup failure, prune orphans on startup, and serialize appends before rechecking pod and channel existence. Room/pod membership workflows use a consistent room-then-workflow lock order, and acceptance rechecks authorization after waits. Collection, grant, and share-token routes serialize persistence and reject stale parent writes. Share-group/member mutations now use their own persistence turn in both dispatchers, and the legacy path releases its write guard during SQLite I/O. Incoming wishlist results and ignored-rule changes share a turn through their paired transaction; all search persistence helpers re-read the current SearchStore snapshot under one persistence turn. Persisted wishlist item routes, imports, completion counters, Lidarr sync, and auto-download take one turn through SQLite persistence. Library create/delete, health-issue patch/fix, MusicBrainz target creation, and the manual-import transaction take a library turn before mutation; manual import orders library before runtime. Contact creation through direct, discovery, and invite routes, updates, and deletes now share a contact persistence turn in both dispatchers; store guards are released before SQLite. User-note create, versioned create, update, and delete routes now share a separate persistence turn in both dispatchers. Liked/hated interest routes and the mesh-rendezvous compatibility mutation use one interest persistence turn in both dispatchers; versioned routes drop it before outbound session commands, and compatibility create/delete restore memory on SQLite failure. Persisted now-playing updates, listening-party projections, and clears use a dedicated turn in both dispatchers. Webhook registration, active-state changes, and deletion across direct/admin routes share a webhook persistence turn in both dispatchers. Security username/IP ban and unban routes across both dispatchers and overlay blocklist compatibility share a security-ban persistence turn, with SQLite writes outside the store guard and failure rollback on compatibility routes. Message creation, inbound session messages, acknowledgements, and conversation deletion share a message persistence turn across both dispatchers; compatibility acknowledgements roll back on database failure and check the URL username before mutation. Room subscription joins and leaves across both dispatchers and compatibility handlers share one persistence turn acquired before changing RoomStore; legacy paths release the store guard before SQLite and compare before rollback. Spotify OAuth state issue and callback consumption use one persistence turn; callback deletion releases the store guard during SQLite work and removes memory state after commit. Browse request, folder, fail, cancel, and response-ingest routes plus direct/indirect peer completion and failure projections now share a browse turn across both dispatchers and background callbacks; browse-store guards are released before SQLite, and failure reporting/events run after the turn is dropped. User watch/unwatch routes in both dispatchers and inbound watched-user, status, and statistics replies share a user-projection turn; store guards are released before SQLite, rollback remains inside the turn, and session/error work follows its release. API event injection in both dispatchers and background `record_event` writes share an event-history turn; EventStore guards are released before SQLite, and scripts, reporting, and event-feed publication follow turn release. Transfer SQLite full-row and progress writes now reject stale `updated_at_ms` revisions; deletion and staged rollback persist tombstones, restart reserves ids past tombstones, and event history sorts by per-transfer revision; split-router request-name, cancellation, retry, progress, and completion updates now advance revisions monotonically to match the retained dispatcher. HashDb HTTP creation and merge, mesh publish and sync, backfill, and transfer-metadata hash writers now take the shared persistence turn before mutation and retain it through SQLite snapshot persistence while releasing the store guard during I/O. The history-backfill route holds that turn from persisted cursor read through candidate selection, in-memory progress update, and cursor write. Manual database cleanup now deletes terminal transfer rows through the revision-aware tombstone helper and rolls the live queue back if SQLite rejects deletion. Age-based message cleanup calculates one cutoff and holds the message persistence turn through live `MessageStore` pruning and SQLite deletion, restoring memory when persistence fails. Webhook queued-log insertion, dispatch snapshot selection, and delivery-stat memory/SQLite updates now share the webhook persistence turn with registration, activation, and deletion; manager guards are released before SQLite, changed or deleted definitions reject stale delivery stats, and failed stats writes conditionally roll back memory. Spotify authorization/refresh and disconnect previously persisted the encrypted file and published live connection state without a shared order or stale-work check.  Legacy batch-download enqueue now resolves destination paths without retaining the transfer write guard, then rechecks active duplicates under the write lock before staging. | Database stalls previously blocked unrelated readers, unrelated runtime fields could be overwritten by stale snapshots, paired rollback could retain a failed item after an independent concurrent update, delayed snapshots could recreate deleted parent state, an interrupted pod/channel write could retain orphan messages, a stale search snapshot could restore an ignored result, and delayed library, contact, user-note, or interest writes could resurrect deleted records, a delayed now-playing update could restore a cleared track, and a delayed webhook active-state write could restore a deleted webhook, and overlapping security ban/unban writes could persist in an order different from memory, and delayed message creates or acknowledgements could cross conversation deletion or leave rollback gaps, and concurrent room join/leave requests could persist in an order different from RoomStore, and OAuth callbacks could hold the state-store guard through SQLite deletion while issue/delete writes raced, and competing browse route/callback snapshots could persist in a different order from BrowseStore, while user watch/unwatch and inbound projection snapshots could persist in an order different from UserStore, and API event injection held the EventStore write guard through SQLite and blocked history readers; delayed transfer snapshots could overwrite newer rows or restore deleted transfers, and wall-clock transfer mutations could reuse or regress revisions, and delayed HashDb snapshots could erase later accepted merges, and overlapping history-backfill requests could advance from the same stale cursor and skip older searches, and manual cleanup could hide terminal transfers in memory while leaving durable rows to return after restart, and expired message rows could disappear from SQLite while live conversation routes still served them; runtime compatibility writes also held runtime and relay write guards across SQLite latency; legacy share-grant creation and manual Lidarr import now release their store guards before SQLite and conditionally roll back unchanged candidates; legacy collection deletion also releases collection/grant guards before SQLite and conditionally rolls back unchanged stores; webhook log insertion could leave orphan rows after deletion, while delivery stats could update a replaced webhook or remain changed only in memory after failed persistence. Authorization or refresh work already in flight could finish after disconnect and recreate credentials in memory and on disk.  Destination/path awaits previously held the transfer write lock and could block concurrent transfer reads and updates. | The current 621-test daemon library suite passes. Focused regressions cover transaction rollback, field-scoped runtime updates, independent rollback, runtime-persistence ordering, responsive pod and collection reads during waits, parent/grant/token ordering, stale collection snapshot rejection, share-group deletion before a queued member add while reads remain available, pod cleanup rollback, startup orphan repair, rejection of a queued append after channel removal, pending-read availability during membership acceptance, acceptor revocation after a lock wait, queued wishlist response followed by ignore creation, a queued completed-search snapshot that preserves suppressed results, a queued wishlist item update followed by deletion that leaves reads available and SQLite consistent, a queued library health repair followed by deletion, queued contact update/delete with a responsive read and no deleted row in memory or SQLite, and queued user-note update/delete with the same read and consistency guarantees, queued liked-add/delete/hated-add with available reads and SQLite matching memory, injected mesh-compatibility create/delete failures that preserve memory, queued now-playing update/clear with reads available and the cleared record absent from memory and SQLite, and queued webhook PATCH/delete with reads available and no deleted record in memory or SQLite, and queued message-create/conversation-delete with responsive reads and matching empty memory/SQLite state; compatibility ack database-failure rollback and wrong-username no-mutation regressions, and queued room join/leave with responsive reads and no final subscription in memory or SQLite; two queued OAuth consumers with responsive state reads and exactly one persisted state consumption, and a queued browse request/cancel with responsive reads and matching cancelled memory/SQLite state, plus queued user watch/unwatch with responsive reads and matching unwatched memory/SQLite state, plus queued API/background event writes with responsive reads and matching persisted event-ID order. Pod management, pod channel lifecycle, membership-workflow, contact CRUD/concurrency, contact persistence-failure, and contact discovery/read, user-note lifecycle/persistence-failure, and library/interest/now-playing/message persistence-failure frozen-controller differentials pass; now-playing persistence-failure and delete/diagnostic tests pass, as does the native webhook differential; webhook persistence/rehydration/dispatch-log, registration, exact-path, and PATCH contract tests also pass. the versioned interest wire-command test also passes, as do the share-group, share-grant, and collection differentials. The legacy/full-controller feature combination compiles; the earlier focused share-group test invocation overflows the historical monolithic dispatcher's Tokio test-worker stack. Message and conversation persistence-failure controller tests and differentials pass. Room subscription persistence/rehydration tests and room-controller restart/failure differentials pass. OAuth issue/delete failure-injection, persistence rehydration, and Spotify authorize/callback controller differential pass. Browse persistence rollback, cache rehydration, indirect browse, cancellation, and controller differentials pass. User-watch persistence rollback, projection rehydration, and controller user/share and open-case differentials pass. The 26-test event-focused feature set, event persistence rollback/rehydration, and oversized transfer-event rotation/FIFO tests pass. The transfer stale-snapshot/deletion and legacy-schema migration regressions, transfer cleanup and full lifecycle controller differentials pass. The split-router request-name revision regression confirms memory and SQLite retain the updated name and advanced revision when wall-clock time is behind the stored revision. A queued HashDb API-writer regression confirms memory and SQLite remain unchanged while writers wait, reads stay responsive, and final rows and the sequence cursor agree. A two-request history-backfill regression confirms queued batches consume successive cursors and SQLite ends at the latest cursor. Manual cleanup success and SQLite-failure regressions verify tombstone deletion and queue rollback; the existing database-cleanup controller contract passes under split dispatch, while the retained monolithic invocation overflows its historical test-worker stack. A queued message-cleanup regression proves memory and SQLite remain unchanged during the wait and lose the same expired record after release; a closed-database regression proves message-memory rollback. HashDb domain, history-backfill, mesh-sync protocol, and publish/lookup differentials pass under the split dispatcher. The retained monolithic HashDb domain differential overflows its historical Tokio worker stack; the combined feature build passes. The webhook queued-stats regression verifies no mutation while waiting, matching memory/SQLite updates after release, and memory rollback on database failure. Webhook config/reopen/log dispatch, audit-failure reporting, CRUD rollback, and native webhook contract tests pass. A file-backed SQLite lock regression proves runtime readers and an unrelated runtime update proceed during compatibility writes; failed-write rollback preserves that update. The split runtime-control persistence-failure differential passes; the legacy-dispatcher variant overflows its historical test-worker stack. ControllerFeatureState production mutations now use an ordered blocking-worker store that persists snapshot candidates outside the async state lock and publishes after file sync; paused-worker/cancellation and injected-write-failure regressions verify responsive reads, later-writer ordering, per-operation rollback, and matching memory/file state. A scoped full-controller/legacy Clippy pass emitted no `await_holding_lock` diagnostics. The latest default daemon library suite passes 620 tests, including the queued source-feed history writer/readback regression; source-feed preview mutations in both dispatchers now share one persistence turn, and the `full-controller-tests legacy-route-dispatch` library check passes. At an earlier checkpoint, the 613-test daemon suite passed. A broad `transfer_` filter with both controller features still overflows the historical Tokio worker stack in `focused_controller_tests::versioned_swarm_rejects_oversized_transfer_limits_before_discovery`; the combined feature compile and normal full-controller differential pass. Server status, connect, and disconnect responses now snapshot and release the session guard before runtime-credential reads in both dispatchers; a deterministic held-credential regression verifies session writes remain available. Other paired persistence routes outside the now-ordered wishlist, library, search, contact, user-note, interest, now-playing, webhook, security-ban, messaging, room-subscription, OAuth-state, browse, user-projection, event-history, transfer SQLite, HashDb snapshot, history-backfill cursor, manual terminal-transfer cleanup, age-based message cleanup, source-feed history ordering, server-session credential read ordering, and split-router transfer revision ordering still need review. The focused stale-commit regression rejects old work and confirms cleared memory plus absent encrypted file. The locked full-controller/legacy library check and scoped await_holding_lock Clippy pass. The `20260924-spotify-disconnect-order.md` fragment passes the working-tree release-note preview.  A held-destinations route regression proves the transfer write lock remains available while path resolution waits; focused and full daemon tests pass (622), as do the feature compile, scoped lock Clippy, and formatter. The scoped library/runtime persistence-lock scan finds both manual-import dispatchers acquire library then runtime, while other inspected call sites take one turn. The wishlist-search scheduler now drops its paired persistence turn after both rollback steps and before updating session error state. Lidarr rejection handling acquires Wishlist then Search for its paired ignored-result transaction and releases both turns before publishing updates and performing rejected-file cleanup. Lidarr wanted sync now refreshes dedup keys under the shared turn, uses an atomic bulk upsert per page, and restores the prior in-memory page snapshot after persistence failure when the current state still matches. The existing integrations and wishlist residual differentials pass; direct enabled-sync failure injection passes. This remains partial helper-based evidence; broader paired-route review is open. Final bounded production-source audit covers the 92 DatabaseManager write methods and their call sites, plus every checked persistence-helper call in crates/slskr/src. The only paired Wishlist/Search transaction has three production callers; split, legacy, and Lidarr paths acquire Wishlist then Search before mutation and persistence. Outliers are startup-only writes, single-owner wishlist scheduler saves, transfer revision-checked writes, and helper bodies whose callers own turns. The full 640-test daemon suite, targeted contention/failure regressions, full-controller/legacy compile, and scoped await_holding_lock Clippy pass. | Verified locally |
-| RF-003 | Distributed mutations previously held `distributed_network` guards across SQLite work, and tree metadata plus child rows used separate transactions. Runtime updates now publish revisioned snapshots; one worker coalesces to the latest bounded snapshot after the state guard is released. `DatabaseManager` loads both tables in one read transaction and replaces both in one write transaction. Graceful shutdown now writes the latest snapshot after managed producers stop. | Database latency previously blocked distributed-state readers, and a failed child replacement could leave branch metadata and child depths from different states. | The current 622-test daemon library suite passes, including cross-table rollback, latest-snapshot persistence, file-backed reopen, startup hydration, and a shutdown-overlap regression proving a registered task is dropped before the final runtime revision reopens from SQLite. Retained live shutdown-overlap and crash/restart evidence remain. | In progress, local transaction/hydration/shutdown proof |
+| RF-003 | Distributed mutations previously held `distributed_network` guards across SQLite work, and tree metadata plus child rows used separate transactions. Runtime updates now publish revisioned snapshots; one worker coalesces to the latest bounded snapshot after the state guard is released. `DatabaseManager` loads both tables in one read transaction and replaces both in one write transaction. Graceful shutdown now writes the latest snapshot after managed producers stop. | Database latency previously blocked distributed-state readers, and a failed child replacement could leave branch metadata and child depths from different states. | The current 622-test daemon library suite passes, including cross-table rollback, latest-snapshot persistence, file-backed reopen, startup hydration, and a shutdown-overlap regression proving a registered task is dropped before the final runtime revision reopens from SQLite. A clean-worktree native process proof at `6fb4d2f6` drives a distributed child through the existing peer listener while a real share scan is active. Graceful SIGTERM closes the child and persists the final disconnected tree; after a committed depth-7 update, SIGKILL/restart preserves both tree and child rows with SQLite integrity `ok`. The source/binary/harness-bound artifact is `benchmarks/artifacts/20260927-rf-distributed-shutdown-crash-restart.json`. | Verified locally, retained live shutdown/crash proof |
 | RF-004 | `crates/slskr/src/persistence.rs:4114-4184` was the remaining unbatched ignored-result path; the current batch uses bounded search/identity/result batches, preserves `fallback_attempts`, and adds metadata plus failure-injection rollback regressions. The production `serve` path now calls the shared `load_wishlist_store` startup helper. | Search metadata and large ignored-result updates were previously at risk. | The current 622-test daemon library suite passes. A file-backed close/reopen regression loads through the production startup helper and verifies the rehydrated ignore rule through API reads and search filtering. | Verified locally |
 | RF-005 | `crates/slskr-client/src/manager.rs:179-224` previously held the server mutex while awaiting an unbounded `send_server_message`; the first implementation batch now bounds the send and marks the session unusable after timeout/error. | A backpressured server previously blocked every indirect request and could strand the manager. | Full manager suite passes with the non-reading peer and subsequent-request regression. | Verified |
-| RF-006 | `AppState` owns a `ManagedTaskRegistry` backed by a `JoinSet`; long-lived workers, schedulers, listener managers, bridge/relay services, overlay gateway, DHT, signal/version services, Unix/HTTPS accept loops, and their HTTPS/Unix HTTP handlers are registered for joined shutdown. Plain HTTP handlers use a joined request set. All three listener types share a 256-connection semaphore. | Accepted HTTP work is bounded and tied to listener lifecycle; clean-runner/live shutdown-overlap evidence is still absent. | Focused regression proves HTTPS/Unix handlers share capacity and are aborted/joined with the managed registry; existing shutdown-flush and share-scan overlap regressions pass. Collect clean-runner and retained live shutdown-overlap evidence. | In progress, stronger local proof |
-| RF-007 | The share-index worker owns the cancellation token with the scan permit, checks it during filesystem traversal, returns `SHARE_SCAN_CANCELLED_ERROR`, and refuses to publish partial snapshots. Configuration reloads and runtime share-setting changes now share an index persistence turn; generation checks reject completed scans built from older settings before SQLite replacement or live publication. | Cancelled or stale rebuilds cannot replace a newer live or durable share index, and a settings reload preserves its pending-rescan state. | Focused shutdown and watched-reload regressions plus the current 621-test daemon suite pass; retained live shutdown-overlap evidence remains. | In progress, local cancellation and ordering proof |
+| RF-006 | `AppState` owns a `ManagedTaskRegistry` backed by a `JoinSet`; long-lived workers, schedulers, listener managers, bridge/relay services, overlay gateway, DHT, signal/version services, Unix/HTTPS accept loops, and their HTTPS/Unix HTTP handlers are registered for joined shutdown. Plain HTTP handlers use a joined request set. Distributed parent and child socket loops now also use the managed task registry. All three listener types share a 256-connection semaphore. | Accepted HTTP work is bounded and tied to listener lifecycle; retained live HTTP/share-scan shutdown proof passes, while clean-runner coverage for other managed services remains absent. | Focused regression proves HTTPS/Unix handlers share capacity and are aborted/joined with the managed registry; existing shutdown-flush and share-scan overlap regressions pass. The retained `55be6aec` live HTTP/share-scan overlap proof passes. Downloaded clean-runner artifacts at `f9a25f9d` and `a43155de` verify shared peer TCP/UDP listener ownership, TLS capacity, client closure, and socket reuse; the latter includes three all-enabled DHT/control/data QUIC cycles with no extra UDP port. Forwarding, script, WebSocket, CLI-probe, and bounded FTP ownership have subsequent local checkpoints; joined relay cancellation cleanup and interrupted webhook outcomes have additional local checkpoints; the nine production `spawn_blocking` sites are classified in `docs/dev/blocking-work-ownership.md`; after managed async shutdown, runtime teardown now waits up to five seconds for blocking workers and logs if the deadline is reached; a focused held-worker regression verifies bounded teardown and eventual worker completion after release. An operating-system call blocked in the kernel can still outlive the Tokio runtime, so this bounds teardown without claiming to join an uninterruptible filesystem call. Windows Smoke run [`36466395263`](https://github.com/snapetech/slskr/actions/runs/36466395263) on `d4d185cc` passed the bounded blocking-shutdown regression within its 694-test Rust run; GitHub CI run [`36467270728`](https://github.com/snapetech/slskr/actions/runs/36467270728) on `6e9a6c00` also passed `cargo test --locked --workspace`, the shared peer-gateway shutdown proof, and reproducibility artifact collection. Its Linux AArch64 job passed; remaining platform jobs are active or queued. GitHub CI run `36552251952` has passed its Rust, Linux, and Web jobs; Windows Smoke run `36550557656` passed on `1dcbb95a`; GitLab pipeline 142 also passed Rust on `1dcbb95a`. The five-second runtime teardown test bounds ordinary blocked work. An in-flight uninterruptible OS syscall remains a documented platform boundary. | Verified locally and on exact-source GitHub CI run 36613453093; the 20,000-file Linux overlap, crash recovery, socket closure, SQLite integrity, Windows shutdown proof, and uninterruptible-syscall limit are documented. |
+| RF-007 | The share-index worker owns the cancellation token with the scan permit, checks it during filesystem traversal, returns `SHARE_SCAN_CANCELLED_ERROR`, and refuses to publish partial snapshots. Configuration reloads and runtime share-setting changes now share an index persistence turn; generation checks reject completed scans built from older settings before SQLite replacement or live publication. | Cancelled or stale rebuilds cannot replace a newer live or durable share index, and a settings reload preserves its pending-rescan state. | Focused shutdown and watched-reload regressions pass. A clean-worktree native process run at `55be6aec` observed a real 20,000-file scan during SIGTERM, returned 503 to the in-flight scan request, exited zero in 0.114 seconds, retained zero partial SQLite share rows, and reopened with zero files. The retained source/binary/harness-bound proof is `benchmarks/artifacts/20260927-rf-shutdown-overlap.json`. | Verified locally, retained live shutdown proof |
 
 ### P1 CI, Release, And Packaging
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-008 | `.gitlab-ci.yml:21-26` previously invoked three nonexistent Rust guard scripts. The current batch uses checked-in process guards and direct Cargo commands. | The GitLab Rust job previously could not start on a clean runner. | Static workflow policy and shell/YAML checks pass; a clean GitLab runner remains external proof. | In progress |
-| RF-009 | `.gitlab-ci.yml:162-174` previously created a GitHub release while `.github/workflows/release.yml` already owned tag publication. The current batch removes the duplicate publisher. | One tag previously could race two release creators. | Workflow policy passes; a tag simulation/clean GitLab runner remains external proof. | In progress |
-| RF-010 | `release-publish.yml:128-168` previously validated AUR hashes and `.SRCINFO` but did not run a clean `makepkg` source/prepare smoke. The release gate and AUR publish job now invoke `check-aur-package-smoke.sh`. | AUR source/package breakage is now exercised before publication on supported runners. | Host `makepkg` smoke passes for both source and binary PKGBUILDs; clean publication runner remains external. | Verified locally, external runner open |
-| RF-011 | `windows-smoke.yml` previously filtered dashboard/client-ts changes while only building Web assets; the current filters align the job with the Rust/Web checks it actually executes. | SDK/dashboard-only changes no longer imply coverage from a Rust/Web-only job. | Workflow policy passes; Windows runner proof remains external. | Verified locally, external runner open |
+| RF-008 | `.gitlab-ci.yml:21-26` previously invoked three nonexistent Rust guard scripts. The current batch uses checked-in process guards and direct Cargo commands. | The GitLab Rust job previously could not start on a clean runner. | Static workflow policy and shell/YAML checks pass. On 2026-09-27, GitLab rejected both a normal and `--no-thin` push of `902574ad` while unpacking existing-base blob `272d9b69` (`scripts/check-controller-options-differential.sh`); local `git cat-file` reads it and GitHub accepted the tip. Fresh pushes of `b9e50c4d`, `dd10c822`, `3049b9fd`, `a4133bc4`, `c02c77bc`, `08f76d7e`, `d4d185cc`, `c81c055a`, `6e9a6c00`, `37ddb72d`, and `b42efb97` on 2026-09-28 were rejected by the same corrupt object, while GitHub accepted those tips. On 2026-09-28, the damaged loose blob was backed up at `/var/opt/gitlab/backups/object-repair-272d9b69345294fa1aa98ec3a83a9383c87be9e2-20260928/damaged.loose-object`, atomically rebuilt from the verified local blob, and confirmed by `git fsck --full --strict --no-reflogs`; GitLab `main` advanced from `576fea92` to `dc7dd5b5` across two successful pushes after repair. No GitLab pipeline has appeared since the repair (latest project pipeline remains #81 from 2026-05-17), so hosted clean-runner proof remains open. On 2026-09-28, GitLab accepted pushes through `b9679f30` and returned HTTP 200 from its internal post-receive endpoint, but direct pipeline-table inspection still found no record newer than #81 from 2026-05-17. CI is enabled and the default `.gitlab-ci.yml` path is configured; the GitLab MCP API token returns 401. Sanitized investigation is in `benchmarks/artifacts/20260928-gitlab-postreceive-pipeline-status.md`. GitLab pipelines 142 on `1dcbb95a` and 143 on `9aa410a7` passed their clean-runner jobs, including Rust, Go, Web, dashboard, TypeScript, and GitHub mirror. Pipeline 143 also ran the new tag-refspec check. The protected local PAT works through direct API; the already-running GitLab MCP process still caches its previous token. | Verified on clean GitLab runners; default-branch scheduling, all CI lanes, and branch mirroring pass. |
+| RF-009 | `.gitlab-ci.yml:162-174` previously created a GitHub release while `.github/workflows/release.yml` already owned tag publication. The current batch removes the duplicate publisher. | One tag previously could race two release creators. | Workflow policy passes. A temporary bare-repository simulation of the `github:mirror` tag refspec pushed a synthetic tag to a local bare remote pointing at commit `dc7dd5b5`, without touching real tags or releases. Clean GitLab runner proof remains open; the repaired repository accepts pushes, but no pipeline has appeared since 2026-05-17. GitLab pipeline 143 on `9aa410a7` passed `github:mirror-tag-refspec-check` against an isolated bare remote and passed `github:mirror`. No public tag or release was created by the test. | Verified on clean GitLab runner; synthetic tag refspec and branch mirror pass. |
+| RF-010 | `release-publish.yml:128-168` previously validated AUR hashes and `.SRCINFO` but did not run a clean `makepkg` source/prepare smoke. The release gate and AUR publish job now invoke `check-aur-package-smoke.sh`. | AUR source/package breakage is now exercised before publication on supported runners. | Actual hosted Docker makepkg verifies and extracts both PKGBUILDs in CI `36405007921` at `7a064d37`; retained full matrix and execution markers establish source/prepare smoke. | Verified hosted smoke at `7a064d37`; publication separate |
+| RF-011 | `windows-smoke.yml` previously filtered dashboard/client-ts changes while only building Web assets; the current filters align the job with the Rust/Web checks it actually executes. | SDK/dashboard-only changes no longer imply coverage from a Rust/Web-only job. | Workflow policy passes; Windows Smoke run `36462085991` completed on `46854887` with the Windows Rust test suite, WASM check, and Web build green. A newer attempt `36465244591` on `08f76d7e` stopped at Rust formatting before tests: its only diff was Windows CRLF versus rustfmt output line endings. The formatter gate now normalizes trailing CR for comparison; Windows Smoke run [`36466395263`](https://github.com/snapetech/slskr/actions/runs/36466395263) then passed the Rust tests, WASM check, and Web build on `d4d185cc`. | Verified; Windows Smoke `36466395263` passed after the formatter EOL fix |
 | RF-012 | `client-ts/package.json` now allowlists `dist`/README publication files and the SDK gate builds, diffs, and dry-runs `npm pack`. | Published TypeScript artifacts cannot silently drift or include tests/configuration. | TypeScript package check passes with 26 allowlisted files; registry publication remains external. | Verified locally |
 | RF-013 | `check-python-client-quality.sh` now runs Black, Flake8, and mypy from a pinned temporary environment when needed; the aggregate SDK gate installs its venv before quality checks. | Python quality regressions no longer pass because host tooling is absent or the gate invokes checks in the wrong order. | Quality, 49 tests, and package gates pass. | Verified locally |
 | RF-014 | Python SDK now declares Python 3.10–3.13 support, bounded runtime/dev dependencies, `pyproject.toml`, constraints, and a package build/import check. | SDK builds and supported-runtime expectations are explicit and reproducible. | sdist/wheel build/import and `pip check` pass; clean cross-platform matrix remains external. | Verified locally |
@@ -110,8 +111,8 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-015 | `examples/README.md`, `docs/CLIENT_LIBRARIES.md`, and SDK examples previously referenced absent files, obsolete port/auth/topic shapes, and APIs not present in current clients. The SDK/docs batch corrected maintained examples and live matrix paths. | Operators previously copied examples that failed or silently subscribed to the wrong events. | Docs freshness, fixture, SDK, Go example, TypeScript, Python, and Playwright-list checks pass; live daemon handshake remains RF-042. | Verified locally; live handshake separate |
-| RF-016 | Python pagination, Go search-detail, message field, transfer progress, and WebSocket example contracts were stale. The SDK/docs batch corrected these examples. | Examples previously could loop, duplicate data, or raise on valid responses. | The full cross-SDK gate and example contract checks pass; live daemon handshake/reconnect remains RF-042. | Verified locally; live handshake separate |
+| RF-015 | `examples/README.md`, `docs/CLIENT_LIBRARIES.md`, and SDK examples previously referenced absent files, obsolete port/auth/topic shapes, and APIs not present in current clients. The SDK/docs batch corrected maintained examples and live matrix paths. | Operators previously copied examples that failed or silently subscribed to the wrong events. | Docs freshness, fixture, SDK, Go example, TypeScript, Python, and Playwright-list checks pass. The live authenticated daemon subscription/unsubscribe handshake is verified under RF-042. | Verified locally and with the RF-042 live handshake proof |
+| RF-016 | Python pagination, Go search-detail, message field, transfer progress, and WebSocket example contracts were stale. The SDK/docs batch corrected these examples. | Examples previously could loop, duplicate data, or raise on valid responses. | The full cross-SDK gate and example contract checks pass. The live authenticated daemon subscription/reconnect path is covered under RF-042 and the retained SDK fixture suites. | Verified locally and with the RF-042 live handshake proof |
 | RF-017 | TypeScript README now describes the CommonJS package as bundler-only in browsers, documents `fetch`/`WebSocket` runtime requirements, and narrows REST support to Node.js 18+ without claiming that `ws` is auto-adapted. | The previous CDN example and implicit Node WebSocket claim could send consumers to unsupported startup paths. | README contract correction is release-noted and covered by the SDK package/example gate; runtime matrix remains a separate external proof. | Verified locally |
 | RF-018 | Go WebSocket listeners in `client-go/websocket.go:431-454` previously had no unsubscribe API; the current batch returns idempotent unsubscribe handles and removes closed channel references. | Long-lived dynamic consumers previously retained listener references. | Go unit/race/vet gates pass; cross-SDK live feed coverage remains RF-042. | Verified |
 | RF-019 | `scripts/check-docs-freshness.sh:15-20` previously scanned four docs files only. The current batch scans maintained SDK/examples and includes a negative regression test. | Documentation gates previously reported verified while stale user-facing guidance remained. | `scripts/check-docs-freshness.sh` and its negative regression test pass; BUG-030 and BUG-039 now state the same executable freshness and SDK-contract evidence. | Verified locally |
@@ -120,10 +121,10 @@ structural improvement to execute only after higher-priority work is stable.
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-027 | `web/e2e/README.md:58-60` previously used `cd src/web` and referenced absent fixture scripts/schema. The current batch adds a root wrapper, schema checker, corruption regression, updates E2E paths, serializes real-node workers, and permits a cold optimized build to finish. | Documented E2E setup previously was broken and zero-download fixture fetch could report success. | Serialized E2E passes 14 tests; 9 media-dependent tests skip because optional media is absent. | Verified with optional-media gap |
-| RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Validate workflow policy and a clean package runner before marking verified. | In progress |
+| RF-027 | `web/e2e/README.md:58-60` previously used `cd src/web` and referenced absent fixture scripts/schema. The current batch adds a root wrapper, schema checker, corruption regression, updates E2E paths, serializes real-node workers, and permits a cold optimized build to finish. | Documented E2E setup previously was broken and zero-download fixture fetch could report success. | Serialized E2E passes 14 tests; all 9 media-dependent cases now pass with the pinned fixtures. | Verified with pinned media-backed E2E; all 9 media-dependent cases pass |
+| RF-028 | `.github/workflows/publish-chocolatey.yml:17-48` now checks out the selected tag, uses a fully qualified release asset URL, verifies `SHA256SUMS`, and runs package smoke preparation. | Manual Chocolatey packages previously could contain invalid URLs and branch drift. | Workflow/package policy and eight actual PowerShell checksum regressions pass. Clean Windows validation-only run `36383308751` downloads and checks the actual `release-v0.2.40` asset, packs/smokes the nupkg, and retains it. Downloaded package/archive hashes, installer URL/checksum, and version are verified; no package was pushed. | Verified clean Windows package runner |
 | RF-029 | `.github/workflows/release-publish.yml:625-638` intentionally targets the existing `snapetech/homebrew-slskdn` compatibility tap, while `docs/dev/release-channels.md:15-18` named `snapetech/homebrew-slskr`. | Channel documentation was stale, but the publication target was not shown to be wrong. | Release-channel documentation now names the actual compatibility tap and preserves the explicit target boundary. | Verified locally, docs |
-| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass; retain browser/nightly artifacts before full verification. | In progress |
+| RF-030 | `web/package.json:77-82` exposes a bundle-budget test; the current batch wires it after Web builds in `.github/workflows/ci.yml` and `scripts/run-release-gate.sh`. Serialized browser E2E now passes its available 14 tests; the React audit and retained nightly artifacts remain separate. | Bundle regressions previously could merge without CI evidence. | Workflow policy, Web budget, build-output, and available E2E checks pass. The retained React audit passes 84 desktop/mobile rendering checks and four workflow scenarios with zero synthetic sweeps; 106 workflow cases are observed through actual UI requests. A daily/manual workflow now retains four real-browser mock scenarios, screenshots, and source-bound receipts for 30 days under memory/swap/task/runtime limits. The successful manual hosted run `36382238277` at `3f0b6010` retained all four reports and 84 screenshots; downloaded audit hashes match the clean checkout receipt. The same workflow is scheduled daily. | Verified hosted browser retention |
 | RF-031 | The release gate invokes the remediation baseline and differential checks, but the universal replacement acceptance document points to retained local artifacts and the release path does not run the full live transport/lifecycle manifest. | Historical acceptance evidence could be mistaken for fresh release evidence. | The acceptance document now explicitly labels the 2026-08-20 closure as historical and requires fresh release-gate/live artifacts for current certification. | Verified locally, policy explicit |
 
 ### P2 Efficiency And Structural Boundaries
@@ -131,64 +132,64 @@ structural improvement to execute only after higher-priority work is stable.
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
 | RF-020 | `crates/slskr-client/src/file_transfer.rs` now flushes only token/offset handshake writes; plain and obfuscated payload chunks use `write_all` without per-chunk flushes. Pinned Tokio 1.53.1 implements `TcpStream::flush` as a no-op. | On the production TCP path, removing these calls does not remove a socket syscall; local loopback measurements show no reproducible throughput change. Transfer queue durability is tracked separately in RF-047. | Two release-profile loopback runs compare validated old/current plain and obfuscated payloads (five 64 MiB samples per variant, 80 KiB chunks). Sample ranges overlap; retained JSON and host/toolchain details are under `crates/slskr-client/benchmarks/artifacts/`. Remote-peer throughput measurement remains open. | Verified locally; no material gain measured |
-| RF-021 | `list_search_results`, `list_transfers`, and `get_webhook_logs` page full rows by ordered columns. The synthetic cardinality run uses 1,000,000 search results, 500,000 transfers, and 500,000 webhook logs. | Transfer and webhook composite indexes materially lower synthetic page-read latency. SQLite's existing `(search_id)` index already satisfies `ORDER BY id` through the implicit rowid; `(search_id, id)` adds storage but is not selected. | On Python SQLite 3.53.4, retained transfer/webhook composites reduce measured first/deep-page medians by 88–99%; search-result medians and plans do not change. The daemon removes the redundant search index on startup. Focused query-plan and file-backed migration regressions plus the 613-test suite pass. Machine-readable output is `benchmarks/artifacts/20260924-sqlite-cardinality.json`; methodology and the 3.46.0 bundled-SQLite limitation are in `benchmarks/artifacts/20260924-sqlite-cardinality.md`. Real-database measurements remain open. | Verified locally; production cardinalities separate |
-| RF-022 | `scripts/check-client-sdk-gates.sh` now owns Go/Python/TypeScript SDK lifecycle, lint, advisory, build, and package checks; GitHub and release paths call it once, while GitLab keeps image-specific Go and Node feedback lanes. | CI latency and source-of-truth drift increase without more coverage. | `docs/dev/sdk-ci-ownership.md` records the split; the combined gate, GitHub/release wiring, and read-only Go lane pass locally. | Verified locally; hosted pipeline separate |
+| RF-021 | `list_search_results`, `list_transfers`, and `get_webhook_logs` page full rows by ordered columns. The synthetic cardinality run uses 1,000,000 search results, 500,000 transfers, and 500,000 webhook logs. | Transfer and webhook composite indexes materially lower synthetic page-read latency. SQLite's existing `(search_id)` index already satisfies `ORDER BY id` through the implicit rowid; `(search_id, id)` adds storage but is not selected. | On Python SQLite 3.53.4, retained transfer/webhook composites reduce measured first/deep-page medians by 88–99%; search-result medians and plans do not change. The daemon removes the redundant search index on startup. Focused query-plan and file-backed migration regressions plus the 613-test suite pass. Machine-readable output is `benchmarks/artifacts/20260924-sqlite-cardinality.json`; methodology and the 3.46.0 bundled-SQLite limitation are in `benchmarks/artifacts/20260924-sqlite-cardinality.md`. The exact-source 69cf4141 binary initialized a disposable SlskR database in a network-disabled no-start run; a deterministic 1,000,000/500,000/500,000 workload was seeded into the migration-created tables and measured with read-only page queries. Row counts, plans, timings, SQLite integrity, and test-only limitations are in [the current-source test-database report](../../benchmarks/artifacts/20260929-rf021-current-source-test-database.md) and its JSON output. Production cardinalities are not claimed. | Verified on the current-source isolated SlskR test database; production cardinalities are not represented. |
+| RF-022 | `scripts/check-client-sdk-gates.sh` now owns Go/Python/TypeScript SDK lifecycle, lint, advisory, build, and package checks; GitHub and release paths call it once, while GitLab keeps image-specific Go and Node feedback lanes. | CI latency and source-of-truth drift increase without more coverage. | `docs/dev/sdk-ci-ownership.md` records the split; the combined gate and read-only Go lane pass locally. GitLab pipelines 143 and 145 passed the Node, Go, and Rust lanes on clean runners. Current-source GitLab pipeline 147 passed the Node, Go, and Rust lanes on a clean runner. | Verified locally and on current-source GitLab pipeline 147 |
 | RF-023 | `crates/slskr/Cargo.toml` has a default `focused-controller-tests` feature; the first implementation batch now selects the focused module explicitly with that feature. | Feature naming previously did not describe actual test selection. | Locked `cargo check` passes for default, `--no-default-features`, `bounded-persistence-tests`, and `full-controller-tests` configurations. | Verified locally |
-| RF-024 | `crates/slskr/src/lib.rs` is now 2,301 lines, down from the 18,161-line audit baseline; `web/src` has 105,422 JavaScript/JSX lines (112,823 lines across all files) after route/polling splits. The managed task registry, bounded HTTP task admission, and lifecycle regression live in `managed_tasks.rs`; runtime compatibility state logic lives in `runtime_compat_state.rs`; hash backfill state and persistence helpers live in `hash_backfill_state.rs`; source-discovery lifecycle state lives in `source_discovery_state.rs`; source-discovery dispatch, source projection, and scheduled searches live in `source_discovery_runtime.rs`; security bans, reputation, durable JWT revocation, and login-attempt throttling live in `security_state.rs`; bounded OAuth issue/consume state lives in `oauth_state.rs`; source-feed history, Lidarr sync state, Spotify connection state, and feed row/target models live in `integration_runtime_state.rs`; contact records/store live in `contact_state.rs`; destination records/store/path selection live in `destination_state.rs`; controller feature state and bounded JSON persistence live in `controller_feature_state.rs`; preview tickets live in `preview_stream_state.rs`; preview stream ticket creation and input validation live in `preview_stream_controller.rs`; versioned GET failure contracts live in `versioned_get_contract.rs`; versioned relay upload, stream, and download handling lives in `versioned_relay_controller.rs`; native compatibility route matching and read projections live in `native_compat_controller.rs`; Spotify and configured-provider source-feed previews live in `source_feed_preview_controller.rs`; the static provider catalog projection lives in `source_provider_catalog.rs`; SongID evidence-package and capability projections live in `songid_controller.rs`; source metadata and fingerprint analysis, queued workers, failure recording, and persisted-run recovery live in `songid_runtime.rs`; `spawn_session_manager` and the Gold Star Club auto-join supervisor live in `session_runtime.rs`; Soulfind bridge TCP framing, client handling, and managed server runtime live in `soulfind_bridge_runtime.rs`; mesh gateway auth, origin validation, and HTTP service responses live in `mesh_gateway_controller.rs`; ranking-history and source-candidate responses live in `ranking_controller.rs`; the history-backfill route and FLAC candidate projection live in `hash_backfill_controller.rs`; the idle-gated backfill scheduler and cycle execution live in `hash_backfill_runtime.rs`; wishlist auto-download planning and staged-transfer rollback live in `wishlist_auto_download.rs`; CSV parsing, simple text import, and versioned CSV import live in `wishlist_csv_import.rs`; listening-party stream limits live in `listening_party_stream_state.rs`; bounded PodCore runtime, signature, and membership verification counters, key validation, and recording logic with regression coverage now live in `podcore_runtime_stats.rs`; PodCore mutation, dynamic-get, and stats response handlers live in `podcore_controller.rs`; MediaCore extended and mutation response handlers live in `mediacore_controller.rs`. Pod membership DTOs, workflow/replay stores, canonical path parsing, acceptor authorization, and signature verification now live in `pod_membership_workflow.rs`; PodCore content-ID parsing, MusicBrainz requests, and metadata shaping live in `musicbrainz_lookup.rs`. | Ownership, review, compile feedback, and safe change isolation remain poor. | Batches 72-74 pass locked feature compiles, the 614-test daemon suite, runtime-boundary guard, and formatter. Batch 75 passes the full-controller/legacy library and test-target compiles, cancellation/order/rollback regressions, the 616-test daemon suite, runtime-boundary guard, scoped `await_holding_lock` Clippy pass, docs/plan freshness, formatter, and diff checks. Batch 76 passes the PodCore stat-key bounds and direct signing/verification counter regressions plus the locked full-controller/legacy library check. The feature-enabled test target compiles, but executing the existing signing-stat endpoint regression overflows its historical test-worker stack before assertions; the runtime-boundary guard, docs and plan freshness, formatter, and diff checks pass. The 27 listener tests passed in Batch 71 and the full release gate passed after Batch 71. Continue splitting by ownership and measure compile/test feedback after each move. Upload-peer cooldown state, key normalization, expiry, and failure classification moved with its three tests into upload_peer_cooldowns.rs; private-message auto-response cooldown tracking, limits, normalization, expiry, and two direct tests moved into private_message_auto_responses.rs; BrowseEntry and bounded remote path-encoding state now live together in browse_path_state.rs with direct entry/cap tests and the feature regression preserved; managed blacklist runtime state and bounded decision caching now live in managed_blacklist_runtime.rs, preserving target-specific matching, TTL/capacity, eviction, and replacement invalidation; shared controller regex matching and request-thread compilation now live in controller_regex.rs with existing root call sites preserved; private-message auto-response eligibility classification now lives beside its bounded cooldown tracker in private_message_auto_responses.rs; MessageRecord, bounded MessageStore state, and conversation JSON construction now live in message_store.rs while route persistence ordering and rollback remain at the crate root; RoomMessageRecord, RoomRosterEntry, RoomRecord, RoomStore, room projections, and bounded room-name handling now live in room_store.rs; UserRecord and bounded UserStore live in user_store.rs; UserNoteRecord and bounded UserNoteStore live in user_note_store.rs; InterestRecord and InterestStore live in interest_store.rs; NowPlayingRecord and bounded NowPlayingStore live in now_playing_store.rs; ShareGroupMember, ShareGroupRecord, and bounded ShareGroupStore live in share_group_store.rs; ShareGrantRecord, ShareAccessTokenRecord, and both bounded stores live in share_grant_store.rs; IncomingShareRecord and bounded IncomingShareStore live in incoming_share_store.rs; CollectionItem, CollectionRecord, and bounded CollectionStore live in collection_store.rs; WishlistItem, wishlist filters/policies, ignored-result models, and bounded WishlistStore live in wishlist_store.rs; SearchRecord, bounded SearchStore, search create outcomes, history/controller projections, and result identity handling live in search_store.rs; the managed search-expiry supervisor lives in search_runtime.rs; VPN polling, advertised-port synchronization, reconnect requests, and reconnect wake handling live in vpn_runtime.rs; BrowseRecord, bounded BrowseStore state, indirect-token allocation, and controller/list projections live in browse_store.rs; library item/health/remediation models, query parsing, bounded LibraryStore, and catalog/health projections live in library_store.rs; share roots, index snapshots, lifecycle state types, and snapshot/catalog projections live in share_index_state.rs; share scan cancellation, rebuild/add lifecycle, snapshot generation checks, persistence, and publication now live in share_index_runtime.rs; HTTP connection and request-stream lifecycle now live in http_connection.rs while bounded parsing and response framing remain in http_server.rs; RelayState and conditional rollback logic live in relay_state.rs; bounded mesh sync-security state, capability registry, and mesh projections live in mesh_state.rs; controller options overlay, obfuscation reload snapshot, and restart fingerprint live in controller_options_state.rs; transfer state snapshot loading/writing and event-file I/O live in transfer_state_io.rs; generation-based durability snapshots, pending events, and TransferQueue persistence hooks live in transfer_durability.rs; TransferQueue and request/audio metadata models, ID allocation, transitions, and queue projections live in transfer_queue.rs; bounded auto-retry and underperformance rescue trackers/planners live in transfer_recovery.rs; TransferEntry serialization, redacted/native/controller projections, recovery fields, and bounded normalization live in transfer_entry.rs; file-transfer progress, retry, peer upload/download, inbound request handling, bounded backfill receive, and completed-media metadata lifecycle live in file_transfer_runtime.rs; session snapshot defaults, error mapping, and JSON summaries live in session_state.rs; ListenerSnapshot and ListenerCommand DTOs, listener JSON projection, and public listener error mapping live in listener_state.rs; listener binding, lifecycle supervision, and incoming-connection handling live in listener_runtime.rs; DistributedRuntime models, persistence snapshots/status, connection roles, and state projections live in distributed_state.rs; parent/child link lifecycle, search forwarding, branch/depth updates, and persisted settings coordination live in distributed_runtime.rs; storage-directory listing budgets, options, and bounded emission state live in storage_directory_state.rs; share scan inputs/results, cancellation-aware index building, and bounded filesystem traversal live in share_scanner.rs; virtual path normalization, hidden-path handling, extension extraction, and bounded media attribute probes also live in share_scanner.rs; persisted share-file projections, root summaries, attribute encoding, and compatibility cache I/O live in share_index_state.rs; SessionCommand and SearchDispatchTarget DTOs live in session_state.rs; SearchResultEntry, text-bounded search result projections, and file-attribute projection live in search_store.rs; share CatalogFilter query parsing and matching live in share_index_state.rs; local file SHA-256 hashing and bounded cache state live in local_file_hash.rs; controller rate-limit policy/model, partition/window projection, and the managed periodic cleanup task live in rate_limit.rs; WishlistAutoDownloadPlan, track identity, quality ranking, edition checks, and wishlist path normalization live in wishlist_store.rs; resolved integration targets and private-address URL validation live in integration_target.rs; source provider matching, bounded ingestion responses, metadata parsing, and provider page requests live in source_feed_ingest.rs; local CSV, playlist, RSS/OPML, and bounded preview parsing live in source_feed_ingest.rs; Lidarr status/wanted HTTP clients, bounded JSON GET helper, quality-profile filter, manual-import candidate GET, and import-command POST live in lidarr_api.rs; Lidarr manual-import path mapping, candidate filtering, duplicate detection, and confined rejected-file deletion live in lidarr_import.rs; Lidarr import-history keys, status classification, persisted-record projection, and public redaction live in lidarr_import.rs; history persistence/listing and retry wrappers live in lidarr_import.rs; manual/automatic import execution, debounce, and retry sequencing live in lidarr_import.rs; database statistics projections, cleanup, retention pruning and scheduling, and vacuum handling live in database_maintenance.rs; bounded peer browse payload construction/parsing, virtual path composition, and folder projections live in browse_wire.rs; collection, wishlist, VirtualSoulfind, share, user, room, bridge, library-health, and share-group route parsing and blank-ID contracts live in `controller_route_inputs.rs`; shared request parsing and bounded array/response checks live in request_input.rs; static asset root selection, path confinement, CSP policy, bounded file reads, static responses, and fallback dashboard HTML live in web_static.rs; controller options JSON response projection lives in controller_options_projection.rs; controller options debug projection and value redaction helpers live in controller_debug_view.rs; controller_yaml.rs owns YAML parsing and responses; target validation/error contracts live in `controller_yaml_validation.rs`; key conversion and API projection live in `controller_yaml_projection.rs`; controller CLI flag mapping, serve argument parsing, and command-line environment projection live in controller_cli.rs; bounded swarm analytics aggregation, peer ranking, and recommendation projection live in swarm_analytics.rs; release-tag normalization/version comparison, scheduled refresh, and latest-version response live in controller_release_check.rs; controller capability parsing, negotiation, native response projection, network statistics, and peer capability descriptor helpers live in controller_capabilities.rs; controller event/search/HashDb/backfill storage preflight and identifier/query validation helpers live in controller_storage_preflight.rs; controller storage route projections, bounded Unix/non-Unix directory enumeration, filesystem timestamp shaping, shared scan limits, and storage query helpers live in controller_storage.rs; extended-controller mutation, dynamic-get, and get handlers live in `extended_controller_mutations.rs`, `extended_controller_dynamic_get.rs`, and `extended_controller_get.rs`, while shared search/download helpers remain in `extended_controller.rs`; PodCore mutation, dynamic-get, and stats handlers live in `podcore_mutations.rs`, `podcore_queries.rs`, and `podcore_stats_controller.rs`, with shared helpers in `podcore_controller.rs`; MediaCore GET and mutation handlers live in `mediacore_extended.rs` and `mediacore_mutations.rs`, with metric and descriptor helpers in `mediacore_controller.rs`; transfer telemetry/storage failure, native transfer validation, and auto-replace response helpers live in transfer_controller.rs; peer socket setup, regular and obfuscated dialing, SOCKS5, peer browse/message transport, and plain/obfuscated negotiation live in peer_transport.rs; incoming plain/obfuscated peer-message loops, request dispatch, blacklist handling, upload-queue scheduling, and queue projections live in peer_message_runtime.rs; the feature-gated legacy HTTP dispatcher preflight and ordered composition live in `legacy_route_dispatch.rs`, with its 399 compatibility route arms split in source order across `legacy_route_dispatch_group_00.rs` through `legacy_route_dispatch_group_10.rs`; the bounded route-dispatch group 6 is an orchestration layer over admin/discovery, telemetry, media/jobs, security/shares, integrations, and MusicBrainz handlers in six focused modules; the 1,342-line telemetry handler now composes metrics/jobs, Pod routes, federation/security, and multisource/graph handlers in four focused modules; the group 6 admin/discovery handler now composes configuration/recommendation and relay-controller routes in two focused modules;  route-dispatch group 0 now composes controller identity/application/session routes and mesh/HashDb/VirtualSoulfind routes in two owner modules, preserving route-arm order; route-dispatch group 1 now composes discovery/backfill/docs/batch, configuration/telemetry, events/webhooks/options, and shares/files handlers in four ownership modules, preserving all route arms in their original order; route-dispatch group 3 now composes room/user/browse, admin-control, room-membership, and options/diagnostics handlers in four ownership modules, preserving route-arm order; route-dispatch group 2 now composes five modules for session/search, downloads, transfer status/files, and room routes; groups 4, 5, and 7 now each compose four modules for collection/wishlist/contact, library/conversation/configuration, and media/stream/PodCore/network handler ownership; daemon startup, shutdown-signal supervision, process replacement, and service orchestration live in daemon_serve.rs; controller compatibility config paths, YAML persistence, watcher, and watched reload/application live in controller_reload.rs; MusicBrainz mutation responses and opaque artist-radar route-reference validation live in musicbrainz_controller.rs; MusicBrainz target and discography-coverage helpers now live in musicbrainz_targets.rs included within route_dispatch, preserving their route_dispatch call paths; the 692-line request-flow block and RouteDispatchContext now live in route_dispatch_request_flow.rs, leaving route_dispatch.rs at 435 lines; ActivityPub signatures, actor and relationship handling, webfinger, and music-activity responses live in activitypub_controller.rs; session-command and peer-message handling, server reconnection, wishlist-search dispatch and smart fallback, Gold Star Club auto-join supervision, and server-message projection live in session_runtime.rs; extended security route responses live in security_controller.rs; quarantine-jury mutation, aggregate/audit/acceptance, and dynamic-read handlers live in quarantine_controller.rs; miscellaneous mutation route responses live in misc_controller_mutations.rs; download-batch response handling and projection helpers also live in extended_controller.rs; VirtualSoulfind v2 catalogue and route handling live in virtual_soulfind_v2_controller.rs; Lidarr wanted synchronization, its managed scheduler and cycle-state projection live in lidarr_wishlist_sync.rs; transfer and auto-retry task supervisors, auto-replace settings projection, persisted rescue-search creation, verified mesh-swarm promotion, retry execution, and rollback coordination live in transfer_recovery_runtime.rs; overlay DHT publication scheduling, snapshot construction, and result logging live in mesh_dht_runtime.rs; PlayerBar visual tiles and stored visualizer-engine selection live in PlayerVisualTiles.jsx; PlayerBar collection and local-file browsing live in PlayerLauncher.jsx; PlayerBar listening statistics, history import/export, and recommendation actions live in PlayerStatsModal.jsx; PlayerBar smart-radio search and Wishlist controls live in PlayerRadioModal.jsx; PlayerBar queue and similar-track handoff controls live in PlayerQueueModal.jsx; PlayerBar is now 1,323 lines with visual, collection, stats, radio, queue, and discovery owners split into modules; Visualizer preset persistence, normalization, and import helpers live in visualizerPresetLibrary.js; App network endpoint normalization, persistence, and ingress migration notice live in NetworkEndpointNotice.jsx; App.jsx is now 2,034 lines and preserves getStoredNetworkEndpointSnapshot; App connection-status menu behavior lives in ModeSpecificConnectButton.jsx; App.jsx is now 1,889 lines; SongIDPanel display/dedup helpers live in songIdPanelHelpers.js; its 1,085-line analysis column lives in SongIDAnalysisResults.jsx, leaving SongIDPanel.jsx at 646 lines; Messaging workspace state is owned by messagingWorkspaceState.js and pod message polling/send lifecycle by PodChannelSession.jsx; Messaging.jsx is now 1,214 lines; AdminPolicies form presentation lives in AdminPoliciesForm.jsx with save/reset YAML lifecycle in the 573-line parent; Adversarial Settings tab and pane rendering lives in AdversarialSettingsView.jsx while data and connectivity request lifecycles stay in its parent; Network peer and infrastructure presentation lives in NetworkDetails.jsx with polling and request lifecycles in the 827-line Network parent; SearchDetail filter and album-candidate panels live in SearchResultControls.jsx, with search/result lifecycle in the 850-line parent; Response.jsx is now 999 lines with its DownloadActionPreviewModal presentation in a separate module; Visualizer overlay control presentation lives in VisualizerOverlayControls.jsx, with audio/engine and persisted state in the 1,356-line parent; Wishlist.jsx is now 599 lines with row, editor, CSV importer, and shared mounted-state ownership in sibling modules; Searches.jsx is now 733 lines with legacy and modern list-page views and persisted collapsible sections in SearchesListView.jsx; Collections.jsx is now 925 lines, with create, share, and add-item modal views in dedicated child modules; Messaging.jsx is now 964 lines, with its sidebar and batch private-message modal in dedicated child modules; PlayerBar.jsx is now 1,111 lines, with its integrations modal, tool button, and rating controls in sibling components while playback, token persistence, and external-visualizer request lifecycles remain in PlayerBar; CompatibilityDashboard.jsx is now 870 lines; chart transforms, series, and graph rendering live in CompatibilityGraph.jsx, with report fetching and tabs in the parent; App.jsx is now 1,774 lines, with the right-side header menu in AppHeaderMenu.jsx and theme/logout/connect behavior passed in as callbacks; App.jsx is now 1,476 lines, with primary route navigation and its notification icon in AppNavigationPrimary.jsx; App.jsx is now 1,104 lines, with lazy route imports, agent/native route tables, and route-miss diagnostics in AppRouteTable.jsx; withTokenCheck remains App-owned Final 2026-09-27 closure scan: the largest non-test Rust source in crates/slskr/src is config.rs at 4,703 lines, the largest Web JS/JSX source is 1,689 lines, and the largest dashboard source is 279 lines. lib.rs is 2,305 lines, persistence.rs 2,313, and cli.rs 2,346. The 640-test daemon library suite, full-controller/legacy feature compile, Web ownership inventory, runtime boundary hardening guard, formatter, Rust module hygiene, and focused Web build/tests recorded in Batches 109-383 pass. The split router now converts an exhausted route search to HTTP 404; its direct and batch regression passes. | Verified locally |
+| RF-024 | `crates/slskr/src/lib.rs` is 2,274 lines at the 2026-09-29 recheck, down from the 18,161-line audit baseline; `web/src` has 105,422 JavaScript/JSX lines (112,823 lines across all files) after route/polling splits. The managed task registry, bounded HTTP task admission, and lifecycle regression live in `managed_tasks.rs`; runtime compatibility state logic lives in `runtime_compat_state.rs`; hash backfill state and persistence helpers live in `hash_backfill_state.rs`; source-discovery lifecycle state lives in `source_discovery_state.rs`; source-discovery dispatch, source projection, and scheduled searches live in `source_discovery_runtime.rs`; security bans, reputation, durable JWT revocation, and login-attempt throttling live in `security_state.rs`; bounded OAuth issue/consume state lives in `oauth_state.rs`; source-feed history, Lidarr sync state, Spotify connection state, and feed row/target models live in `integration_runtime_state.rs`; contact records/store live in `contact_state.rs`; destination records/store/path selection live in `destination_state.rs`; controller feature state and bounded JSON persistence live in `controller_feature_state.rs`; preview tickets live in `preview_stream_state.rs`; preview stream ticket creation and input validation live in `preview_stream_controller.rs`; versioned GET failure contracts live in `versioned_get_contract.rs`; versioned relay upload, stream, and download handling lives in `versioned_relay_controller.rs`; native compatibility route matching and read projections live in `native_compat_controller.rs`; Spotify and configured-provider source-feed previews live in `source_feed_preview_controller.rs`; the static provider catalog projection lives in `source_provider_catalog.rs`; SongID evidence-package and capability projections live in `songid_controller.rs`; source metadata and fingerprint analysis, queued workers, failure recording, and persisted-run recovery live in `songid_runtime.rs`; `spawn_session_manager` and the Gold Star Club auto-join supervisor live in `session_runtime.rs`; Soulfind bridge TCP framing, client handling, and managed server runtime live in `soulfind_bridge_runtime.rs`; mesh gateway auth, origin validation, and HTTP service responses live in `mesh_gateway_controller.rs`; ranking-history and source-candidate responses live in `ranking_controller.rs`; the history-backfill route and FLAC candidate projection live in `hash_backfill_controller.rs`; the idle-gated backfill scheduler and cycle execution live in `hash_backfill_runtime.rs`; wishlist auto-download planning and staged-transfer rollback live in `wishlist_auto_download.rs`; CSV parsing, simple text import, and versioned CSV import live in `wishlist_csv_import.rs`; listening-party stream limits live in `listening_party_stream_state.rs`; bounded PodCore runtime, signature, and membership verification counters, key validation, and recording logic with regression coverage now live in `podcore_runtime_stats.rs`; PodCore mutation, dynamic-get, and stats response handlers live in `podcore_controller.rs`; MediaCore extended and mutation response handlers live in `mediacore_controller.rs`. Pod membership DTOs, workflow/replay stores, canonical path parsing, acceptor authorization, and signature verification now live in `pod_membership_workflow.rs`; PodCore content-ID parsing, MusicBrainz requests, and metadata shaping live in `musicbrainz_lookup.rs`. | Ownership, review, compile feedback, and safe change isolation remain poor. | Batches 72-74 pass locked feature compiles, the 614-test daemon suite, runtime-boundary guard, and formatter. Batch 75 passes the full-controller/legacy library and test-target compiles, cancellation/order/rollback regressions, the 616-test daemon suite, runtime-boundary guard, scoped `await_holding_lock` Clippy pass, docs/plan freshness, formatter, and diff checks. Batch 76 passes the PodCore stat-key bounds and direct signing/verification counter regressions plus the locked full-controller/legacy library check. The feature-enabled test target compiles, but executing the existing signing-stat endpoint regression overflows its historical test-worker stack before assertions; the runtime-boundary guard, docs and plan freshness, formatter, and diff checks pass. The 27 listener tests passed in Batch 71 and the full release gate passed after Batch 71. Continue splitting by ownership and measure compile/test feedback after each move. Upload-peer cooldown state, key normalization, expiry, and failure classification moved with its three tests into upload_peer_cooldowns.rs; private-message auto-response cooldown tracking, limits, normalization, expiry, and two direct tests moved into private_message_auto_responses.rs; BrowseEntry and bounded remote path-encoding state now live together in browse_path_state.rs with direct entry/cap tests and the feature regression preserved; managed blacklist runtime state and bounded decision caching now live in managed_blacklist_runtime.rs, preserving target-specific matching, TTL/capacity, eviction, and replacement invalidation; shared controller regex matching and request-thread compilation now live in controller_regex.rs with existing root call sites preserved; private-message auto-response eligibility classification now lives beside its bounded cooldown tracker in private_message_auto_responses.rs; MessageRecord, bounded MessageStore state, and conversation JSON construction now live in message_store.rs while route persistence ordering and rollback remain at the crate root; RoomMessageRecord, RoomRosterEntry, RoomRecord, RoomStore, room projections, and bounded room-name handling now live in room_store.rs; UserRecord and bounded UserStore live in user_store.rs; UserNoteRecord and bounded UserNoteStore live in user_note_store.rs; InterestRecord and InterestStore live in interest_store.rs; NowPlayingRecord and bounded NowPlayingStore live in now_playing_store.rs; ShareGroupMember, ShareGroupRecord, and bounded ShareGroupStore live in share_group_store.rs; ShareGrantRecord, ShareAccessTokenRecord, and both bounded stores live in share_grant_store.rs; IncomingShareRecord and bounded IncomingShareStore live in incoming_share_store.rs; CollectionItem, CollectionRecord, and bounded CollectionStore live in collection_store.rs; WishlistItem, wishlist filters/policies, ignored-result models, and bounded WishlistStore live in wishlist_store.rs; SearchRecord, bounded SearchStore, search create outcomes, history/controller projections, and result identity handling live in search_store.rs; the managed search-expiry supervisor lives in search_runtime.rs; VPN polling, advertised-port synchronization, reconnect requests, and reconnect wake handling live in vpn_runtime.rs; BrowseRecord, bounded BrowseStore state, indirect-token allocation, and controller/list projections live in browse_store.rs; library item/health/remediation models, query parsing, bounded LibraryStore, and catalog/health projections live in library_store.rs; share roots, index snapshots, lifecycle state types, and snapshot/catalog projections live in share_index_state.rs; share scan cancellation, rebuild/add lifecycle, snapshot generation checks, persistence, and publication now live in share_index_runtime.rs; HTTP connection and request-stream lifecycle now live in http_connection.rs while bounded parsing and response framing remain in http_server.rs; RelayState and conditional rollback logic live in relay_state.rs; bounded mesh sync-security state, capability registry, and mesh projections live in mesh_state.rs; controller options overlay, obfuscation reload snapshot, and restart fingerprint live in controller_options_state.rs; transfer state snapshot loading/writing and event-file I/O live in transfer_state_io.rs; generation-based durability snapshots, pending events, and TransferQueue persistence hooks live in transfer_durability.rs; TransferQueue and request/audio metadata models, ID allocation, transitions, and queue projections live in transfer_queue.rs; bounded auto-retry and underperformance rescue trackers/planners live in transfer_recovery.rs; TransferEntry serialization, redacted/native/controller projections, recovery fields, and bounded normalization live in transfer_entry.rs; file-transfer progress, retry, peer upload/download, inbound request handling, bounded backfill receive, and completed-media metadata lifecycle live in file_transfer_runtime.rs; session snapshot defaults, error mapping, and JSON summaries live in session_state.rs; ListenerSnapshot and ListenerCommand DTOs, listener JSON projection, and public listener error mapping live in listener_state.rs; listener binding, lifecycle supervision, and incoming-connection handling live in listener_runtime.rs; DistributedRuntime models, persistence snapshots/status, connection roles, and state projections live in distributed_state.rs; parent/child link lifecycle, search forwarding, branch/depth updates, and persisted settings coordination live in distributed_runtime.rs; storage-directory listing budgets, options, and bounded emission state live in storage_directory_state.rs; share scan inputs/results, cancellation-aware index building, and bounded filesystem traversal live in share_scanner.rs; virtual path normalization, hidden-path handling, extension extraction, and bounded media attribute probes also live in share_scanner.rs; persisted share-file projections, root summaries, attribute encoding, and compatibility cache I/O live in share_index_state.rs; SessionCommand and SearchDispatchTarget DTOs live in session_state.rs; SearchResultEntry, text-bounded search result projections, and file-attribute projection live in search_store.rs; share CatalogFilter query parsing and matching live in share_index_state.rs; local file SHA-256 hashing and bounded cache state live in local_file_hash.rs; controller rate-limit policy/model, partition/window projection, and the managed periodic cleanup task live in rate_limit.rs; WishlistAutoDownloadPlan, track identity, quality ranking, edition checks, and wishlist path normalization live in wishlist_store.rs; resolved integration targets and private-address URL validation live in integration_target.rs; source provider matching, bounded ingestion responses, metadata parsing, and provider page requests live in source_feed_ingest.rs; local CSV, playlist, RSS/OPML, and bounded preview parsing live in source_feed_ingest.rs; Lidarr status/wanted HTTP clients, bounded JSON GET helper, quality-profile filter, manual-import candidate GET, and import-command POST live in lidarr_api.rs; Lidarr manual-import path mapping, candidate filtering, duplicate detection, and confined rejected-file deletion live in lidarr_import.rs; Lidarr import-history keys, status classification, persisted-record projection, and public redaction live in lidarr_import.rs; history persistence/listing and retry wrappers live in lidarr_import.rs; manual/automatic import execution, debounce, and retry sequencing live in lidarr_import.rs; database statistics projections, cleanup, retention pruning and scheduling, and vacuum handling live in database_maintenance.rs; bounded peer browse payload construction/parsing, virtual path composition, and folder projections live in browse_wire.rs; collection, wishlist, VirtualSoulfind, share, user, room, bridge, library-health, and share-group route parsing and blank-ID contracts live in `controller_route_inputs.rs`; shared request parsing and bounded array/response checks live in request_input.rs; static asset root selection, path confinement, CSP policy, bounded file reads, static responses, and fallback dashboard HTML live in web_static.rs; controller options JSON response projection lives in controller_options_projection.rs; controller options debug projection and value redaction helpers live in controller_debug_view.rs; controller_yaml.rs owns YAML parsing and responses; target validation/error contracts live in `controller_yaml_validation.rs`; key conversion and API projection live in `controller_yaml_projection.rs`; controller CLI flag mapping, serve argument parsing, and command-line environment projection live in controller_cli.rs; bounded swarm analytics aggregation, peer ranking, and recommendation projection live in swarm_analytics.rs; release-tag normalization/version comparison, scheduled refresh, and latest-version response live in controller_release_check.rs; controller capability parsing, negotiation, native response projection, network statistics, and peer capability descriptor helpers live in controller_capabilities.rs; controller event/search/HashDb/backfill storage preflight and identifier/query validation helpers live in controller_storage_preflight.rs; controller storage route projections, bounded Unix/non-Unix directory enumeration, filesystem timestamp shaping, shared scan limits, and storage query helpers live in controller_storage.rs; extended-controller mutation, dynamic-get, and get handlers live in `extended_controller_mutations.rs`, `extended_controller_dynamic_get.rs`, and `extended_controller_get.rs`, while shared search/download helpers remain in `extended_controller.rs`; PodCore mutation, dynamic-get, and stats handlers live in `podcore_mutations.rs`, `podcore_queries.rs`, and `podcore_stats_controller.rs`, with shared helpers in `podcore_controller.rs`; MediaCore GET and mutation handlers live in `mediacore_extended.rs` and `mediacore_mutations.rs`, with metric and descriptor helpers in `mediacore_controller.rs`; transfer telemetry/storage failure, native transfer validation, and auto-replace response helpers live in transfer_controller.rs; peer socket setup, regular and obfuscated dialing, SOCKS5, peer browse/message transport, and plain/obfuscated negotiation live in peer_transport.rs; incoming plain/obfuscated peer-message loops, request dispatch, blacklist handling, upload-queue scheduling, and queue projections live in peer_message_runtime.rs; the feature-gated legacy HTTP dispatcher preflight and ordered composition live in `legacy_route_dispatch.rs`, with its 399 compatibility route arms split in source order across `legacy_route_dispatch_group_00.rs` through `legacy_route_dispatch_group_10.rs`; the bounded route-dispatch group 6 is an orchestration layer over admin/discovery, telemetry, media/jobs, security/shares, integrations, and MusicBrainz handlers in six focused modules; the 1,342-line telemetry handler now composes metrics/jobs, Pod routes, federation/security, and multisource/graph handlers in four focused modules; the group 6 admin/discovery handler now composes configuration/recommendation and relay-controller routes in two focused modules;  route-dispatch group 0 now composes controller identity/application/session routes and mesh/HashDb/VirtualSoulfind routes in two owner modules, preserving route-arm order; route-dispatch group 1 now composes discovery/backfill/docs/batch, configuration/telemetry, events/webhooks/options, and shares/files handlers in four ownership modules, preserving all route arms in their original order; route-dispatch group 3 now composes room/user/browse, admin-control, room-membership, and options/diagnostics handlers in four ownership modules, preserving route-arm order; route-dispatch group 2 now composes five modules for session/search, downloads, transfer status/files, and room routes; groups 4, 5, and 7 now each compose four modules for collection/wishlist/contact, library/conversation/configuration, and media/stream/PodCore/network handler ownership; daemon startup, shutdown-signal supervision, process replacement, and service orchestration live in daemon_serve.rs; controller compatibility config paths, YAML persistence, watcher, and watched reload/application live in controller_reload.rs; MusicBrainz mutation responses and opaque artist-radar route-reference validation live in musicbrainz_controller.rs; MusicBrainz target and discography-coverage helpers now live in musicbrainz_targets.rs included within route_dispatch, preserving their route_dispatch call paths; the 692-line request-flow block and RouteDispatchContext now live in route_dispatch_request_flow.rs, leaving route_dispatch.rs at 435 lines; ActivityPub signatures, actor and relationship handling, webfinger, and music-activity responses live in activitypub_controller.rs; session-command and peer-message handling, server reconnection, wishlist-search dispatch and smart fallback, Gold Star Club auto-join supervision, and server-message projection live in session_runtime.rs; extended security route responses live in security_controller.rs; quarantine-jury mutation, aggregate/audit/acceptance, and dynamic-read handlers live in quarantine_controller.rs; miscellaneous mutation route responses live in misc_controller_mutations.rs; download-batch response handling and projection helpers also live in extended_controller.rs; VirtualSoulfind v2 catalogue and route handling live in virtual_soulfind_v2_controller.rs; Lidarr wanted synchronization, its managed scheduler and cycle-state projection live in lidarr_wishlist_sync.rs; transfer and auto-retry task supervisors, auto-replace settings projection, persisted rescue-search creation, verified mesh-swarm promotion, retry execution, and rollback coordination live in transfer_recovery_runtime.rs; overlay DHT publication scheduling, snapshot construction, and result logging live in mesh_dht_runtime.rs; PlayerBar visual tiles and stored visualizer-engine selection live in PlayerVisualTiles.jsx; PlayerBar collection and local-file browsing live in PlayerLauncher.jsx; PlayerBar listening statistics, history import/export, and recommendation actions live in PlayerStatsModal.jsx; PlayerBar smart-radio search and Wishlist controls live in PlayerRadioModal.jsx; PlayerBar queue and similar-track handoff controls live in PlayerQueueModal.jsx; PlayerBar is now 1,323 lines with visual, collection, stats, radio, queue, and discovery owners split into modules; Visualizer preset persistence, normalization, and import helpers live in visualizerPresetLibrary.js; App network endpoint normalization, persistence, and ingress migration notice live in NetworkEndpointNotice.jsx; App.jsx is now 2,034 lines and preserves getStoredNetworkEndpointSnapshot; App connection-status menu behavior lives in ModeSpecificConnectButton.jsx; App.jsx is now 1,889 lines; SongIDPanel display/dedup helpers live in songIdPanelHelpers.js; its 1,085-line analysis column lives in SongIDAnalysisResults.jsx, leaving SongIDPanel.jsx at 646 lines; Messaging workspace state is owned by messagingWorkspaceState.js and pod message polling/send lifecycle by PodChannelSession.jsx; Messaging.jsx is now 1,214 lines; AdminPolicies form presentation lives in AdminPoliciesForm.jsx with save/reset YAML lifecycle in the 573-line parent; Adversarial Settings tab and pane rendering lives in AdversarialSettingsView.jsx while data and connectivity request lifecycles stay in its parent; Network peer and infrastructure presentation lives in NetworkDetails.jsx with polling and request lifecycles in the 827-line Network parent; SearchDetail filter and album-candidate panels live in SearchResultControls.jsx, with search/result lifecycle in the 850-line parent; Response.jsx is now 999 lines with its DownloadActionPreviewModal presentation in a separate module; Visualizer overlay control presentation lives in VisualizerOverlayControls.jsx, with audio/engine and persisted state in the 1,356-line parent; Wishlist.jsx is now 599 lines with row, editor, CSV importer, and shared mounted-state ownership in sibling modules; Searches.jsx is now 733 lines with legacy and modern list-page views and persisted collapsible sections in SearchesListView.jsx; Collections.jsx is now 925 lines, with create, share, and add-item modal views in dedicated child modules; Messaging.jsx is now 964 lines, with its sidebar and batch private-message modal in dedicated child modules; PlayerBar.jsx is now 1,111 lines, with its integrations modal, tool button, and rating controls in sibling components while playback, token persistence, and external-visualizer request lifecycles remain in PlayerBar; CompatibilityDashboard.jsx is now 870 lines; chart transforms, series, and graph rendering live in CompatibilityGraph.jsx, with report fetching and tabs in the parent; App.jsx is now 1,774 lines, with the right-side header menu in AppHeaderMenu.jsx and theme/logout/connect behavior passed in as callbacks; App.jsx is now 1,476 lines, with primary route navigation and its notification icon in AppNavigationPrimary.jsx; App.jsx is now 1,104 lines, with lazy route imports, agent/native route tables, and route-miss diagnostics in AppRouteTable.jsx; withTokenCheck remains App-owned Final 2026-09-27 closure scan: the largest non-test Rust source in crates/slskr/src is config.rs at 4,703 lines, the largest Web JS/JSX source is 1,689 lines, and the largest dashboard source is 279 lines. lib.rs is 2,305 lines, persistence.rs 2,313, and cli.rs 2,346. The 640-test daemon library suite, full-controller/legacy feature compile, Web ownership inventory, runtime boundary hardening guard, formatter, Rust module hygiene, and focused Web build/tests recorded in Batches 109-383 pass. The split router now converts an exhausted route search to HTTP 404; its direct and batch regression passes. | Verified owners locally and hosted at `29165746` |
 | RF-025 | The existing plan and performance report retained stale Web test counts without a clearly separated current snapshot. | Planning and release decisions could use incorrect baselines. | `docs/performance-analysis.md` labels the 2026-09-15 836/141 baseline as historical, records the 2026-09-24 local Web snapshot of 872 tests across 146 files, and keeps the 2026-09-22 dashboard snapshot of 38 tests across 11 files with commands. | Verified locally |
-| RF-026 | `docs/dev/bug-burndown-ledger.md` marks several SDK/docs items verified while the current checks do not exercise the cited behavior. | Audit closure is not evidence-backed. | The ledger now names the executable checks for BUG-020, BUG-030, and BUG-039; docs freshness, SDK example contracts, the aggregate SDK gate, and the remediation baseline pass. Hosted/live compatibility rows remain explicitly separate. | Verified locally; hosted/live evidence separate |
-| RF-032 | `docs/full-network-test-plan.md` mixed a historical all-pass result with a newer missing-artifact plan; `REMEDIATION.md` was a stale snapshot that said daemon tests were excluded even though CI runs them. | Operators could not tell current release evidence from archived history. | The network plan labels dated results historical and points operators to current release/live gates; REMEDIATION is explicitly historical with active-plan links. A scoped local-link and referenced-script audit found no broken current paths; absent script names appear only as proposed work. The server-code count is corrected to the 103-code validated inventory, and docs freshness passes. | Verified locally; fresh live certification remains separate |
+| RF-026 | `docs/dev/bug-burndown-ledger.md` marks several SDK/docs items verified while the current checks do not exercise the cited behavior. | Audit closure is not evidence-backed. | The ledger now names the executable checks for BUG-020, BUG-030, and BUG-039; docs freshness, SDK example contracts, the aggregate SDK gate, and the remediation baseline pass. Hosted/live compatibility rows remain explicitly separate. Current-source GitLab pipeline 147 and Live Parity run 36565318189 passed the hosted SDK/API, Rust UI, and public interoperability checks on 12836668. | Verified locally, hosted, and live on current source |
+| RF-032 | `docs/full-network-test-plan.md` mixed a historical all-pass result with a newer missing-artifact plan; `REMEDIATION.md` was a stale snapshot that said daemon tests were excluded even though CI runs them. | Operators could not tell current release evidence from archived history. | The network plan labels dated results historical and points operators to current release/live gates; REMEDIATION is explicitly historical with active-plan links. A scoped local-link and referenced-script audit found no broken current paths; absent script names appear only as proposed work. The server-code count is corrected to the 103-code validated inventory, and docs freshness passes. Fresh credentialed Live Parity run 36549221015 also passed Rust/API parity and public interop on 1dcbb95a. Fresh credentialed Live Parity run 36565318189 also passed public live interop on current source 12836668. | Verified locally and with fresh current-source credentialed Live Parity |
 | RF-033 | Council counts had drifted across `docs/dev/council-scan-inventory.md`, `.council/latest-candidate-counts.md`, and the active backlog; benchmark comparison/profile tests were not invoked; frontend configs lacked coverage thresholds. | Audit numbers drift and executable performance/coverage checks are absent. | The generated report now stamps date/commit provenance; active-backlog, inventory-closure, and council-freshness gates validate synchronized copies. Dashboard V8 coverage remains ratcheted in CI/release. CI and release now run the seven benchmark comparison/SQLite profiler unit tests and a focused Web API/session/event-lifecycle coverage gate at 84% statements, 75% branches, 72% functions, and 86% lines; the focused 50-test run passes at 85.54%, 78.13%, 73.91%, and 87.38%. | Verified locally |
-| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two identical local builds produced SHA-256 `cb0ec78f41813cb7bf564c22057e1d56483219144a136a9d7456bb9e52ff853d`; shared CI artifacts remain open. | In progress, local deterministic proof |
-| RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Retain clean-runner/actionlint evidence before external closure. | Verified locally, external runner open |
+| RF-034 | SDK gates, CI, and release gate reinstall/build the same TypeScript/Web assets; release archives previously used ambient mtimes/order and the SBOM serial was constant. | CI latency grows and release artifacts were not reproducible or uniquely identified. | Archives now use sorted entries, fixed source timestamps/ownership, deterministic gzip/ZIP metadata, and the CycloneDX serial derives from release version plus source commit. Two current Linux tar builds with a fixed source timestamp produced identical SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`; macOS and Linux hosted archives passed, and Windows archive construction, verification, and packaged-binary smoke passed at `339e6812`; all seven hosted archive jobs reuse one verified Web artifact and the complete CI/package workflow passes at `47440cfb`, with retained job/artifact metadata; SDK checks use one canonical TypeScript package build. | Verified locally and hosted archive matrix |
+| RF-035 | `crates/slskr-web/Cargo.toml:17-18` now pins lock revision `3825c9ad5e4ace15bb210012e79b2cbdbfc20434`. Locked WASM/package checks, shellcheck, npm policy, and dependency audits pass locally. | Dependency and policy drift is now covered by the local release surfaces. | Hosted `Lint GitHub workflows` executes actionlint successfully in clean CI `36405007921` at `7a064d37`; full job/step receipt and locked metadata retained. | Verified hosted workflow/dependency gates at `7a064d37` |
 | RF-036 | `crates/slskr-protocol/src/server.rs` repeated server-code variants, inventory metadata, numeric conversion, and direction-specific matches. | Adding a protocol code can update one table and miss another. | A declarative macro owns the variants, numeric values, inventory order, names, and numeric decoding. The 103-code two-direction test inventory classifies every code as typed or opaque and fails if dispatch drifts. All 25 server protocol tests pass. | Verified locally |
 | RF-037 | `crates/slskr-client/src/overlay.rs` combines framing, handshake DTOs, validation, service DTOs, and request lifecycle in about 2,200 lines. | Unrelated changes share one review/compile boundary. | Framing, protocol messages/validation, and TLS/client lifecycle now have separate private modules; `overlay` preserves the public re-exports. The complete locked client package test suite passes. | Verified locally |
-| RF-038 | `crates/slskr/src/storage.rs` and the production compatibility parser duplicated file-entry decoding and allocated joined cache strings through `format!`, `replace`, and `Vec<String>`. | Large share lists pay avoidable allocations and parser behavior can drift. | The production parser now uses one bounded file-entry decoder, both cache writers append escaped fields into one buffer, and malformed-count/output/escaping tests pass with the full daemon library suite. Quantitative allocation benchmarking remains separate. | Verified locally; benchmark separate |
+| RF-038 | `crates/slskr/src/storage.rs` and the production compatibility parser duplicated file-entry decoding and allocated joined cache strings through `format!`, `replace`, and `Vec<String>`. | Large share lists pay avoidable allocations and parser behavior can drift. | The production parser now uses one bounded file-entry decoder, both cache writers append escaped fields into one buffer, and malformed-count/output/escaping tests pass with the full daemon library suite. A retained synthetic benchmark asserts byte-for-byte compatibility and measures 20 current allocator calls/4,194,304 requested bytes versus 408,828/14,370,775 for the former serializer over 50,000 entries; elapsed times are diagnostic only. | Verified locally with retained allocation benchmark |
 | RF-039 | `crates/slskr/src/lib.rs:3122-3125` expires/prunes up to the 500-record cap through `delete_searches`; the current batch changes that persistence helper from one delete trio per ID to bounded `IN (...)` statements inside one transaction. | Search eviction previously could perform hundreds of round trips. | Persistence module and full workspace daemon tests pass with the bounded transaction path. | Verified locally |
-| RF-040 | Python/TypeScript clients retry GETs by default; Go previously had no typed API error (`client-go/client.go:780-815`). The current batch adds structured Go `APIError` fields while explicitly documenting no automatic retries for mutation safety. | Equivalent SDK calls have different transient behavior and Go callers previously parsed error strings. | Go/Python/TypeScript SDK gates pass, with mutation retry boundaries documented; live cross-language retry/error fixtures remain separate. | Verified locally; live fixture separate |
+| RF-040 | Python/TypeScript clients retry GETs by default; Go previously had no typed API error (`client-go/client.go:780-815`). The current batch adds structured Go `APIError` fields while explicitly documenting no automatic retries for mutation safety. | Equivalent SDK calls have different transient behavior and Go callers previously parsed error strings. | `testdata/sdk-http-contract.json` drives loopback HTTP fixtures in Go, Python, and TypeScript for the same structured 422 response, a dropped GET connection, and a dropped POST response. Go makes one GET attempt; Python/TypeScript retry once; all three issue one mutation attempt even with a retry budget of three. `scripts/check-client-sdk-gates.sh` passes. Retained methodology is in `benchmarks/artifacts/20260929-rf040-cross-sdk-http-contract.md`. Current-source GitLab pipeline 147 passed the cross-SDK gates that consume the shared HTTP fixture. | Verified locally across all SDKs and hosted on GitLab pipeline 147 |
 | RF-041 | `docs/CLIENT_LIBRARIES.md:516-559` used nonexistent TypeScript methods and unsafe POST retry recipes. | Integration guidance could fail or create duplicate searches. | Maintained SDK examples and retry boundaries pass docs freshness, example-contract, and SDK package gates. | Verified locally |
-| RF-042 | `crates/slskr/src/events_ws.rs:247-256` rejected all client text/binary frames, while Go, Python, and TypeScript SDKs send `subscribe`/`unsubscribe` JSON frames. The current batches accept bounded JSON commands/filtering and add a dependency-free cross-SDK fixture covering dotted event types, `data.topics`, unsubscribe filtering, and reconnect resubscription. | Every SDK subscription previously closed the event feed instead of filtering events; the release contract was contradicted. | Go, Python, and TypeScript fixture suites pass. Rust-daemon authentication/persistence and external interoperability remain separate evidence. | Verified locally, external proof open |
-| RF-043 | `.github/workflows/ci.yml`, `scripts/run-release-gate.sh`, package verification, and Go SDK gates previously allowed dependency resolution to change during validation. | CI/release/package checks could silently regenerate dependency resolution. | Cargo package, metadata, tree, protocol-adversarial, and extracted-workspace checks now use `--locked`; Go tests use `-mod=readonly`, and the local package gate passes. Hosted clean-runner and stale-lock evidence remain separate. | Verified locally; hosted clean-runner separate |
-| RF-044 | Direct plain/obfuscated init readers previously allocated up to the 16 MiB frame cap before applying 4 KiB peer fields. The current batch inspects fixed headers first, caps known `PeerInit` frames at 8205 bytes, and preserves `PeerUsernameTooLong`. | A peer previously could amplify handshake memory across permits with an oversized known init field. | Client/protocol/IO suites pass. The shared listener now preflights known plain and obfuscated `PeerInit` headers before buffering the body; unknown-init 16 MiB compatibility remains an explicit residual. | Verified locally; unknown-init stress separate |
-| RF-045 | `crates/slskr/src/lib.rs:80830-80842`, `route_dispatch_group_2.rs:771-797`, and `persistence.rs:2345-2377` delete/reinsert a full search projection after each accepted response. | A 10k-result burst becomes O(n^2) work despite bounded SQL parameter batches. | Search acceptance now returns the newly admitted delta and persistence appends only those rows in one transaction; peer and HTTP paths use the delta, and append-preservation tests pass. Crash/restart and 10k-response benchmark evidence remain separate. | Verified locally; burst/crash proof separate |
-| RF-046 | `crates/slskr-client/src/search.rs:350-381` uses full `Vec::contains` equality over response file/private-result vectors for duplicate detection under a per-token cap. | Adversarial duplicate bursts can consume O(responses x file-list) CPU while holding search state. | Search responses now use a stable fingerprint bucket with exact-equality fallback, including cleanup on token removal and duplicate/distinct-response tests. Adversarial benchmark evidence remains separate. | Verified locally; benchmark separate |
-| RF-047 | `crates/slskr/src/lib.rs:84944-84958`, transfer queue mutations, and `92562-92667` previously performed full JSON rewrite, fsync, and event append while holding the async transfer write lock. The current batch snapshots pending events/state and flushes durability after the lock; event-order and restart-normalization assertions pass, with a delayed-coordinator queue-lock regression. | Slow disks previously stalled every transfer/API reader and every download chunk repeated durable full-state work. | The 561-test daemon library suite passes. Real delayed-filesystem and crash/restart stress proof remain before full closure. | In progress |
-| RF-048 | `web/e2e/smoke-auth.spec.ts` and `core-pages.spec.ts` previously accepted blank/unknown UI states as success; the library E2E treated shares/content as optional. The current specs require authenticated navigation, route denial, logout, Browse, System, Shares, and table roots. | Browser regressions and broken fixtures now fail the maintained deterministic paths instead of passing through fallback branches. | Playwright passes all 14 available assertions; optional media remains a separate skipped-fixture gap. | Verified locally with optional-media gap |
-| RF-049 | Dashboard now has focused tests for App health, Dashboard, Database, Monitoring, ApiKeys/Configuration/Webhooks, Sidebar, and ErrorBoundary, with an explicit V8 coverage provider and representative axe coverage. | The previous dashboard test gap for administrative and shell/error surfaces is closed locally; coverage can now regress only below the ratcheted threshold without failing the gate. | `npm run test:coverage` passes 38 tests with 67% statements, 55% branches, 55% functions, and 71% lines; CI and release run it. The latest dashboard build is 242.02 KiB initial JavaScript and 87.84 KiB gzip against 260/100 KiB budgets. | Verified locally; deployed-browser evidence remains separate |
+| RF-042 | `crates/slskr/src/events_ws.rs:247-256` rejected all client text/binary frames, while Go, Python, and TypeScript SDKs send `subscribe`/`unsubscribe` JSON frames. The current batches accept bounded JSON commands/filtering and add a dependency-free cross-SDK fixture covering dotted event types, `data.topics`, unsubscribe filtering, and reconnect resubscription. | Every SDK subscription previously closed the event feed instead of filtering events; the release contract was contradicted. | Go, Python, and TypeScript fixture suites pass; Rust local tests cover event WebSocket authentication and event persistence/re-hydration/rollback. On kspls0, the authenticated TypeScript SDK received `search.started` after subscribing and received no second event after unsubscribe; the client issued cleanup DELETE requests for both test searches. The isolated instance disabled persistence, so durability evidence remains the local contract suite. See `benchmarks/artifacts/20260929-rf042-kspls0-live-subscription.md`. | Verified locally and on temporary live slskR |
+| RF-043 | `.github/workflows/ci.yml`, `scripts/run-release-gate.sh`, package verification, and Go SDK gates previously allowed dependency resolution to change during validation. | CI/release/package checks could silently regenerate dependency resolution. | Cargo package, metadata, tree, protocol-adversarial, and extracted-workspace checks now use `--locked`; Go tests use `-mod=readonly`, and the local package gate passes. GitLab pipeline 145 ran the locked Rust and SDK lanes on a clean runner. Current-source GitLab pipeline 147 passed the locked Rust and SDK lanes on a clean runner. | Verified locally and on current-source clean GitLab pipeline 147 |
+| RF-044 | Direct plain/obfuscated init readers previously allocated up to the 16 MiB frame cap before applying 4 KiB peer fields. The current batch inspects fixed headers first, caps known `PeerInit` frames at 8205 bytes, and preserves `PeerUsernameTooLong`. | A peer previously could amplify handshake memory across permits with an oversized known init field. | Client/protocol/IO suites pass. The shared listener preflights known plain and obfuscated `PeerInit` headers before buffering the body, caps unknown init frames at 8,205 bytes, and preserves `PeerUsernameTooLong`. A bounded regression holds 64 peers open with 16 MiB unknown-init headers (32 plain and 32 obfuscated) and no body; all reject before body reads. See `benchmarks/artifacts/20260929-rf044-concurrent-unknown-init.md`. Third-party support for larger unknown init extensions is not claimed. | Verified locally and on current-source GitLab pipeline 148 and GitHub CI run 36566959004; unknown-init size cap documented |
+| RF-045 | `crates/slskr/src/search_persistence.rs::persist_search_result_delta` and `crates/slskr/src/persistence_search.rs::append_search_results` now append accepted result rows; the former path rewrote the complete projection after each accepted batch. | A 10k-result burst previously repeated O(n) writes for each batch despite bounded SQL parameter batches. | Search acceptance returns the newly admitted delta and peer/HTTP paths persist only those rows. A retained 10,000-result benchmark across 50 batches records 10,000 inserted rows versus 255,000 historical rewrites (31.47 ms versus 799.82 ms medians in a development-profile synthetic SQLite run). A separate abrupt child-process termination after committed writes reopens the file-backed DB and verifies all 10,000 rows. See `benchmarks/artifacts/20260929-rf045-search-result-delta.md`. | Verified locally with retained benchmark and process-kill/reopen proof |
+| RF-046 | `crates/slskr-client/src/search.rs:350-381` uses full `Vec::contains` equality over response file/private-result vectors for duplicate detection under a per-token cap. | Adversarial duplicate bursts can consume O(responses x file-list) CPU while holding search state. | Search responses now use a stable fingerprint bucket with exact-equality fallback, including cleanup on token removal and duplicate/distinct-response tests. The release-profile adversarial benchmark measures a 716,366 ns current median versus 31,642,837 ns for the former linear scan (44.171x) on a 900-response duplicate-heavy synthetic case; see `benchmarks/artifacts/20260929-rf046-search-response-dedup.md`. GitLab pipeline 144 caught Clippy's `never_loop` warning in the benchmark's one-argument parser; its correction passed targeted local Clippy and full GitLab pipeline 145. The corrected parser also passes full current-source GitLab pipeline 147. | Verified locally, benchmarked, and hosted on GitLab pipeline 147 |
+| RF-047 | Transfer queue mutations previously performed full JSON rewrite, fsync, and event append while holding the async transfer write lock. The current path snapshots pending events/state and flushes durability after the lock. | Slow disks previously stalled transfer/API readers and download chunks repeated durable full-state work. | A file-backed append paused immediately before fsync permits a concurrent queue mutation, then persists its ordered events and restart state. A separate writer process persists 32 transfers, is killed without shutdown, and a fresh process rehydrates all 32 and their 64 events. The 642-test daemon library suite passes. An actual isolated FUSE mount delays event-file fsync by 500 ms: queue access remains available, and three killed writers recover 24 transfers and all 48 ordered events. The fixture and source-bound evidence are retained. | Verified locally; mounted delay and crash stress |
+| RF-048 | `web/e2e/smoke-auth.spec.ts` and `core-pages.spec.ts` previously accepted blank/unknown UI states as success; the library E2E treated shares/content as optional. The current specs require authenticated navigation, route denial, logout, Browse, System, Shares, and table roots. | Browser regressions and broken fixtures now fail the maintained deterministic paths instead of passing through fallback branches. | Playwright passes all 14 deterministic assertions; all 9 media-dependent cases now pass with the pinned fixtures. | Verified with pinned media-backed E2E; all 9 media-dependent cases pass |
+| RF-049 | Dashboard now has focused tests for App health, Dashboard, Database, Monitoring, ApiKeys/Configuration/Webhooks, Sidebar, and ErrorBoundary, with an explicit V8 coverage provider and representative axe coverage. | The previous dashboard test gap for administrative and shell/error surfaces is closed locally; coverage can now regress only below the ratcheted threshold without failing the gate. | The dashboard suite now passes 52 tests at 75.77% statements, 61.90% branches, 73.64% functions, and 80.13% lines; type-check, lint, production build, and the bundle budget pass. The initial JavaScript bundle is 243.01 KiB against the 260 KiB limit, and aggregate gzip is 88.67 KiB against 100 KiB. A deployed kspls0 audit covered all six dashboard routes at desktop and mobile sizes, with zero axe violations. | Verified locally, deployed-browser audited, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
 | RF-050 | `REMEDIATION.md` is now explicitly a dated historical baseline; `PLAN.md` points current readers to the active refactor plan and evidence ledger, and the new plan-freshness check enforces those links. | Operators may execute obsolete migration/backfill steps or misread current scope when historical rows look current. | `scripts/check-plan-freshness.sh` and its negative test pass in the remediation baseline; historical phase detail remains intentionally retained. | Verified locally |
 
 ### P1/P2 Web Runtime And UI Boundaries
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-051 | `web/src/components/App.jsx:823-935` now uses scalar activity endpoints, short-circuits room/message routes, and pauses the navigation timer while hidden. | Navigation previously could fan out hundreds of requests and duplicate room/chat work. | App tests cover route exclusion, hidden-tab pause/resume, and one refresh per source after visibility returns; the full Web suite remains the final local gate. | Verified locally; deployed-browser evidence remains separate |
-| RF-052 | `dashboard/src/hooks/useFetch.ts:66-75,130-141` now coalesces active requests, schedules only after settlement, pauses/resumes on visibility, and clears a pending timeout when a manual refresh starts. | Slow requests previously could be perpetually aborted and background tabs churned requests; manual refresh could also leave a duplicate poll scheduled. | Dedicated hook coverage now exercises slow, hidden, manual, and unmount paths; the full 38-test dashboard suite, type-check, and lint pass. | Verified locally; deployed-browser evidence remains separate |
-| RF-053 | `web/src/components/Shared/Footer.jsx:101-142` polls every 2 seconds and invokes a six-request stats fan-out also used by Network every 5 seconds. The current batch adds a 2-second in-flight/short-TTL cache around the shared stats helper and skips the native poller entirely for the legacy footer. | Global telemetry previously created redundant server/browser work, including in legacy profiles. | Footer regression coverage and the full Web suite pass; deployed request cadence remains separate evidence. | Verified locally; deployed cadence separate |
-| RF-054 | Messaging/Rooms polling and SignalR callbacks directly call full workspace hydration; the current batch adds a per-workspace refresh gate that coalesces active requests and schedules one follow-up. | Hub bursts and timer ticks previously overlapped hydrations. | Messaging has a deferred-promise test proving an event during hydration produces one serialized follow-up; the focused suite passes 18 tests and the full Web suite passes 857 tests. | Verified locally; deployed/live evidence remains separate |
-| RF-055 | Chat, room, and pod panels fetched full histories despite `since` support (`ChatSession.jsx:70-152`, `RoomSession.jsx:158-183`, `Messaging.jsx:179-223`). | Payload, parsing, allocation, and render costs grew with history size. | Shared cursor deltas with full-read fallback, deduplication, bounded histories, and stable message keys are implemented; focused and full Web tests pass. | Verified locally; live browser evidence remains separate |
-| RF-056 | Web polling stopped timers but could not abort callback requests; dashboard mutations and Search missing-status checks only set cancellation flags. | Route changes still consumed server work and repeated status requests could overlap. | Chat, room, and pod history reads now propagate `AbortSignal` and use per-resource in-flight gates; unmount/abort tests and the full Web suite pass. | Verified locally; unrelated dashboard/Search cancellation remains outside this slice |
-| RF-057 | Dashboard health state retains the last successful response during a transient refresh failure; `App.tsx` now keeps routing usable and surfaces a distinct degraded-connection alert. | The previous implementation replaced a usable last-known-good view with the initial connection screen on any refresh error. | Dashboard App success-then-failure regression, type-check, lint, and full suite pass. | Verified locally; external browser/device evidence remains separate |
+| RF-051 | `web/src/components/App.jsx:823-935` now uses scalar activity endpoints, short-circuits room/message routes, and pauses the navigation timer while hidden. | Navigation previously could fan out hundreds of requests and duplicate room/chat work. | App tests cover route exclusion, hidden-tab pause/resume, and one refresh per source after visibility returns. A current-build browser run against the live test API observed one chat-activity and one room-activity GET while visible, zero during 10.6 seconds hidden, and one of each after resume; all responses were 200. See `benchmarks/artifacts/20260929-rf051-rf053-rf054-rf055-rf056-live-browser.md`. | Verified locally, against the live test API, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
+| RF-052 | `dashboard/src/hooks/useFetch.ts:66-75,130-141` now coalesces active requests, schedules only after settlement, pauses/resumes on visibility, and clears a pending timeout when a manual refresh starts. | Slow requests previously could be perpetually aborted and background tabs churned requests; manual refresh could also leave a duplicate poll scheduled. | Dedicated hook coverage exercises slow, hidden, manual, and unmount paths; the full 52-test dashboard suite, type-check, lint, production build, and bundle-budget gate pass. A regression proves an already queued timeout is canceled when the tab becomes hidden and one poll fires on resume. On kspls0, hidden state produced no health/stats requests for longer than one interval; visibility resume produced exactly one request for each. | Verified locally, on kspls0, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
+| RF-053 | `web/src/components/Shared/Footer.jsx:101-142` polls every 2 seconds and invokes a six-request stats fan-out also used by Network every 5 seconds. The current batch adds a 2-second in-flight/short-TTL cache around the shared stats helper and skips the native poller entirely for the legacy footer. | Global telemetry previously created redundant server/browser work, including in legacy profiles. | Footer regressions and the full Web suite pass. In a current-build browser against the live test API, mesh transport and transfer speeds each returned 3 times in 5.2 seconds visible, zero times over 10.6 seconds hidden, and once after resume; all measured responses were 200. See `benchmarks/artifacts/20260929-rf051-rf053-rf054-rf055-rf056-live-browser.md`. | Verified locally, against the live test API, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
+| RF-054 | Messaging/Rooms event callbacks now pass through a one-second workspace refresh scheduler; active hydrations remain serialized, and event timers are canceled on unmount. | Hub event bursts previously could launch repeated full workspace reads even after each quick hydration completed. | A 50-event local regression burst coalesces to one follow-up; an unmount regression confirms the scheduled refresh is canceled. The full Web suite passes 962 tests. A current-build browser delivered 25 synthetic message events and 25 synthetic room events while reading the live test API; it made exactly one initial workspace read and one follow-up per endpoint with no API writes. The event-burst fix is covered by `release-notes/20260929-web-messaging-event-coalescing.md`; live evidence is in `benchmarks/artifacts/20260929-rf051-rf053-rf054-rf055-rf056-live-browser.md`. | Verified locally, against the live test API, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
+| RF-055 | Chat, room, and pod panels fetched full histories despite `since` support (`ChatSession.jsx:70-152`, `RoomSession.jsx:158-183`, `Messaging.jsx:179-223`). | Payload, parsing, allocation, and render costs grew with history size. | Shared cursor deltas with full-read fallback, deduplication, bounded histories, and stable message keys are implemented. In a read-only current-build browser, an initial 200 conversation read contained a usable cursor and the next read carried `since` and returned 200. No message body or conversation name was retained. Full Web suite: 962 tests. Evidence: `benchmarks/artifacts/20260929-rf051-rf053-rf054-rf055-rf056-live-browser.md`. | Verified locally, against the live test API, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
+| RF-056 | Web polling stopped timers but could not abort callback requests; dashboard mutations and Search missing-status checks only set cancellation flags. | Route changes still consumed server work and repeated status requests could overlap. | Chat, room, and pod history reads propagate `AbortSignal` and use per-resource in-flight gates; Search detail status checks now forward `AbortSignal` through the API client; dashboard webhook, database, and configuration mutations abort on unmount and suppress aborted results. A current-build browser confirmed a pending chat history GET failed with `net::ERR_ABORTED` after SPA navigation. Two unread acknowledgements were blocked in the browser before reaching the daemon; no API writes were forwarded. Evidence: `benchmarks/artifacts/20260929-rf051-rf053-rf054-rf055-rf056-live-browser.md`. | Verified locally, against the live test API, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
+| RF-057 | Dashboard health state retains the last successful response during a transient refresh failure; `App.tsx` now keeps routing usable and surfaces a distinct degraded-connection alert. | The previous implementation replaced a usable last-known-good view with the initial connection screen on any refresh error. | The Dashboard App success-then-failure regression, type-check, lint, and full suite pass. On kspls0, two controlled health 503 responses preserved the last known-good view and showed the degraded-connection alert. | Verified locally, on kspls0, and on GitHub CI run 36613453093 plus GitLab pipeline 162 (source 69cf4141). |
 | RF-058 | App navigation still sets state when flags are unchanged; render mutates title/classes; MediaCore and Integrations remain multi-thousand-line ownership boundaries. | Shell updates rerender broad trees and large workflows remain hard to profile/change. | Navigation skips unchanged activity state, and title/theme DOM synchronization runs in lifecycle methods. Profiler evidence led to memoized message-search and external-ID resolver panels, then Batch 300 moved PodCore DHT Publishing state, actions, and UI into a memoized local-state panel. Its 20-update JSDOM profile improved from 9.425 ms median/13.968 ms p95 to 1.026 ms/1.167 ms; the same measurement passed in the focused MediaCore suite (18 tests), and the Web build plus targeted lint pass. The MediaCore composition file fell from 8,547 to 8,192 lines. The last recorded full Web suite passed 876 tests; it was not rerun for Batch 300. Batch 301 extracted Pod Membership Management state, actions, and UI into `PodMembershipManagementPanel.jsx`, retaining the existing shared verification loading flag through a parent prop. Its 20-update JSDOM profile improved from 9.308 ms median/17.579 ms p95 to 1.533 ms/1.909 ms. The focused MediaCore suite passes 19 tests, and the Web build, targeted lint, and diff checks pass. The composition file is now 7,676 lines. Batch 302 extracted Pod Discovery state, actions, and UI into `PodDiscoveryPanel.jsx`. Its 20-update JSDOM profile improved from 8.254 ms median/16.453 ms p95 to 2.033 ms/2.626 ms. The repeated focused MediaCore run passes 20 tests; the Web build, targeted lint, and diff checks pass. The composition file is now 7,112 lines. Batch 303 extracted Pod Join/Leave state, actions, and UI into `PodJoinLeavePanel.jsx`. Its two baseline runs measured 8.650–9.208 ms median (one run had a JSDOM stall affecting p95); after extraction it measured 1.415 ms median/1.854 ms p95. All 21 focused MediaCore tests pass; the Web build, targeted lint, and diff checks pass. The composition file is now 6,734 lines. Batch 304 extracted Pod Message Routing into `PodMessageRoutingPanel.jsx` and its duplicated search-index/vacuum controls into shared `PodMessageMaintenanceActions.jsx`. The 20-update JSDOM profile improved from 8.088 ms median/13.211 ms p95 to 1.361 ms/1.723 ms. All 22 focused MediaCore tests pass; the Web build, targeted lint, and diff checks pass. The composition file is now 6,266 lines. Batch 305 moved Pod Message Backfill state, validation/actions, and last-seen timestamp projection into `PodMessageBackfillPanel.jsx`. Its 20-update JSDOM profile improved from 7.433 ms median/13.452 ms p95 to 0.596 ms/0.923 ms. All 23 focused MediaCore tests pass; the Web build, targeted lint, and diff checks pass. The composition file is now 5,992 lines. Batch 306 moved Pod Channel Management state, actions, current-pod projection, and UI into `PodChannelManagementPanel.jsx`. Its stable 20-update JSDOM profile improved from 7.813 ms median/13.184 ms p95 to 0.615 ms/0.817 ms; a second baseline run had an environment stall and is recorded in the artifact. All 24 focused MediaCore tests pass; the Web build, targeted lint, and diff checks pass. The composition file is now 5,649 lines. Batch 307 moved Pod Content Linking state, actions, and UI into `PodContentLinkingPanel.jsx`; the shared `contentId` remains in the parent because Content Registry clears it after registration. Its 20-update JSDOM profile improved from 7.040 ms median/14.013 ms p95 to 0.548 ms/0.801 ms. All 25 focused MediaCore tests pass; the Web build, targeted lint, and diff checks pass. The composition file is now 5,346 lines. Batch 308 extracted Pod Opinion Management and aggregation into `PodOpinionsPanel.jsx`; its 20-update JSDOM profile improved from 7.002 ms median/16.247 ms p95 to 1.149 ms/1.493 ms. All 26 focused MediaCore tests, the Web production build, targeted ESLint, and diff checks pass, and the composition file is now 4,527 lines. Batch 309 extracted Pod Message Signing into `PodMessageSigningPanel.jsx`; shared verification input and result state remain parent-owned because other verification workflows use them. Its 20-update profile improved from 6.138 ms median/14.396 ms p95 to 1.068 ms/1.468 ms. All 27 focused MediaCore tests and the Web build, targeted ESLint, and diff checks pass. Batch 310 extracted the MediaCore statistics dashboard state, actions, and cards into `MediaCoreStatisticsDashboardPanel.jsx`. Two baseline profiles measured 5.530–5.599 ms median, with JSDOM stalls raising p95 to 66.517–66.832 ms; after extraction it measured 1.969 ms median/2.468 ms p95. All 28 focused MediaCore tests, the Web build, targeted ESLint, and diff checks pass. The composition root is now 3,469 lines. Batch 311 split Content Descriptor Publishing and Retrieval into local-state panels under a 14-line `MediaCoreDescriptorManagementPanel.jsx` composition component. The 20-update JSDOM input profile improved from baseline medians of 11.344–11.689 ms (p95 included repeatable stalls at 42.541–43.528 ms) to 1.969 ms median/2.061 ms p95. All 29 focused MediaCore tests, the Web build, targeted ESLint, and diff checks pass. The composition root is now 2,461 lines. Batch 312 extracted the ContentID Registry and Content Graph workflows into `MediaCoreContentRegistryPanel.jsx` and `MediaCoreContentGraphPanel.jsx`. The registry panel keeps registration form state local while the parent owns its polled summary and the ContentID shared with Pod linking. The two 20-update input profiles improved from 4.906/22.814 ms to 1.776/2.237 ms and from 5.523/23.195 ms to 1.196/1.502 ms median/p95. All 31 focused MediaCore tests, the Web build, targeted ESLint, and diff checks pass. The root is now 1,851 lines. Batch 313 extracted Metadata Portability state, conflict-strategy loading, actions, and cards into `MediaCoreMetadataPortabilityPanel.jsx`. Its profile improved from two variable baselines (5.827–7.502 ms median and 14.822–15.078 ms p95, with event-loop stalls) to 1.124/1.343 ms median/p95. The focused 32-test suite passed on its final run; the first full run had an unrelated Pod Opinions refresh failure, which passed alone and on the full rerun. The Web build, targeted ESLint, and diff checks pass. The root is now 1,535 lines. Batch 314 moved Pod Membership Verification state, actions, and UI into `PodMembershipVerificationPanel.jsx`. The existing loading flag remains shared with Pod Membership Management, and the message input remains shared with Message Signing. Its profile moved from two noisy baselines at 9.419–10.753 ms median and 10.707–12.026 ms p95 to 1.378/1.647 ms. All 33 focused MediaCore tests, the Web build, targeted ESLint, and diff checks pass. The composition root is now 1,177 lines. Batch 315 moved Pod Message Storage state, stats/cleanup actions, retention UI, and its existing search and maintenance panels into `PodMessageStoragePanel.jsx`. Its 20-action profile improved from two noisy baselines (7.426/7.779 ms and 8.518/9.123 ms median/p95) to 0.442/0.696 ms. The final focused 34-test suite passes; one Pod Opinions statistics refresh assertion failed on the first full run, then passed alone and in the full rerun. The Web build, targeted ESLint, and diff checks pass. The composition root is now 1,062 lines. Batch 316 moved audio/image hashing state, actions, and cards into `MediaCoreContentHashingPanel.jsx`. Supported-algorithm metadata stays parent-owned because its summary is rendered after other workflows; the hashing panel receives it as a stable prop. Its profile improved from two baselines (6.531–6.739 ms median and 7.305–8.212 ms p95) to 1.037/1.144 ms. All 35 focused MediaCore tests, the Web build, targeted ESLint, and diff checks pass. The composition root is now 820 lines. Batch 317 moved raw hash comparison, fuzzy content search, perceptual ContentID comparison, and text similarity state/actions/cards into `MediaCoreSimilarityAnalysisPanel.jsx`. Its isolated hash-input profile improved from two baselines (4.932–5.719 ms median and 5.204–5.995 ms p95) to 1.909/2.335 ms; a full-suite profile sample was lower at 0.550/0.723 ms, showing JSDOM timing variance. All 36 focused MediaCore tests, the Web build, targeted ESLint, and diff checks pass. The root remains 369 lines. Batch 318 split the 518-line similarity owner into a 16-line composer plus four independent memoized owners for raw hash comparison, fuzzy content matching, perceptual comparison, and text similarity (144–175 lines each). The hash-input profile improved from 1.909/2.335 ms to 0.558/0.670 ms median/p95 after the finer split. The final full MediaCore suite passes all 36 tests; the Web build, targeted ESLint, and diff checks pass. MediaCore ownership extraction is complete. Batch 319 moved shared option/form/async helpers to `integrationsShared.jsx` and the Spotify, YouTube, and Last.fm settings workflow to `SourceFeedIntegrationsPanel.jsx`. The Integrations composer fell from 3,915 to 3,264 lines. Spotify client-ID input profiling remained stable (before 1.651–1.657 ms median / 1.859–1.937 ms p95; after 1.626/2.023 ms), consistent with its state already being local to a React panel before the file split. All 18 focused Integrations tests, the Web build, targeted ESLint, and diff checks pass. Batch 320 moved Notification state, apply/save actions, and UI into `NotificationIntegrationsPanel.jsx`; the composition root fell from 3,264 to 2,628 lines. Its 20-update JSDOM profile stayed within the observed range: two before runs measured 2.099/2.870 ms and 2.121/2.840 ms median/p95; two after runs measured 2.210/2.858 ms and 2.243/3.109 ms. All 19 focused Integrations tests, the Web production build, targeted ESLint, and diff checks pass. Batch 321 moved Metadata and Servarr configuration form construction, state, actions, and UI into `MetadataSettingsPanel.jsx`; the root fell from 2,628 to 1,830 lines. The MusicBrainz user-agent input profile stayed within JSDOM variation (two before medians 3.007/2.908 ms, p95s 3.280/3.167; two after medians 2.964/3.003 ms, p95s 3.389/3.599). All 20 focused Integrations tests pass, with build, targeted ESLint, and diff checks. Batch 322 moved FTP encryption choices, form construction, and apply/save workflow into `FtpIntegrationPanel.jsx`; the root fell from 1,830 to 1,417 lines. Its profile overlapped the before range (two before runs at 1.478/1.751 ms and 1.396/1.720 ms median/p95; two after runs at 1.492/1.772 ms and 1.608/1.992 ms). All 21 focused Integrations tests, the build, targeted ESLint, and diff checks pass. Batch 323 moved the VPN readiness/status view into `VpnPanel.jsx`; the root fell from 1,417 to 1,235 lines. Its 20-update state-prop profile covers the full Integrations tree and stayed noisy: before medians were 6.521/6.698 ms with p95 12.599/14.397; after medians were 6.967/6.320 ms with p95 12.943/13.647. All 22 focused tests, the build, targeted ESLint, and diff checks pass. Batch 324 moved Lidarr live status, wanted sync, import history/retry, and manual import state/actions into `LidarrPanel.jsx`; the root fell from 1,235 to 884 lines. The import-directory profile kept similar medians (before 1.214/1.238 ms, after 1.206/1.228 ms) while p95 was lower in both after runs (1.329/1.404 ms versus 1.622/1.795 ms). All 23 focused Integrations tests, build, targeted ESLint, and diff checks pass. Batch 325 moved Media Server adapter readiness, path diagnostics, preview, and execution-contract state/actions/UI into `MediaServerPanel.jsx`; the root fell from 884 to 439 lines. Its profile overlapped the baseline (before medians 3.902/3.704 ms, p95 4.832/4.181; after medians 3.996/3.650, p95 5.000/4.227). All 24 focused tests, build, targeted ESLint, and diff checks pass. Batch 326 moved Servarr readiness checks, compatibility preview, copy, and wanted-sync actions into `ServarrReadinessPanel.jsx`; the root fell from 439 to 211 lines. Its prop-update profile remained within the broad baseline range (before medians 7.853/8.156 ms, p95 18.247/17.175; after medians 7.690/7.696, p95 17.994/16.682). All 25 focused tests, build, targeted ESLint, and diff checks pass. Batch 327 moved Federation Diagnostics async loading, error handling, state, and read-only posture UI into `FederationDiagnosticsPanel.jsx`. The Integrations root is now a 61-line composer, down from 3,915 lines. The diagnostics-load profile median was 0.924/0.896 ms before and 0.751/0.808 ms after; p95 varied from 1.367–1.538 ms before to 1.316–1.606 ms after. All 26 focused tests pass, including the now-awaited async notification success assertion; Integrations ESLint, Web build, and diff checks pass. MediaCore is 369 lines. RF-058 ownership extraction is complete. | Verified locally |
-| RF-059 | PlayerBar previously statically imported optional Visualizer/RustyMilk; System eagerly imported most tabs; dashboard eagerly imported all pages. The current batches lazy-load the visualizer and dashboard routes and load all remaining System panes by section. | Users previously paid parsing costs for optional features/routes. | The System entry chunk fell from 236.95 KiB to 9.17 KiB; Vite emits six section chunks plus independent AdminPolicies, Integrations, and MediaCore chunks. Initial JavaScript (1,084.68 KiB) and all-JavaScript gzip (593.07 KiB) pass their 1,150/600 KiB budgets. The route-switch regression and full Web suite (873 tests across 147 files) pass. The asset graph is retained in `benchmarks/artifacts/20260924-system-pane-asset-graph.md`; deployed-device evidence remains open. | In progress, deployed evidence open |
+| RF-059 | PlayerBar previously statically imported optional Visualizer/RustyMilk; System eagerly imported most tabs; dashboard eagerly imported all pages. The current batches lazy-load the visualizer and dashboard routes and load all remaining System panes by section. | Users previously paid parsing costs for optional features/routes. | The System entry chunk fell from 236.95 KiB to 9.17 KiB; Vite emits six section chunks plus independent AdminPolicies, Integrations, and MediaCore chunks. Current initial JavaScript (1,086.28 KiB) and all-JavaScript gzip (597.67 KiB) pass their 1,150/600 KiB budgets. The route-switch regression and full Web suite (873 tests across 147 files) pass. The asset graph is retained in `benchmarks/artifacts/20260924-system-pane-asset-graph.md`. After nonce metadata was decoupled from runtime-profile disclosure, the current kspls0 React build passed 30 desktop/mobile route views: all documents returned HTTP 200, nonces matched, and CSP/browser errors were zero. Under 150 ms latency, 1.6 Mbps download, and 4× CPU emulation, JavaScript transfer was 347,827 bytes (1,112,351 decoded) and DCL ranged from 2,769 to 3,159 ms. A matching asset returned gzip with `Vary: Accept-Encoding`; full evidence is in `benchmarks/artifacts/20260929-rf059-rf063-kspls0-deployed-gzip-accessibility.md`. | Verified locally and deployed on kspls0 |
 | RF-060 | Browse tree repeatedly filtered full directory lists and compared selection by set size; normalized name handling differed. The current batch builds parent lookups, memoizes sanitized trees, compares set membership, and tests wide/deep/file-heavy malformed fixtures plus same-sized replacements. | Large shares previously stalled and same-size replacement trees could retain stale selection. | Browse fixture, replacement-tree, and full Web tests pass. | Verified locally |
-| RF-061 | Shared semantic wrappers used clickable divs/icons without keyboard/accessible-name semantics; dashboard navigation lacked `aria-current`. The current batch adds keyboard activation, icon roles, active navigation state, explicit browse control names, and axe checks for representative Web/dashboard shells. | Keyboard and screen-reader users previously missed controls and context. | Semantic, Browse, Sidebar, and axe tests pass; deployed-browser/device coverage remains separate. | Verified locally; deployed evidence separate |
+| RF-061 | Shared semantic wrappers used clickable divs/icons without keyboard/accessible-name semantics; dashboard navigation lacked `aria-current`. The current batch adds keyboard activation, icon roles, active navigation state, explicit browse control names, and axe checks for representative Web/dashboard shells. | Keyboard and screen-reader users previously missed controls and context. | Semantic, Browse, Sidebar, and axe tests pass. A deployed kspls0 axe audit covered all 15 maintained React routes at desktop and mobile sizes (30 views) with zero violations; the current Dashboard audit covered all six routes at both sizes (12 views), also with zero violations. Evidence: [Web axe results](../../benchmarks/artifacts/20260929-rf063-kspls0-a11y-30-views.json) and [Dashboard audit](../../benchmarks/artifacts/20260929-rf049-rf052-rf057-rf061-kspls0-dashboard.md). | Verified locally and deployed on kspls0; all 30 Web and 12 Dashboard views had zero axe violations |
 | RF-062 | Web mounted `App` without an error boundary; route try/catch could not catch descendant render failures. The current batch adds a reloadable render fallback. | One render error previously could blank the entire UI. | ErrorBoundary test and full Web tests pass. | Verified |
-| RF-063 | Web audit records responses but not request-count/cadence/accessibility budgets. The current batch preserves per-asset budgets, adds deterministic aggregate initial-JS and gzip budgets for Web/dashboard, adds local axe checks for representative shells, and records Rust Web request-count/cadence budgets across 15 desktop/mobile route pairs. | Duplicate requests, hidden-tab churn, accessibility, and aggregate regressions previously could pass. | Web/dashboard aggregate budgets, representative axe checks, and Rust Web mock request-count/cadence budgets pass locally. The rebuilt Rust Web audit made 512 requests across 30 route views versus the 518-request baseline; the 200 ms repeated-endpoint floor passed, with Solid status repeating at 594.8–608.3 ms in the retained run. Full deployed accessibility and live-backend cadence evidence remain open. | In progress |
-| RF-064 | `AppContext.js` is active around the routed App; legacy `Pods.jsx` is not the `/pods` route; unused-symbol lint is disabled; dashboard still has separate context/prop ownership to review. | Dead modules and competing ownership patterns dilute refactor/test signal. | `docs/dev/web-ownership-inventory.md` records active versus deferred ownership, and `scripts/check-web-ownership-inventory.sh` verifies the route/context/import boundary. Legacy `Pods.jsx` deletion remains explicitly deferred. | Verified locally, deletion deferred |
+| RF-063 | Web audit records responses but not request-count/cadence/accessibility budgets. The current batch preserves per-asset budgets, adds deterministic aggregate initial-JS and gzip budgets for Web/dashboard, adds local axe checks for representative shells, and records Rust Web request-count/cadence budgets across 15 desktop/mobile route pairs. | Duplicate requests, hidden-tab churn, accessibility, and aggregate regressions previously could pass. | Web/dashboard aggregate budgets, representative axe checks, and Rust Web mock request-count/cadence budgets pass locally. Hosted Live Parity run `36460398465` recorded all 30 views but exposed the wishlist budget missing one intentional post-action list refresh: desktop made 11 requests against a 10-request budget, with the repeated list request 812 ms apart. The budget now records 11 for that action path; the corrected full local audit passes all 30 views with zero errors; hosted run `36464045259` on `c02c77bc` also passed all views and retained the audit under [`live-parity-36464045259`](https://github.com/snapetech/slskr/actions/runs/36464045259/artifacts/10988987235). A separate isolated live-backend audit recorded 469 requests across 30 route views, with zero route-budget or sub-200 ms cadence violations; its strict exit was due only to protected YAML (403) and unconfigured Lidarr (503) responses. The sanitized evidence is `benchmarks/artifacts/20260927-rust-web-live-backend-cadence.md`. A fresh deployed axe audit on kspls0 then passed all 30 desktop/mobile route views with zero WCAG violations, nonce mismatches, CSP errors, or browser errors; the sanitized per-view results are in `benchmarks/artifacts/20260929-rf063-kspls0-a11y-30-views.json`. Current-source Live Parity run `36561787367` recorded 22 desktop requests against the 21-request `/collections` budget: a successful GET action was followed 725.1 ms later by an unnecessary route refresh. The native action now skips refresh after successful GET responses while retaining refresh after mutations and failed requests; the budget remains 21. Current-source Live Parity run `36565318189` on `12836668` passed both jobs; its audit records 30 views with zero errors and `/collections` desktop at 21/21 requests. The follow-up evidence is retained in `benchmarks/artifacts/20260929-rf063-successful-read-action.md`. See `benchmarks/artifacts/20260929-rf063-successful-read-action.md`. | Verified locally and on current-source Live Parity run 36565318189; prior 30-view deployed axe evidence retained |
+| RF-064 | `AppContext.js` is active around the routed App; `/pods` renders `Messaging.jsx`, while the 1,267-line legacy `Pods.jsx` and its 870-line-only `VpnGatewayConfig.jsx` had no production import; dashboard API context and page props were reviewed for single ownership. | Dead modules and competing ownership patterns dilute refactor/test signal. | `docs/dev/web-ownership-inventory.md` records active route and API ownership, and `scripts/check-web-ownership-inventory.sh` verifies the route/context/import boundary and absence of retired modules. The unreachable Pods route-shaped component, its test/style files, and its exclusively imported VPN gateway configuration module are removed; active Messaging coverage retains pod list/detail/message failures and cancellation. The independently tested PortForwarding compatibility import remains. | Verified locally, deployed 42-route audit passed, and GitHub CI run 36613453093 plus GitLab pipeline 162 passed (source 69cf4141). |
 | RF-065 | `LyricsPane.jsx:148-159` used both `timeupdate` and a 500 ms interval for the same position update. The current batch removes the duplicate timer and adds a regression test. | Continuous duplicate state checks previously ran while lyrics were visible. | Focused LyricsPane test passes; keep the full Web suite as proof. | Verified |
 
 ### P2/P3 Evidence And Gate Hygiene
 
 | ID | Evidence | Impact | Action and validation | Status |
 | --- | --- | --- | --- | --- |
-| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest tests pass; serialized E2E passes with static fixtures; optional remote media remains unavailable in this Linux environment. | In progress, optional-media gap |
-| RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | Local checks pass; hosted GitHub/GitLab runner results remain external evidence. | In progress, local/CI wiring |
+| RF-066 | Fixture fetchers previously recorded observed hashes instead of verifying expected values. The current batch adds a manifest checker, checksum/size enforcement, corruption regression, and one root fetch wrapper. | Remote fixture drift previously could silently change E2E/share behavior. | Fixture manifest/corruption tests pass; serialized E2E passes with static fixtures. Repository discovery and media file-presence checks are corrected and tested. Genuine Sintel and Aria downloads are pinned and verified. Five real sharing cases and two range/seek cases pass, including decoded H.264 browser playback. Recipient backfill now uses authenticated, certificate-pinned MeshContent on the shared native peer port; grant/recipient/permission and file/range limits are enforced, downloaded bytes are SHA-256 verified before no-overwrite publication, and a real three-peer E2E verifies the exact downloaded fixture. Per-grant ticketed stream admission now has a focused local regression proving a second stream is rejected at limit one, another grant retains independent capacity, and dropping a lease releases capacity. On 2026-09-29, a temporary kspls0 replacement using test account 4 returned HTTP health 200 and logged successful Soulseek login; peer TCP/UDP shared port 44508 while HTTP stayed loopback-only on 5030, with no HTTPS 5031 or media mounts. The original slskdN service was restored healthy. The sanitized receipt is `benchmarks/artifacts/20260929-rf006-rf066-kspls0-temporary-slskr-swap.md`. The startup receipt documents port reuse only; later dated receipts below close deployed recipient backfill and owner stream saturation. GitLab pipeline 148 and GitHub CI run 36566959004 both passed on 8265032a; Live Parity run 36565318189 passed on 12836668, which has the same product source because 8265032a adds the bounded listener stress test and evidence only. The temporary kspls0 replacement, authenticated login, shared-port binding, recipient backfill, owner stream saturation, and restoration are retained in `benchmarks/artifacts/20260929-rf006-rf066-kspls0-temporary-slskr-swap.md`. | Verified on GitHub CI run 36613453093, GitLab pipeline 162, and kspls0; the current-source RF-006 shutdown proof is also retained. |
+| RF-067 | GitHub and GitLab test jobs now run the bounded docs-freshness and active-plan-freshness checks plus their negative tests before the Rust matrix. | Scope and maintained-guidance regressions are now found during review instead of only at release. | GitHub and GitLab test jobs execute docs freshness and active-plan freshness checks plus negative regressions before the Rust matrix. The GitLab recovery investigation and object-storage findings remain in `benchmarks/artifacts/20260928-gitlab-postreceive-pipeline-status.md` and `benchmarks/artifacts/20260929-gitlab-object-storage-recovery.md`; the earlier no-pipeline observations are historical and were superseded when default-branch scheduling and mirror promotion were restored. Current-source GitLab pipeline 148 and GitHub CI run 36566959004 both passed the docs-freshness and active-plan-freshness checks, including their negative regressions; all platform and package/deployment jobs passed on 8265032a. | Verified on current-source GitLab pipeline 148 and full GitHub CI run 36566959004 |
 | RF-068 | `benchmarks/README.md` and `docs/performance-analysis.md` describe manual one-off scripts without stored JSON baselines, thresholds, or a CI/nightly target. | Performance drift has no reproducible regression signal. | The benchmark docs now explicitly classify the commands as diagnostic-only and require retained JSON plus environment metadata for release evidence. | Verified locally, diagnostic-only |
 | RF-069 | `web/package.json` exposes RustyMilk compatibility/performance/smoke scripts, but no workflow invokes them while `slskr-web` tracks the upstream main branch. | Web dependency drift can pass without compatibility evidence. | The performance note explicitly classifies these scripts as diagnostic-only; a scheduled threshold job remains intentionally absent. | Verified locally, diagnostic-only |
-| RF-070 | Council count files had no scan date/commit and checks regenerated only when a report was missing. | Stale counts could pass active-backlog checks. | `run-council-scan.sh` stamps the report; `check-council-freshness.sh` validates date and full source commit across the report, inventory, and backlog, with a negative test and all-phases/remediation wiring. | Verified locally |
-| RF-071 | The audit PASS matrix records a SHA but not toolchain/node/npm versions, lock hashes, or retained artifact links. | A clean checkout cannot reproduce the evidence exactly. | `scripts/collect-reproducibility-metadata.py` records the source SHA, dirty-worktree state, required tool versions, lock/config SHA-256 values, and optional artifact hashes; the remediation baseline validates a current local snapshot. Retained hosted artifact links remain external. | In progress, local metadata gate |
-| RF-072 | `docs/live-interop-test-matrix.md:39,119` referenced absent `web/e2e/live-surfaces.spec.ts`; the current batch updates it to maintained specs and keeps historical results explicitly dated. | Operators previously could not reproduce the stated live matrix. | Docs freshness passes and the maintained Playwright suite runs locally; add retained live artifact links before marking verified. | In progress |
-| RF-073 | `scripts/run-release-gate.sh:69-74` makes the slskd API compatibility smoke opt-in; `docs/release.md:41-63` intentionally assigns that smoke to scheduled/manual Live Parity. The current batch now labels the skipped local check as a certification artifact requirement. | This is a policy boundary, not a code defect, but release certification could be misread if artifact freshness was not visible. | Keep the opt-in behavior and require a retained scheduled artifact for certification. | In progress, policy |
+| RF-070 | Council count files had no scan date/commit and checks regenerated only when a report was missing. | Stale counts could pass active-backlog checks. | `run-council-scan.sh` stamps the report; `check-council-freshness.sh` validates date and the SHA-256 digest of tracked scan inputs across the report, inventory, and backlog, with a negative test and all-phases/remediation wiring. Generated records are excluded so committing them cannot invalidate their own stamp, including on shallow CI checkouts. | Verified locally |
+| RF-071 | The audit PASS matrix records a SHA but not toolchain/node/npm versions, lock hashes, or retained artifact links. | A clean checkout cannot reproduce the evidence exactly. | The collector validates source/run identity, observed tool versions, required lock/config and artifact hashes, and worktree state. The GitHub Rust gate now retains metadata, coverage summary, and the Web entry point for 30 days with a direct job-summary link. Twelve regressions and local policy gates pass. The successful Rust job at `37f2e049` retained the artifact; downloaded metadata, artifact hashes, and all seven lock/three configuration hashes match that exact clean checkout. | Verified main-gate hosted retention |
+| RF-072 | `docs/live-interop-test-matrix.md:39,119` referenced absent `web/e2e/live-surfaces.spec.ts`; the current batch updates it to maintained specs and keeps historical results explicitly dated. | Operators previously could not reproduce the stated live matrix. | Docs freshness and maintained Playwright pass locally. The 2026-09-27 local matrix passed four login, one local-peer, and two social probes; its sanitized result and raw TSV hashes are in `benchmarks/artifacts/20260927-live-interop-summary.md`. On 2026-09-28, the credentialed matrix passed locally and on hosted Live Parity after validating eight unique test accounts. Hosted run [`36499213873`](https://github.com/snapetech/slskr/actions/runs/36499213873) passed both the Rust UI/API job and the credentialed public interop job; the retained interop and full parity artifacts are linked in `benchmarks/artifacts/20260928-live-interop-hosted-summary.md`. | Verified locally and hosted on current source; run 36535159086 passed |
+| RF-073 | `scripts/run-release-gate.sh:69-74` makes the slskd API compatibility smoke opt-in; `docs/release.md:41-63` intentionally assigns that smoke to scheduled/manual Live Parity. The current batch labels the skipped local check as a certification artifact requirement. | This is a policy boundary, not a code defect, but release certification could be misread if artifact freshness was not visible. | Manual run `36456533118` retained the UI audit artifact but exposed a stale cached Python target that hid `SlskdClient`; a fresh local reproduction confirmed the target collision. The smoke now installs its pinned client into unique temporary state, clears any stale summary at start, isolates config/state, keeps generated private keys outside artifacts, disables its unused HTTPS listener, and uses an available loopback port for the shared native peer TCP/UDP listener. The local smoke passes all 91 API calls. Manual Live Parity run [`36464045259`](https://github.com/snapetech/slskr/actions/runs/36464045259) passed the corrected UI audit and API smoke on `c02c77bc`; retained artifact [`live-parity-36464045259`](https://github.com/snapetech/slskr/actions/runs/36464045259/artifacts/10988987235) contains the passing 91-call summary. Its credentialed public interop job skipped because `SLSKR_LIVE_INTEROP_ENV` is absent; that matrix proof remains open under RF-072. | Verified hosted API smoke; credentialed interop tracked in RF-072 |
 
 ## Continuation Evidence (2026-09-21)
 
@@ -244,10 +245,12 @@ aggregate gzip; the dashboard measured 242.02 KiB initial JavaScript and 87.84
 KiB gzip. These are local release-gate results, not hosted-runner or deployed
 browser claims.
 
-Remaining evidence gaps are clean GitLab/Windows/Chocolatey runner results,
-optional media fixtures, retained external live-parity artifacts, a complete
-shared detached-task registry, and the older protocol/lock/search-delta/
-benchmark findings listed in the tables above.
+At the close of the 2026-09-22 gate, gaps included clean
+GitLab/Windows/Chocolatey runner results, optional media fixtures, retained
+external live-parity artifacts, detached-task ownership, and older
+protocol/lock/search-delta/benchmark evidence. This is a historical snapshot,
+not the current status: dated continuations below record later closures, while
+the table above remains authoritative for evidence that is still separate.
 
 ## Continuation Evidence — managed daemon shutdown (2026-09-22)
 
@@ -1462,12 +1465,15 @@ default would change the current-parity endpoint behavior.
 
 The related [slskdN Type-1 design note](https://github.com/snapetech/slskdN/blob/main/docs/soulseek-type1-obfuscation.md)
 describes the same shared-port default and a nonzero dedicated-listener option.
-The fixture proves that local parsing cannot tell sender intent in the
-dual-valid case. RF-001 remains in progress pending an explicit compatibility
-decision to retain the current shared default or change the advertised port;
-no parser-only change can resolve the collision while preserving the current
-wire behavior. This is internal audit evidence and does not change release
-behavior.
+The user selected the single-port policy. The shared demultiplexer now rejects
+a prefix whose plain and obfuscated forms both advertise known init forms,
+before it can return the shorter frame and desynchronize the stream. This
+rejects the exact dual-valid legacy sequence because sender intent is absent
+from the wire bytes. A coordinated wire discriminator would be required to
+accept that sequence safely. Ordinary plain and obfuscated handshakes retain
+the shared port; the random obfuscated writer avoids plain-length keys. All 29
+listener tests pass, including a TCP collision test. Extension and nested-form
+collisions remain a separate legacy framing limit under the current parser.
 
 ## RF-024 Pod Membership Ownership Split (Batch 88, 2026-09-24)
 
@@ -5673,3 +5679,2568 @@ The full daemon library run found a deterministic split-router regression: an un
 Scan production Rust sources for calls to the 92 mutating `DatabaseManager` methods and all checked persistence helpers, then inspect paths without a nearby persistence turn. Helper bodies delegate turn ownership to callers. Startup share-index, stale-grant, token, and HashDb writes occur before app state publication; the two wishlist scheduler saves run in the owning session loop; transfer projection writes use monotonic revision checks; PodCore's `vacuum` call is a different store. Lidarr wanted sync holds its Wishlist turn through the page write despite the call lying farther than the scan window from acquisition. The paired Wishlist/Search transaction has exactly three production callers, and each acquires Wishlist then Search before mutation and commit.
 
 The full 640-test daemon library suite passes, including the direct/batch route regression; the focused Wishlist contention and Lidarr failure tests recorded in Batches 362-373 pass. The full-controller/legacy feature compile and scoped Clippy with `-D clippy::await_holding_lock` pass. This closes the local write-ordering and held-guard audit for RF-002; the existing release-note fragments cover its user-facing fixes.
+
+## Live Parity Artifact Scope (2026-09-27)
+
+The manual/scheduled Live Parity workflow placed its temporary `live.env` in
+`target/live-interop/` and previously uploaded that entire directory. Its upload
+now selects only `*.tsv`, and the workflow policy check rejects the broad glob.
+All 12 accessible historical `credentialed-live-interop-*` artifacts were
+inspected through the GitHub API: each contains only
+`credentialed-live-interop.tsv` with status `skipped`. No accessible artifact
+contains `live.env`; the credentialed hosted run remains unproven because the
+GitHub secret has not been configured. The narrowed upload has a validated
+operator release note.
+
+## RF-024 Tracked-Source Inventory Correction (2026-09-27)
+
+The earlier closure scan covered non-test daemon Rust and Web/dashboard JavaScript,
+not every tracked source file. A complete `git ls-files` line inventory found
+`crates/slskr/src/controller_tests.rs` at 149,731 lines,
+`crates/slskr-web/src/lib.rs` at 22,436 lines,
+`scripts/check-controller-options-differential.sh` at 9,481 lines,
+`crates/slskr/src/focused_controller_tests.rs` at 7,209 lines, and
+`scripts/audit-parity-manifest.py` at 6,063 lines. RF-024 is reopened to split
+these boundaries by reviewable ownership while preserving the existing code
+and validating the affected feature and policy gates. The prior daemon and
+JavaScript closure evidence remains valid for its stated scope.
+
+The 2026-09-27 manually triggered Live Parity workflow run
+[36339374480](https://github.com/snapetech/slskr/actions/runs/36339374480)
+completed successfully at `5d497f55`. Its Rust UI and slskd API parity job
+passed and retained a 298-file artifact. The credentialed live-interoperability
+job produced a skipped TSV because the hosted secret is not configured; this
+does not close RF-072 or the scheduled-artifact requirement in RF-073.
+
+The first broader RF-024 pass split `slskr-web/src/lib.rs` into seven bounded
+files (largest 5,822 lines), preserving an exact 881,329-byte reconstruction
+before formatting. Host and WASM checks, all 86 crate tests, and the changed-file
+formatter pass. The tests now inspect the React route, navigation, and header
+owners after their earlier split. `controller_tests.rs` was then split into 29
+test segments (largest 5,855 lines), with an exact 5,310,963-byte
+reconstruction before formatting. Fixture paths were adjusted for the new
+directory. The full-controller and legacy-route test target compiles, and six
+source-owner policy guards, module hygiene, shell hygiene, and formatting pass.
+The segments still share one Rust module through `include!`, so test ownership
+is not yet isolated; RF-024 remains in progress.
+
+`focused_controller_tests.rs` is now three included segments of at most 2,543
+lines. The pre-format extraction reconstructed all 252,983 original bytes.
+Its relative fixture references were adjusted, the runtime boundary guard and
+formatter pass, and the default daemon library suite passes all 642 tests.
+
+The 9,481-line controller-options differential shell script is now a 539-line
+entry point and six sourced parts under 1,900 lines each. The extraction
+reconstructed all 457,048 original bytes. Shell syntax/hygiene checks include
+the new parts, and the complete differential matrix passed for both frozen
+slskd and slskdN targets in the `6163c7f8` release gate and the later
+`c6eedb8b` gate retry.
+
+The 6,063-line parity audit Python entry point is now 3,759 lines. Its seven
+frozen-source exception constants/functions moved into the 2,336-line
+`scripts/parity_not_applicable.py` module, with each extracted AST item checked
+byte-for-byte against the committed source. Audit tooling, CLI import, and diff
+checks pass. This is an actual module boundary; the Rust test segment splits
+above remain flat-scope interim work.
+
+## Council Scan Provenance And Scalar Boundary Review (2026-09-27)
+
+Council freshness previously required the stamp to equal `HEAD`; committing a
+refreshed stamp immediately made it stale. The source stamp now hashes the
+tracked files read by the scan and excludes its generated inventory/backlog.
+The protocol scalar scan now includes extracted production daemon modules and
+excludes controller test segments. It reports 305 candidate lines: 24 `u8`,
+21 `u16`, 42 `u32`, 184 `u64` casts, with the balance mainly checked
+length conversions. Review of the narrowing candidates and suspicious signed
+conversions found four concrete wrapping paths. Oversized share media values
+now saturate; distributed and wishlist scheduler SQLite values reject invalid
+depths/indices/intervals; persisted user timestamps clamp negative values.
+Focused regressions pass, as do the protocol taint lens and adversarial corpus.
+Council candidate counts remain heuristic line counts, not a proof that every
+cast is dangerous.
+
+## Release Gate And Hosted Packaging Follow-up (2026-09-27)
+
+The complete local release gate passed at `6163c7f8`, including the frozen
+controller-options matrix, workspace Rust tests, security scans, Web tests,
+dashboard checks, SDK gates, and artifact checks. GitHub Rust CI and all Linux
+platform jobs and all CodeQL language jobs also passed at `c6eedb8b`.
+
+Hosted macOS arm64 and x64 archive jobs passed at `c6eedb8b` after replacing
+GNU-specific tar flags with a sorted Python tar writer. Hosted Windows x64
+found two separate ZIP packaging errors: the staging timestamp call used an
+unsupported `follow_symlinks` argument, and `ZipInfo` received a `datetime`
+instead of its required six-field tuple. Both are corrected in the current
+batch. With a fixed `SOURCE_DATE_EPOCH`, two local tar builds have identical
+SHA-256 `89a5be824e5600b51ac6d774cff07342decfb7cde28446ccb27a9fa797b58e6d`;
+the release artifact verifier accepts all 115 normalized entries. Executing
+the exact ZIP writer block twice against the same staged tree produced
+identical SHA-256 `6e1e2d6ddfe082906077158451b7ac2eaf286292a9707ebd6fa1202525f2e307`;
+the artifact verifier accepted its 110 entries. Hosted Windows proof is still
+pending at this source revision.
+
+An exact-tip local gate at `c6eedb8b` had one frozen slskdN regex-protocol
+startup bind failure. That isolated differential passed for both frozen targets
+on retry, and the subsequent full matrix passed. The same gate later had one
+intermittent MediaCore opinion test failure; that test and its 36-test file
+passed separately. The test suite now resets queued mock responses before each
+case, and the complete Web suite passes 905 tests across 148 files. The next
+full gate and hosted CI run will validate the combined packaging and test fixes.
+
+The subsequent local gate completed successfully; its log is
+`target/rf-release-gate-339e6812.log`. It began at `339e6812`, and the workflow
+artifact reuse and Python protocol inventory split were committed while it ran,
+so it is working-tree evidence rather than immutable exact-tip certification.
+Semgrep reported zero findings from 710 rules across 2,160 files; Trivy, Rust,
+Web, dashboard, and the complete frozen options matrix passed. The later
+single-port TLS classification change has its focused listener proof below.
+
+Hosted Windows archive construction, archive verification, and the packaged
+binary smoke all passed at `339e6812` in GitHub CI run
+[36354468661](https://github.com/snapetech/slskr/actions/runs/36354468661).
+The macOS and all Linux platform jobs also passed at that revision. The overall
+workflow and downstream package-surface job completed successfully, including
+Debian/RPM packages for both architectures and deployment/package policy checks.
+
+## RF-034 Shared Web Asset Build (2026-09-27)
+
+The seven platform CI jobs previously ran `npm ci` and built the same production
+Web assets independently. CI now has one `web-assets` job that installs, builds,
+verifies, and uploads `web/build`. Each platform job downloads that artifact
+before its release archive build, while retaining its platform-specific binary
+build and archive verification. The workflow passes actionlint and the release
+workflow policy check locally. The shared-artifact path still needs hosted
+matrix proof; RF-034 remains in progress until that run completes.
+
+## RF-024 Protocol Parity Inventory Ownership (2026-09-27)
+
+The protocol enum/string inventory readers and per-case manifest entry builder
+now live in `scripts/parity_protocol_inventory.py`; the main parity audit
+imports their public functions. The four extracted function bodies were
+preserved byte-for-byte from a pre-edit snapshot. Both frozen target inventories
+and all generated entry rows match the original implementation (123/615 for
+slskd and 170/850 for slskdN). Python compilation, CLI import, and the audit
+tooling check pass. This is a real module boundary, but RF-024 remains open
+while the large Rust test segments still share flat `include!` scope.
+
+## RF-001 Shared-Port TLS Classification (2026-09-27)
+
+The mesh branch of the shared listener previously classified only the first
+two bytes, `0x16 0x03`, as TLS. A valid 790-byte plain Soulseek `PeerInit` frame
+has the same length prefix and could be routed to the mesh gateway. The listener
+now peeks at the bounded six-byte TLS record and ClientHello prefix before
+routing, without consuming either protocol's bytes. A regression sends the
+colliding plain frame through the real TCP listener, and all 30 listener tests
+pass. This fixes that classification error on the single shared port. RF-001
+still retains the legacy plain/obfuscated framing ambiguity recorded above.
+
+## RF-006/RF-007 Live Shutdown Overlap Harness (2026-09-27)
+
+`scripts/run-rf-shutdown-overlap.py` creates bounded real filesystem fixtures,
+starts an isolated native daemon with persistence, observes an active share
+scan through the API, sends SIGTERM, and reopens the same state. Its local run
+passes: the in-flight HTTP scan returns 503, both processes exit zero, SQLite
+integrity remains `ok`, and neither the durable store nor restart exposes a
+partial index. DHT, mesh, overlay, and HTTPS are disabled only in the temporary
+fixture, so this proves the HTTP/share-scan overlap rather than every managed
+service. The harness bounds startup, requests, and shutdown, kills failed child
+processes, removes fixtures, and records source/binary/harness metadata. The
+clean-worktree run at `55be6aec` is retained in
+`benchmarks/artifacts/20260927-rf-shutdown-overlap.json`: shutdown and restarted
+shutdown both completed in 0.114 seconds, the scan returned 503, SQLite remained
+valid with zero partial rows, and restart reported zero files. This closes the
+retained live overlap requirement for RF-007. RF-006 still requires clean-runner
+coverage for the other managed services.
+
+## RF-006 Distributed Link Shutdown Ownership (2026-09-27)
+
+The distributed parent and child socket loops still used detached `tokio::spawn`
+calls after the broader task-registry migration. Both now use the managed task
+registry, which aborts and joins producers before the final distributed snapshot
+is persisted. A file-backed regression registers a real TCP child, receives the
+branch metadata, sends a depth update, shuts down the registry, observes socket
+closure, and reloads the latest child depth from SQLite. The focused regression
+and all 647 daemon library tests pass, as do the full-controller/legacy feature
+compile and changed-file formatter. Broader clean-runner and live parent/service
+coverage remains open.
+
+## RF-003 Retained Distributed Shutdown And Crash Proof (2026-09-27)
+
+The extended live harness passed at clean commit `6fb4d2f6`. Its retained
+`benchmarks/artifacts/20260927-rf-distributed-shutdown-crash-restart.json` records
+source, binary, harness, and toolchain metadata. A live child depth-3 snapshot
+exists before SIGTERM overlaps a real 20,000-file share scan; graceful shutdown
+closes the socket, exits zero in 0.114 seconds, and persists the final
+disconnected tree with no children. Restart restores that final state. A new
+committed depth-7 snapshot then survives SIGKILL and another restart, with both
+distributed tables matching and SQLite integrity `ok`. This closes RF-003's
+retained live shutdown/crash requirement. RF-006 still needs clean-runner
+coverage for the other managed services.
+
+## RF-024 Focused Controller Test Ownership (2026-09-27)
+
+The three flat focused-test includes now form eight named Rust test modules
+with a shared fixture module. The extraction audit accounts for all 255,275
+original bytes and all 91 test functions; the pre-edit files and audit remain
+under `target/rf-focused-controller-before-modules/` and
+`target/rf-focused-controller-module-audit.json`. The subprocess durability
+test now selects its nested module path. Bounded controller fixtures reference
+their actual capability, session, mesh, bridge, and quarantine owners rather
+than feature-gated root aliases. The bounded authorization runner emitted
+7,790 passing rows. All 647 default daemon library tests, strict all-targets Clippy, and the
+full-controller/legacy all-targets compile pass on the final extraction.
+The formatter excludes deleted files when checking a module move. RF-024
+remains open for the larger full-controller include segments. This work is
+internal-only and preserves the production listener's single-port design.
+
+## RF Validation Harness HTTP Ownership (2026-09-27)
+
+Hosted Semgrep at `a7bba2d8` flagged dynamic urllib use in the isolated live
+shutdown fixture. The fixture now uses an explicit loopback HTTP connection
+with a five-second timeout and closes it in a `finally` block. The live
+shutdown/distributed crash-restart proof still passes with this adapter.
+The existing retained artifacts keep their original source and harness hashes;
+a later hosted run must confirm the scanner result for the replacement.
+This is an internal-only validation-tool change.
+
+## RF-024 Full Controller Bridge Contract Ownership (2026-09-27)
+
+The bridge client-isolation and search/download oracle-shape regressions now
+live in a real `controller_tests::bridge_contracts` module. They import only
+the shared state/share fixtures and use the crate's route entry point. Exact
+reconstruction of the moved bodies is recorded alongside pre-edit snapshots
+in `target/rf-controller-bridge-before-module/`. The full-controller/legacy
+all-targets compile passes. This internal-only step starts ownership boundaries
+inside the remaining full-controller includes; RF-024 remains open.
+
+## RF-001 Unknown Initialization Stream Boundary (2026-09-27)
+
+The shared-port parser retained the shortest unknown frame while probing a
+longer alternate interpretation. If neither was known, it returned the shorter
+frame with an already advanced stream. The fallback now rejects this case as
+ambiguous. A real TCP regression constructs two valid unknown interpretations
+of different lengths; another checks that an unambiguous unknown initialization
+retains its payload and subsequent bytes. The listener still uses the existing
+shared port. This closes the fallback stream-boundary defect; the broader
+legacy plain/obfuscated ambiguity remains open under RF-001.
+
+## RF-006 Peer Listener Task Ownership (2026-09-27)
+
+The listener's accepted initialization workers and peer handlers still used
+detached tasks. Both now register with managed shutdown. A network-guard lease
+releases admission counts when a handler completes, fails before dispatch, or
+is canceled; connection permits remain owned by the handler. The regression
+opens one stalled handshake and one initialized peer on the same shared
+listener, then checks managed shutdown closes both sockets, returns capacity,
+and clears the per-IP guard counts. All 648 daemon library tests pass,
+including this real TCP shutdown regression. Broader clean-runner service
+coverage remains open under RF-006.
+
+## RF-006 Session Worker Ownership (2026-09-27)
+
+Peer capability probes, the five-second wishlist fallback, and incoming search
+responses now use managed task ownership. A queue lease releases incoming
+search admission counts even if shutdown cancels a worker waiting for a permit
+or rejects its future before polling. The focused regression holds every
+search permit, schedules work, joins shutdown, and verifies both queued and
+subsequent rejected work leave a zero queue count. All 649 daemon library
+tests pass. Other service coverage remains open under RF-006.
+
+## RF-024 Media And Song Identification Test Ownership (2026-09-27)
+
+Nine media/analyzer/hash-database contract tests and eight song-identification
+contract tests now live in real `controller_tests::media_contracts` and
+`controller_tests::songid_contracts` modules. Their fixture imports are explicit,
+and implementation paths name the crate owner. The pre-edit source and audit
+in `target/rf-controller-media-before-modules/` account for 38,382 moved bytes
+and all 17 test bodies with exact reconstruction before formatting. The
+remaining full-controller includes still need ownership boundaries; this
+internal-only step does not close RF-024.
+
+## RF-003/RF-006/RF-007 Owned-Worker Live Revalidation (2026-09-28 UTC)
+
+The native daemon was rebuilt at clean commit `dbc188d9` after the peer listener
+and session workers moved into managed shutdown. The retained
+`benchmarks/artifacts/20260928-rf-owned-workers-shutdown-crash-restart.json`
+records source, binary, harness, and Rust toolchain metadata. SIGTERM during
+an observed real 20,000-file scan and an attached distributed child exits
+zero in 0.164 seconds, closes the child socket, returns HTTP 503 to the scan,
+and leaves zero partial share rows with SQLite integrity `ok`. The final
+disconnected distributed snapshot survives restart; a later committed depth-7
+child snapshot survives SIGKILL and another restart. The direct loopback HTTP
+adapter also passes hosted security scans at `47440cfb`. RF-003/RF-007 retain
+their verified local status; RF-006 still needs broader service coverage.
+
+## RF-024 Mesh Controller Test Ownership (2026-09-28 UTC)
+
+Eight mesh controller/runtime contract tests now live in an owned
+`controller_tests::mesh_contracts` module with explicit state/share/capability
+fixture imports. Six differential entry points remain available to bounded
+API group 1 through feature-gated exports. The pre-edit source and audit under
+`target/rf-controller-mesh-before-module/` account for all 59,932 moved bytes
+and all eight bodies, with only root-owner paths and bounded visibility
+adapted. The full-controller/legacy all-targets compile passes. This
+internal-only step leaves RF-024 open for the other include segments. The
+bounded API group 1 runner now passes after the separately documented fixture
+and storage-error corrections; all 58 rows in its six mesh ledgers pass.
+
+## RF-001 Fixed Firewall Initialization Bound (2026-09-28 UTC)
+
+Known firewall initialization has a five-byte body. The shared parser now
+checks that bound in its header validation, for both plain and obfuscated
+interpretations, before resizing the receive buffer. The regression advertises
+the maximum general frame length while sending only each header and keeping
+the connection open; rejection must arrive without reading a body. This
+closes the oversized known-firewall allocation defect on the existing shared
+port; all 33 listener tests pass. Broader legacy framing ambiguity remains
+open under RF-001.
+
+## Bounded Search Lifecycle Assertion Correction (2026-09-28 UTC)
+
+The bounded API group 1 run stopped before the extracted mesh cases because
+its old search lifecycle test expected cancellation and an explicit status
+update to overwrite an already completed search. `SearchStore` already rejects
+terminal-state changes. The test now checks that completed state survives both
+requests, that its metadata can still update, and that cancellation changes a
+separate active search to `cancelled` before deletion. This internal-only
+fixture correction retains cancellation persistence coverage.
+
+## Mesh Unavailable-Storage Response Classification (2026-09-28 UTC)
+
+The owned mesh differential exposed two stale runtime-failure assertions that
+expected success after closing durable storage. Rollback already occurred,
+but the hash-database error prefix was not classified as storage unavailability,
+and mesh merge bypassed the shared response classifier. Both paths now return
+a sanitized HTTP 503 for unavailable storage; validation errors keep their
+client-error response. The differential checks 503 and missing rolled-back
+entries, and a default focused regression checks both routes retain sequence
+zero and hide closed-pool details. All 650 default daemon library tests pass.
+The shared classifier also covers hash-database reads/writes that already use
+it. This behavior fix has a new release fragment.
+
+## RF-024 Retained Owned Mesh Differential Proof (2026-09-28 UTC)
+
+A fresh bounded API group 1 run at clean commit `84e42960` passes. All six
+owned mesh ledgers were rewritten during that run and contain 58 passing rows.
+`benchmarks/artifacts/20260928-rf-owned-mesh-bounded-differential.json` retains
+the rows, ledger digests, source commit, binary/module hashes, toolchain,
+platform, command, and timing metadata. This records real execution through
+the new module exports and the unavailable-storage rollback assertions.
+RF-024 remains open for the other controller include owners.
+
+## RF-001 Unknown Initialization Allocation Bound (2026-09-28 UTC)
+
+Unknown initialization codes previously retained the general 16 MiB frame
+limit on the shared listener even though known initialization is bounded.
+Header validation now applies `MAX_PEER_INIT_FRAME_LEN` to these extensions
+for both encodings, keeping receive allocation bounded before authentication.
+A header-only regression advertises the old general maximum and requires
+immediate rejection; another accepts extensions exactly at the initialization
+bound and preserves following bytes. All changes use the existing shared
+port. The legacy byte-level framing ambiguity remains open under RF-001.
+
+## RF-034 Retained Shared Artifact And SDK Closure (2026-09-28 UTC)
+
+GitHub CI run [36359792162](https://github.com/snapetech/slskr/actions/runs/36359792162)
+at `47440cfb` completed successfully: the Web producer, all seven platform
+archive jobs, Windows packaged-binary smoke, native AArch64 tests, Rust/security
+gates, and the downstream package/deployment job.
+`benchmarks/artifacts/20260928-rf-shared-web-hosted-archive-matrix.json` retains
+job links, source commit, the eight artifact identifiers/digests/expiry dates,
+and successful archive verification/download steps. One additional duplicate
+TypeScript build remained in the combined SDK script; the package checker now
+owns that single build and its tracked-dist/package verification. The full
+Go/Python/TypeScript SDK gate passes in 22.2 seconds with a 452.8 MiB peak and
+zero swap. Together with the earlier deterministic TAR/ZIP/SBOM evidence, this
+closes RF-034. The latest source tip still has its own queued hosted CI run.
+
+## RF-024 Controller Segment 07 Owner Completion (2026-09-28 UTC)
+
+The remaining segment 07 functions now live in five named contract owners
+(native routes, collection authorization, controller surfaces, quarantine, and
+listening parties) and one shared quarantine-verdict fixture module. The two
+API group 1 entry points retain feature-gated exports. Exact pre-format
+reconstruction accounts for all 79,986 bytes and all 16 functions; snapshots
+and the per-owner audit remain under
+`target/rf-controller-segment-07-before-owners/`. The old include is removed.
+The full-controller/legacy all-targets compile and bounded API group 1 runner
+pass. This is internal-only; RF-024 remains open for the other 28 includes.
+
+## RF-024 Remaining Controller Test Owner Extraction (2026-09-28 UTC)
+
+All 28 remaining flat controller test includes are replaced by domain modules
+and shared fixture owners. Rust syntax spans account for 915 test functions,
+58 helper functions, and every one of the original 5,131,884 bytes before
+formatting. Code-token path changes and visibility insertions are reversed in
+the extraction audit to verify exact source reconstruction; strings and
+comments are preserved. The formatted test-name inventory matches the original
+exactly. The 114 new owners are at most 2,399 lines; the existing manual owners
+remain in place. Shared state, network, federation, persistence, route fixtures,
+and bounded runners have their own modules. Feature guards and the public
+bounded-runner entry point are preserved.
+
+`benchmarks/artifacts/20260928-rf-controller-domain-owner-extraction.json`
+retains the source revision, original file/item hashes, function-to-owner map,
+and formatted module hashes. Snapshots remain under
+`target/rf-controller-domain-owner-backup/`. The Rust hygiene gate now rejects
+flat includes and controller test owners over 2,500 lines. This is internal-only
+work. The full-controller/legacy all-targets compile, runtime boundary hardening,
+formatter, and ownership/hygiene gates pass. RF-024 remains open for its broader
+tracked-source scope; bounded execution gates are recorded after they finish.
+
+## MusicBrainz Overlay Routing Differential Repair (2026-09-28 UTC)
+
+Bounded API group 2 exposed a real validation mismatch: overlay routing used
+an opaque-reference validator that rejected its generated `edit:<id>` channel
+and namespaced `actor:<id>` peers. Overlay routing now shares the existing
+bounded artist-radar identifier validator. A focused regression checks empty
+peers, namespaced peers, path/URL metadata and targets, oversized identifiers,
+and durable readback of every failed attempt. All 651 default daemon tests and
+bounded API group 2 pass; strict daemon all-targets Clippy passes. The behavior
+fix has its own release fragment. API group 1 also passes through the extracted
+controller owners at clean commit `3552f9ed`.
+
+## RF-024 Native Web Rendering Ownership (2026-09-28 UTC)
+
+A complete tracked-source scan found the 5,822-line native Web renderer outside
+the earlier daemon/Web-JSX closure inventory. Its 121 functions now live in
+nine owners: route data projections, reference panels, native rows, tabs,
+workspace panels, workflow rendering, shell startup, table navigation, and
+transfer controls. WASM-only navigation and controls retain module guards;
+public rendering and WASM exports retain their signatures. Exact pre-format
+reconstruction accounts for all 278,732 bytes, and the formatted function-name
+inventory matches. The largest owner is 1,339 lines.
+
+`benchmarks/artifacts/20260928-rf-native-web-rendering-owner-extraction.json`
+retains the source/item and formatted-module hashes; source snapshots remain
+under `target/rf-web-rendering-owner-backup/`. All 86 native Web tests, strict
+all-targets Web Clippy, and the locked WASM-target compile pass. This is an
+internal-only ownership move. Across tracked Rust files, the largest remaining
+source is daemon `config.rs` at 4,703 lines; RF-024 stays open while broader
+ownership and bounded execution gates continue.
+
+## RF-024 Bounded API Group 3 Fixture Repair (2026-09-28 UTC)
+
+The owned group 3 run exposed stale MultiSource success expectations for
+`skipVerification` requests. Verified swarm execution already requires an
+expected hash. The differential now checks that bypass requests return 400
+without queuing a job, and uses verified requests with blocked unspecified
+source addresses for bounded failure execution without HTTP I/O. Async
+responses retain the existing 202/queued/id contract; the initial worker is
+waited to completion before its fixture directory is removed. A PodCore
+bad-channel check also compared a body string directly with a JSON object;
+it now parses the response before comparing the existing error contract.
+Bounded API group 3 passes through the extracted owners. These are internal-only
+fixture repairs; no production behavior changes in this checkpoint.
+
+## RF-001 Shared-Port Random-Key TLS Exclusion (2026-09-28 UTC)
+
+Random obfuscated initialization keys now avoid the `0x16, 0x03` TLS prefix in
+addition to plausible plain frame lengths. An exhaustive unit check covers all
+65,536 keys in that prefix range; the random writer regression checks both
+exclusions. All 359 client tests, including 35 listener tests, and strict
+client all-targets Clippy pass. This uses the existing shared port and has a
+release fragment. Broader legacy framing ambiguity remains open under RF-001.
+
+## RF-024 Bounded API Group 4 Completion And Relay Repairs (2026-09-28 UTC)
+
+All four bounded API groups now execute successfully through the new controller
+owners. Group 4 exposed additional stale assertions: the Spotify fixture now
+calls its real helper owner; restart requests remain current-process latches
+and stay cleared in durable/rehydrated state; controller transfer IDs are
+strings; and audio canonical/dedupe checks now verify exactly the seeded key,
+size, hash, and variant instead of expecting empty populated arrays.
+
+The relay fixture exposed two production defects. Invalid authorization consumed
+its one-use upload token but left its waiter pending; it now wakes the waiter
+with failure immediately, while replay remains rejected. Uploaded staging files
+were opened for writing only and caused bad-file-descriptor errors in the HTTP
+reader; they now retain a readable, rewound original handle after syncing,
+with exclusive creation and private permissions unchanged. Direct regressions
+cover rejected credentials, filename mismatch, token consumption, waiter
+removal, readable bytes, permissions, and overwrite rejection. Both fixes have
+release fragments. Fixture stream/hub waits now have five-second deadlines and
+abort/join HTTP workers on timeout; large-stack controller cases have a
+60-second deadline. The stalled owned process was stopped and reaped.
+
+`benchmarks/artifacts/20260928-rf-controller-owned-api-group-4.json` retains 96
+passing rows across the relay, audio, upload, and core restart ledgers, binary
+and changed-source hashes, command, toolchain, platform, and the working-tree
+evidence scope. All 653 default daemon tests and strict daemon all-targets
+Clippy and the full-controller/legacy all-targets compile pass.
+RF-024 and RF-006 remain open for their broader scopes and remaining gates.
+
+The refreshed council counts are protocol scalars 307, resolver/raw streams
+1,027, and task/lifecycle 1,275. New scalar candidates are bounded key tests;
+the new readback candidate reads a six-byte local staging fixture; lifecycle
+additions are the fixture completion/abort/deadline checks above. These are
+guarded test paths rather than newly accepted production bugs.
+
+## RF-001 Nested Shared-Port Initialization Collision (2026-09-28 UTC)
+
+A real nested collision is now covered: the same wire decodes as a plain
+`PierceFirewall` and a supported nested obfuscated file-transfer `PeerInit`.
+Previously the known-only prefix check returned the shorter plain frame. The
+listener now recognizes potentially nested headers by the outer bounded length
+and its necessary inner-length low byte, and rejects conflicting init headers
+at nine bytes before reading either body. An open-sender regression proves
+early rejection; a separate case proves an unambiguous nested file init retains
+the following bytes. All 361 client tests, including 37 listener tests, and
+strict client all-targets Clippy pass. A release fragment records the fix.
+No new listener or port is added.
+
+A broader rule treating every unknown bounded code as another known init was
+rejected after it failed ordinary plain-handshake regressions. Unknown arbitrary
+legacy extensions cannot establish sender intent when their bytes also encode
+a known init; this compatibility boundary remains explicit under RF-001.
+
+## RF-024 Remaining Owned Differential Gates (2026-09-28 UTC)
+
+The clean committed source at `ec6d6889` passed the combined bounded persistence,
+file-lifecycle, protocol, security-control, and security-authorization gates.
+`benchmarks/artifacts/20260928-rf-controller-owned-remaining-differentials.json`
+retains 53 freshly generated ledgers with 773 passing rows, plus the 7,790-row
+passing authorization matrix, command, source revision, and binary/log hashes.
+Together with the four bounded API groups, this validates the selected
+differential runners through their extracted owners. It does not claim execution
+of every opt-in full-controller test. The process exited successfully and was
+reaped. Broader production ownership and lifecycle work remains open.
+
+## RF-006 Managed Asynchronous Swarm Execution (2026-09-28 UTC)
+
+Both asynchronous swarm route paths now register execution with the daemon's
+managed task registry. Admission is atomic with registry closure; a rejected
+request marks only its own job failed and returns HTTP 503. After managed
+workers are aborted and joined, shutdown marks queued/in-progress swarm jobs
+failed while preserving completed/failed jobs. Existing workspace drop cleanup
+removes unpublished temporary chunks when cancellation drops the executor.
+No new listener or port is added. A release fragment records the lifecycle fix.
+
+A real two-source stalled transfer proves managed shutdown removes its
+temporary workspace and rejects subsequent task admission. Bounded source
+waits prevent a stale harness process. Additional tests cover direct stopped
+admission, both async URL forms in both controller profiles, and preservation
+of terminal job records. All 656 default daemon tests, strict daemon
+all-targets Clippy, full-controller/legacy all-targets compile, and bounded API
+group 3 pass. RF-006 remains open for remaining service lifecycles and hosted
+proof.
+
+## RF-024 Configuration Contract Test Owners (2026-09-28 UTC)
+
+Extracted all 79 configuration tests from the 3,797-line `config_tests.rs`
+into seven real domain modules: peer transport, Web security, media integration,
+transfer policy, file layers, runtime policy, and federation/membership. The
+formatted registry is 41 lines; the largest owner is 872 lines. The shared
+environment fixture stays in the registry. No test body or expected contract
+was removed. Only token-identified parent paths are relocated to `crate::config`.
+
+`benchmarks/artifacts/20260928-rf-config-test-owner-extraction.json` accounts for
+all 140,311 original bytes, per-test hashes, fixture bytes, formatted owner
+hashes, and exact reconstruction after reversing every path relocation. All
+79 test names match the original inventory. All 79 configuration tests, all
+656 default daemon tests, strict daemon all-targets Clippy, and full-controller/
+legacy all-targets compile pass. Module hygiene now enforces a 1,200-line
+configuration-test owner budget and forbids flat includes in the registry.
+This checkpoint is internal-only. Production configuration ownership and other
+RF-024 scopes remain open.
+
+## RF-024 Production Configuration Domain Owners (2026-09-28 UTC)
+
+Reduced `config.rs` from 4,703 lines to a 290-line aggregate and registry.
+Ten real owners hold startup orchestration, environment layers, peer transport,
+network/security settings, Web security, transfer policy, federation/membership,
+media services, file loading, and projection. The largest owner is 891 lines.
+All 57 original public function/type declarations retain their configuration
+namespace bindings; existing settings/integration exports and the configuration
+environment trait remain available. Private members gain only the visibility
+needed to retain access within the original configuration boundary. Four
+public compatibility exports have a narrow unused-import allowance so their
+existing paths remain available in builds without current callers.
+
+`benchmarks/artifacts/20260928-rf-config-production-owner-extraction.json`
+accounts for all 172,044 original bytes and all 154 original top-level items,
+retains per-item and formatted-owner hashes, and proves exact reconstruction
+after reversing visibility relocations. All 100 function/method declarations
+remain. All 79 configuration tests, 656 default daemon tests, strict daemon
+all-targets Clippy, and full-controller/legacy all-targets compile pass.
+Boundary checks search the real owners; module hygiene forbids flat includes,
+caps this aggregate at 400 lines, and caps its owners at 1,200 lines.
+This checkpoint is internal-only. The 3,231-line file-configuration model and
+other RF-024 scopes remain open.
+
+## RF-024 File Configuration Model And Validation Owners (2026-09-28 UTC)
+
+Reduced `config_file.rs` from 3,231 lines to a 210-line aggregate and registry.
+Ten domain owners contain the input models and their validation/default
+implementations: federation/membership, filters/shares, foundation, integration,
+media services, network security, peer transport, signal policy, transfer policy,
+and Web security. The largest owner is 863 lines. All 129 original public and
+configuration-scoped declaration bindings remain available from the file-model
+namespace. Nested input-type compatibility exports have targeted unused-import
+allowances; implementation bodies have no such allowance.
+
+Moved `pub(super)` members explicitly retain `crate::config` visibility, and
+moved private members retain file-configuration visibility. Serde attributes,
+field values, layer ordering, validation bodies, and default implementations
+are preserved. The retained audit at
+`benchmarks/artifacts/20260928-rf-config-file-model-owner-extraction.json`
+accounts for all 123,927 original bytes and all 150 original items, proves exact
+reconstruction after reversing visibility edits, and preserves all 22 function/
+method declarations. All 79 configuration tests, 656 default daemon tests,
+strict daemon all-targets Clippy, and full-controller/legacy all-targets compile
+pass. Hygiene caps the aggregate at 300 lines and these owners at 1,200 lines.
+This checkpoint is internal-only. Native Web ownership and other RF-024 scopes
+remain open.
+
+## RF-024 Native Web Contract Test Owners (2026-09-28 UTC)
+
+Replaced the included native Web test module with a real test-module registry.
+All 86 tests now have eleven domain owners, plus one shared fixture owner.
+The registry is 32 lines and the largest owner is 766 lines. RustyMilk runtime,
+preset, geometry, GPU, and shader contracts are owned separately from native
+actions, workflow rendering, response projection, player/search, shell lifecycle,
+and route inventory contracts. Test names and assertions remain intact.
+
+`benchmarks/artifacts/20260928-rf-native-web-test-owner-extraction.json`
+accounts for all 156,690 original bytes and 4,092 original lines, including
+the moved module wrapper, all 93 items, and both shared fixtures. It verifies
+exact reconstruction after reversing visibility and dependency-path relocations.
+The two moved `include_str!` dependencies resolve to their original files with
+matching hashes. All 86 Web tests, strict Web all-targets Clippy, and the locked
+WASM target check pass. Hygiene caps the registry at 100 lines and owners at
+1,000 lines, and forbids a return to flat test includes. This checkpoint is
+internal-only. Production Web action ownership remains open under RF-024.
+
+## RF-024 Native Web Action Domain Owners (2026-09-28 UTC)
+
+Replaced the 3,630-line `web_actions.rs` flat include with thirteen real owners:
+WASM action execution, form values, wishlist operations, share access, row
+context, filters, selection/inspection, sorting, reference controls, action
+projection, and player/search/experience models. The largest owner is 567
+lines. WASM-only modules and imports retain their target guards; the action
+projection keeps its original WASM-or-test availability. All eleven original
+public declaration bindings remain at the crate root.
+
+`benchmarks/artifacts/20260928-rf-native-web-action-owner-extraction.json`
+accounts for all 133,129 original bytes, all 95 original items, and all 87
+functions, including exact reconstruction after reversing visibility/path
+relocations. Source backups and original committed source remain available.
+All 86 Web tests, strict Web all-targets Clippy, and the locked WASM target
+check pass. Hygiene requires real action modules and caps owners at 1,000
+lines. This checkpoint is internal-only.
+
+The complete tracked Rust scan now has six files above 2,500 lines:
+`private_gateway.rs` (3,524), `session_runtime.rs` (3,083), `cli_smoke_soak.rs`
+(2,914), native Web `search_planning.rs` (2,857), native Web `rustymilk_ui.rs`
+(2,802), and `file_transfer_runtime.rs` (2,524). RF-024 remains open for these
+and its other scope/evidence requirements.
+
+## RF-024 Native Search, Player, and Workspace Owners (2026-09-28 UTC)
+
+Replaced the 2,857-line `search_planning.rs` flat include with eleven real
+modules for search ranking/previews, player radio/queue planning and browser
+controls, experience reports, workspace tables/actions, browser preferences,
+player status projection, and visualizer startup. The largest owner is 520
+lines. WASM guards and all 22 public root bindings remain intact.
+
+`benchmarks/artifacts/20260928-rf-search-planning-owner-extraction.json`
+accounts for every original byte and all 87 items, with exact reconstruction
+and reversed visibility relocations. All 75 functions remain present. All 86
+Web tests, strict all-targets Clippy, and the locked WASM check pass. Hygiene
+forbids the old flat include and caps owners at 1,000 lines. This checkpoint
+is internal-only. Five tracked Rust files remain above 2,500 lines; broader
+RF-024 scope remains open.
+
+## RF-024 Visualizer and Live Web Runtime Owners (2026-09-28 UTC)
+
+Replaced the 2,802-line `rustymilk_ui.rs` flat include with twelve real
+WASM-only owners for browser controls, library projection/storage/actions,
+playlists, preset editing, automation, file imports, audio analysis, live
+player and route refresh, and HTTP request caching. The largest owner is
+417 lines. Request-cache ownership stays together, and the original target
+and method guards remain intact.
+
+`benchmarks/artifacts/20260928-rf-rustymilk-ui-owner-extraction.json`
+accounts for every original byte and all 88 items, with exact reconstruction
+and reversed visibility relocations. All 84 function/method declarations
+remain present. All 86 Web tests, strict all-targets Clippy, and the locked
+WASM check pass. Hygiene forbids the old flat include and caps owners at
+1,000 lines. This checkpoint is internal-only. Four tracked Rust files
+remain above 2,500 lines: private gateway, session runtime, CLI smoke/soak,
+and file-transfer runtime. Broader RF-024 scope remains open.
+
+## RF-024 Session Runtime Domain Owners (2026-09-28 UTC)
+
+Replaced the 3,083-line session runtime implementation with a 50-line registry
+and twelve real owners for login replay, room dispatch, server transport,
+peer connection and messages, command dispatch, session connection,
+wishlist dispatch, server projections, supervision, pod room bridges, and
+incoming search. The largest owner is 474 lines. Existing parent-scoped
+bindings and managed worker lifetimes remain intact; shared-port connection
+behavior is preserved.
+
+`benchmarks/artifacts/20260928-rf-session-runtime-owner-extraction.json`
+accounts for all 113411 original bytes and 38 items, with exact
+reconstruction after reversing scope relocations. All 36 functions/methods
+remain present. All 656 default daemon library tests, strict all-targets
+Clippy, and the full-controller/legacy-route all-targets feature compile pass.
+Runtime boundary checks include all new owners. Hygiene caps the registry
+at 150 lines and owners at 1,200 lines. This checkpoint is internal-only.
+Three tracked Rust files remain above 2,500 lines; RF-024 remains open.
+
+## RF-024 Private Gateway Transport And Policy Owners (2026-09-28 UTC)
+
+Replaced the 3,524-line private gateway with a 144-line registry and eleven
+real owners for gateway models/transport/services, QUIC proxy admission and
+relay I/O, service policy, mesh content projections, pod request models, peer
+authentication, identity files, and contracts. The largest owner is 999 lines.
+Existing shared TCP admission, certificate handling, replay protection, relay
+limits, and public gateway type bindings remain intact. No dedicated port
+was added.
+
+`benchmarks/artifacts/20260928-rf-private-gateway-owner-extraction.json`
+accounts for all 131592 original bytes and 119 items, with exact
+reconstruction after reversing scope relocations. All 119 functions/methods
+and 25 gateway contract tests remain present. The test module wrapper moves
+to the registry while its original body and dependency scopes are preserved.
+All 656 default daemon tests, strict all-targets Clippy, and the full-controller/
+legacy-route all-targets feature compile pass. Hygiene caps the registry at
+150 lines and owners at 1,200 lines. This checkpoint is internal-only. Two
+tracked Rust files and the parity audit script remain above 2,500 lines;
+RF-024 remains open.
+
+## RF-024 Transfer And CLI Proof Runtime Owners (2026-09-28 UTC)
+
+Replaced `file_transfer_runtime.rs` (2,524 lines) with an 80-line registry and
+eleven real owners for paths, capacity/upload policy, negotiation, permissions,
+audio metadata, indirect transfer, upload/download streaming, content safety,
+progress, and inbound transfer. Replaced `cli_smoke_soak.rs` (2,914 lines)
+with a 74-line registry and fourteen real owners for fixture transfers, live
+server/peer runtime, configuration, probes, scenarios, protocol names, and
+redaction. The largest transfer and CLI owners are 527 and 357 lines.
+Original conditional helpers retain their guards; narrow unused-import
+allowances preserve original parent-scoped compatibility aliases.
+
+The two `20260928-rf-*-owner-extraction.json` artifacts for file-transfer
+runtime and CLI smoke/soak account for every original byte and item, with
+exact reconstruction after reversing scope relocations. All 56 transfer and
+70 CLI function/method declarations remain present. All 656 default daemon
+tests, strict all-targets Clippy, and the full-controller/legacy-route
+all-targets compile pass against both extractions together. Boundary checks
+include the transfer owners. Hygiene caps both registries at 150 lines and
+owners at 1,200 lines. This checkpoint is internal-only.
+
+A complete tracked Rust scan now finds no file above 2,500 lines. The broader
+tracked code scan still finds `scripts/audit-parity-manifest.py` at 3,585
+lines. Its current live-backfill source guard still targets the historical
+`lib.rs` location and fails before producing a manifest; repair that guard
+against the real backfill owner before extracting the audit domains. RF-024
+remains open for that script and the remaining evidence requirements.
+
+## RF-024 Parity Audit Source-Owner Guard Repair (2026-09-28 UTC)
+
+The frozen config inventory now scans nested Rust implementation owners and
+excludes named test suites, so test literals cannot replace missing owned
+configuration settings. All 436 mapped frozen configuration leaves pass.
+The live backfill source guard reads `hash_backfill_runtime.rs` and verifies
+its daemon module registration while retaining remote-route, transfer-token,
+and parsed-hash checks. Six boundary regressions prove positive wiring and
+rejection of disconnected/missing owners, registry decoys, removed token and
+route checks, and configuration test decoys. Audit tooling and process-memory
+policy checks pass. The operator fragment captures these audit behavior fixes.
+
+`benchmarks/artifacts/20260928-rf-parity-source-owner-guards.json` retains the
+frozen source revisions and validation hashes. The normal reused-evidence
+manifest remains blocked by absent `target/react-webui-audit/audit.json`.
+A separate extraction-equivalence fixture disables differential execution and
+browser proof, preserving needs-proof states; it is not live parity evidence.
+RF-024 and the missing UI/evidence tasks remain open.
+
+## RF-024 Parity Audit Domain Owners (2026-09-28 UTC)
+
+Replaced the 3,589-line parity manifest implementation with a 605-line entry
+point and sixteen real modules for API/security, configuration, WebUI,
+persistence, files, operators, protocol, live catalogs/contracts/evidence,
+transport/UI evidence, completeness, subprocess admission, and shared
+constants. Every original function and constant binding remains at the entry
+point. No dynamic execution or shared global namespace is used.
+
+`benchmarks/artifacts/20260928-rf-parity-audit-owner-extraction.json`
+accounts for every original byte and item with exact reconstruction. All 41
+public function bodies and all constant declarations match the original AST,
+including nested function bodies. Seven boundary/ownership regressions,
+Python compilation, audit tooling, and process-memory policy gates pass.
+The complete before/after extraction fixtures match all 19,216 entries when
+fed identical captured frozen inventory inputs. Those fixtures disable live
+and differential proof execution and preserve needs-proof states; they are
+not live parity evidence. Fresh controller inventory provenance can vary
+because unsorted `rg --files` results choose among duplicate route sources;
+that separate determinism issue remains to repair.
+
+The normal reused-evidence manifest still requires the absent React audit
+artifact. Rust and script owners are structurally bounded, while the broader
+source scan also identifies native Web `static/styles.css` at 3,316 lines.
+RF-024 remains open for that stylesheet and its remaining evidence scope.
+This extraction checkpoint is internal-only.
+
+## RF-024 Native Stylesheet Source Owners (2026-09-28 UTC)
+
+Replaced the 3,316-line native stylesheet with fourteen ordered source owners
+and a small manifest. The largest owner is 403 lines. The existing native
+Web build now assembles one distribution `styles.css`; it adds no browser
+requests and no dedicated ports. All 57,794 original bytes, all 456 top-level
+rules, and their exact cascade order survive unchanged. The distribution
+stylesheet remains a generated artifact, rather than a large tracked source.
+
+`benchmarks/artifacts/20260928-rf-native-style-owner-extraction.json`
+retains owner hashes and exact reconstruction. The complete release WASM /
+wasm-bindgen packaging build passes and emits a stylesheet with the original
+hash. All 86 Web tests, strict all-targets Clippy, the locked WASM check, six
+builder regressions, audit tooling, and style-owner hygiene pass. The native
+confirmation-modal contract reads the ordered source owners. The builder
+rejects empty, duplicate, omitted, escaping, and noncanonical manifests.
+The operator fragment records the source/build materialization change.
+
+The broad tracked source scan now has no code file above 2,500 lines;
+RF-024's structural source split is complete. The retained extraction and
+feature proofs remain distinct from missing deployed/live parity evidence.
+Hosted validation and the remaining full-program lifecycle/evidence work
+remain open; this checkpoint does not declare the RF program complete.
+
+## RF-024 Source Budget And Stable Audit Provenance (2026-09-28 UTC)
+
+Module hygiene now enforces the 2,500-line limit across every tracked code
+file in the broad ownership inventory's suffix scope, alongside the tighter
+domain-owner budgets. This guards against recreating oversized source files.
+The controller audit sorts discovery paths before its existing last-declaration
+selection, making duplicate-route provenance stable. A synthetic duplicate
+fixture and two independent frozen slskdN inventories pass: both 683-route
+JSON outputs are byte-identical. The operator fragment records the audit
+provenance fix; proof requirements and route counts remain unchanged.
+
+`benchmarks/artifacts/20260928-rf-controller-inventory-determinism.json`
+retains the frozen revision, output hashes, selection policy, and gate logs.
+RF-024 source ownership is structurally complete; hosted validation remains
+open. The remaining RF program tasks retain their separate lifecycle and
+live/deployed evidence requirements.
+
+## RF-006 Managed Bridge Client Ownership (2026-09-28 UTC)
+
+Removed the Soulfind bridge's detached accepted-client spawn. Every accepted
+handler now enters the managed task registry. The listener owns a cancellation
+channel and bounded completion tracking, reaps completed/panicked handlers,
+and cancels/joins pending clients on listener stop. Dropping the listener
+owner also closes cancellation, so client I/O does not outlive its owner.
+Closed registry admission drops the rejected socket and removes its record.
+After managed daemon shutdown joins the registered handlers, ephemeral bridge
+client records and the running flag are cleared. No listener port was added.
+
+`benchmarks/artifacts/20260928-rf-managed-bridge-client-shutdown.json`
+retains source and gate hashes. Four deadline-bounded socket regressions prove
+listener stop, listener-owner drop, joined daemon cleanup, and rejected late
+admission. All 660 default daemon tests, strict all-targets Clippy, and the
+full-controller/legacy-route all-targets feature compile pass. The operator
+fragment records the lifecycle correction. Broader RF-006 clean-runner proof
+for the remaining managed services remains open.
+
+
+## Dashboard Hosted Coverage Gate Repair (2026-09-28 UTC)
+
+Hosted run `36369051212` failed only the dashboard branch coverage threshold:
+38 tests passed, but branch coverage was 54.21% against the required 55%.
+The webhook lifecycle suite now exercises loading, invalid envelopes, create
+validation and refresh, cancellation, confirmed deletion with encoded IDs,
+test delivery, and failed mutations preserving existing rows. Explicit DOM
+cleanup isolates the administrative page tests. The URL input and icon actions
+have accessible names; loading and errors expose status and alert semantics.
+
+All 48 dashboard tests pass. Coverage is 75.36% statements, 63.45% branches,
+71.2% functions, and 79.4% lines, with every threshold unchanged. Type checking,
+ESLint, production build, and bundle budgets pass. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-dashboard-webhook-lifecycle.json`; the release
+fragment records the accessible controls. This fixes the observed local
+reproduction; exact-tip hosted validation remains pending. No port was added.
+
+
+## RF-006 Managed Shared Gateway Workers (2026-09-28 UTC)
+
+Shared-listener TLS handlers, UDP control, QUIC control/data listeners and
+accepted handlers, and DHT response forwarding now register with daemon
+shutdown rather than detaching. Existing connection semaphores and rate limits
+remain intact. A synchronous admission guard releases the rate limiter on
+normal completion, cancellation, panic, or rejection before first polling.
+
+Four deadline-bounded regressions prove stalled TLS socket closure on joined
+shutdown and late rejection, plus admission release on cancelled and rejected
+tasks. All 664 daemon tests, strict all-targets Clippy, and full-controller/legacy
+all-targets compilation pass. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-managed-gateway-workers.json`. No production
+port was added. The release fragment records the operational lifecycle fix.
+Tunnel readers, proxy-session workers, outbound metadata cleanup, and broader
+clean-runner service evidence remain RF-006 work; this checkpoint does not
+claim their completion.
+
+
+## Nested Audit Memory Guard Repair (2026-09-28 UTC)
+
+Regenerating the missing React browser ledger exposed a guard nesting defect:
+the Python audit already ran in a 4 GiB, zero-swap cgroup, but its guarded Node
+build also received a 4 GiB virtual-address ceiling. Node failed to reserve
+WebAssembly memory before compilation. A separately guarded build succeeded,
+confirming the nesting path caused the failure.
+
+Nested commands now reuse verified inherited limits. Linux validation checks
+the actual cgroup `memory.max` and `memory.swap.max`, rather than trusting a
+unit name or environment marker. Smaller nested requests still establish
+their requested limit. Spoofed-marker, fallback, tighter-nesting, environment,
+working-directory, Node heap, and real cgroup regressions pass; shell syntax,
+process policy, and the complete audit-tooling gate pass.
+
+The browser ledger regeneration is progressing in Chromium under the bounded
+cgroup; complete UI evidence remains pending. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-nested-process-memory-guards.json`. Rust
+commands continue to use Cargo directly without these wrappers.
+
+
+## RF-006 Joined Gateway Child Resources (2026-09-28 UTC)
+
+The managed registry now exposes an abort handle while retaining each task in
+its join set. Tunnel readers use this admission path, and their existing local
+Drop cancellation remains intact. QUIC proxy workers use the same registry;
+session Drop cancels the worker, and closed daemon admission rejects creation
+while releasing the session lease and socket. No production gateway owner
+contains a detached `tokio::spawn`; the runtime boundary gate enforces this.
+
+Overlay metadata uses short synchronous lock operations that never span an
+await. Guards remove metadata directly, including on threads without a Tokio
+runtime. Inbound TLS and QUIC guards also clear peer limiter state on cancelled
+handlers. After joining workers, daemon shutdown clears gateway tunnels,
+metadata, and replay entries.
+
+All 667 daemon tests, strict all-targets Clippy, and full-controller/legacy
+all-targets compilation pass. Bounded regressions verify session/daemon
+cancellation, real UDP socket rebind, admission lease release, late rejection,
+tunnel reader joining with TCP EOF, gateway record cleanup, and metadata Drop
+outside Tokio. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-managed-gateway-child-resources.json`.
+No production port was added. Broader RF-006 clean-runner coverage remains open.
+
+
+## React Browser Contracts, Cleanup, And Honest Workflow Evidence (2026-09-28 UTC)
+
+Regenerating the real Chromium audit exposed invalid success fixtures for
+unread activity, rooms, jobs, metadata processing, auto-replace, and analytics.
+Ten tests now validate the fixture responses through the actual frontend API
+adapters. A failed Chromium launch previously left the temporary HTTP server
+running; launch now belongs to cleanup, including when browser close fails.
+A bounded subprocess regression proves launch failure exits promptly.
+
+The audit also credited synthetic endpoint sweeps as rendered workflows,
+inflating all four categories to 417 cases each. The authoritative workflow
+ledger now removes inherited sweep settings and never requests sweeps. Fresh
+and reusable reports must declare an integer zero `endpointSweepCount`;
+unmarked, swept, malformed, and failed reports cannot become workflow proof.
+Six evidence regressions and the launch regression run through audit tooling,
+now wired into the GitHub Rust job.
+
+The corrected Chromium run passes 84 route/viewport rendering checks and all
+four scenarios, with zero sweeps and errors. Actual UI requests establish 73
+success, 8 loading/empty, 11 error, and 14 authorization cases. The isolated
+frozen manifest reuses these reports successfully: WebUI has 523 complete
+cases (417 call-presence plus 106 workflow cases), with 1,562 still needing
+proof. Six differential families were deliberately skipped for this UI-only
+check; these counts are not whole-program certification or a replacement for
+the separately retained differential evidence.
+
+Full Web validation passes 915 tests across 149 files, ESLint, audit tooling,
+workflow policy, artifact-matrix policy, and repository boundaries. Evidence
+is retained in `benchmarks/artifacts/20260928-rf-react-webui-ui-request-evidence.json`.
+This is real-browser evidence against deterministic mocks, not live daemon,
+deployed-device, or credential-backed interoperability proof. No production
+port was added. RF-030 nightly retention and the deployed evidence tasks stay
+open.
+
+
+## RF-024 Hosted Ownership Validation Baseline (2026-09-28 UTC)
+
+GitHub run `36376549126` succeeds at immutable source `29165746`, including
+all 11 jobs and the seven-platform archive matrix. Eight artifacts are retained;
+the Linux GNU x64 archive was downloaded and its SHA-256 matches the retained
+checksum. Run, job, and artifact links are recorded in
+`benchmarks/artifacts/20260928-rf-ownership-hosted-validation.json`.
+This closes structural source-ownership validation at that baseline. Later
+gateway lifecycle and browser evidence corrections have separate local gates
+and hosted runs; this receipt is not their exact-tip release certification.
+All tracked source remains covered by the 2,500-line budget and tighter owner
+budgets.
+
+## RF-071 Hosted Reproducibility Artifact Wiring (2026-09-28 UTC)
+
+The main Rust CI gate now collects validated metadata after its tests and
+frontend builds, retaining it alongside the actual dashboard coverage summary
+and Web entry point for 30 days. A job-summary link points to the uploaded
+artifact. Metadata schema 2 adds operating system/architecture, required Cargo
+configuration hashes, and source-bound GitHub run identity. Lock hashes,
+observed tool versions, optional artifact hashes, and worktree state remain.
+Generic CI-local checks do not invent an artifact name; unavailable worktree
+status cannot be reported as clean. Tokens and other arbitrary environment
+variables are not captured.
+
+Twelve regressions cover local/hosted collection, real file hashing, required
+inputs, duplicate paths, invalid digests/sizes, source mismatch, malformed run
+context, dirty/unknown worktree state, and legacy schema 1 validation. The
+actual local collector, default reproducibility check, audit tooling, workflow
+policy, and package matrix gates pass. Evidence is retained in
+`benchmarks/artifacts/20260928-rf-hosted-reproducibility-retention.json`.
+Exact-tip hosted artifact validation remains RF-071 work; this wiring is not
+yet a hosted receipt. No production port was added.
+
+
+## RF-006 Single-Port Gateway Without DHT (2026-09-28 UTC)
+
+Current native TCP sharing no longer depends on DHT enablement. Overlay bind
+selection, startup projection, and the shared-listener predicate agree when
+DHT or mesh DHT is disabled. The existing peer listener carries both ordinary
+peer initialization and mesh TLS; gateway UDP uses the same port number.
+Frozen profiles and explicit bind choices retain their existing contracts.
+
+The daemon library suite passes 668 tests, strict Clippy passes, and the full
+controller/legacy configuration compiles. The bounded live harness completes
+three isolated daemon cycles with DHT disabled: one peer TCP listener, UDP on
+that same port, established and partial TLS clients closed during graceful
+shutdown, exit zero, and immediate TCP/UDP rebind. Three completed TLS
+handshakes occupy the per-IP capacity and a fourth client is rejected. The
+fixture's existing HTTP API listener is separate from the peer transport;
+no new production port was introduced. Shutdown takes approximately 0.114
+seconds locally. Six helper regressions and audit/workflow policy gates pass.
+
+The harness always kills and reaps its owned daemon before saving logs on
+failure. CI now runs and retains the three-cycle proof inside the reproducibility
+artifact. Its hosted result remains pending. Evidence is retained under
+`benchmarks/artifacts/20260928-rf-shared-tcp-shutdown-proof.json`.
+Broader managed-service clean-runner coverage remains RF-006 work.
+
+## RF-071 Downloaded Hosted Receipt (2026-09-28 UTC)
+
+The Rust job at `37f2e049` completed successfully in run `36379384611`.
+The actual `ci-reproducibility-rust` artifact was downloaded and validated:
+metadata records a clean source checkout, all retained file hashes match,
+and seven lock plus three configuration hashes match that exact Git commit.
+Observed Cargo, Rust, Node, npm, and Python versions are retained, together
+with immutable run and artifact links, in
+`benchmarks/artifacts/20260928-rf-hosted-reproducibility-receipt.json`.
+RF-071 main-gate hosted metadata retention is verified. This receipt does not
+certify the later single-port change or substitute for its hosted execution.
+
+
+## RF-030 Bounded Nightly React Evidence (2026-09-28 UTC)
+
+The dedicated `React Nightly Audit` workflow runs daily and supports manual
+dispatch without live credentials. Its four deterministic mock scenarios
+exercise the actual React UI through Chromium, with desktop/mobile success
+rendering and focused loading/empty, validation/error, and authorization/
+reconnect/restart workflows. It retains reports, screenshots, logs, and a
+source-bound receipt for 30 days. This is browser proof against mocks;
+it does not certify deployed devices or credentialed upstream interop.
+
+The runner clears inherited live-backend settings, tokens, endpoint sweeps,
+and route restrictions. It rejects missing, failed, swept, mismatched, or
+empty browser evidence and removes stale reports before every launch. Build and focused scenario commands have five-minute deadlines; the full
+desktop/mobile scenario has an eight-minute deadline. Timeout and interruption
+terminate the owned process group; a grace period lets the memory guard stop
+its external systemd service before hard cleanup. Six regressions include a
+real guarded-child timeout and confirm that child is reaped.
+
+Hosted browser work runs in an owned service with 4 GiB resident memory,
+zero swap allowance, 512 tasks, and a 15-minute deadline. The workflow itself
+has a 25-minute deadline, cleanup trap, pinned actions, read-only permissions,
+and a required artifact upload. Workflow policy guards this contract.
+The retained hosted result is still required before RF-030 is closed.
+
+
+## RF-006 Downloaded Single-Port Clean-Runner Receipt (2026-09-28 UTC)
+
+The Rust job at `f9a25f9d` succeeded in run `36380983771`. Its actual retained
+artifact was downloaded: reproducibility metadata, artifact hashes, and all
+lock/configuration hashes match the exact clean source checkout. The live
+proof passes all three cycles with DHT disabled, exactly one peer TCP
+listener and gateway UDP on the same port. Established and partial TLS
+clients close during graceful shutdown; TCP/UDP rebind succeeds. The fourth
+client is rejected after three completed TLS handshakes occupy per-IP capacity.
+The source-bound receipt and immutable artifact link are retained in
+`benchmarks/artifacts/20260928-rf-hosted-single-port-shutdown-receipt.json`.
+This closes shared-gateway clean-runner evidence within RF-006; other managed
+services remain in its scope. No dedicated peer transport port was added.
+
+## RF-047 Actual Mounted Sync Delay and Crash Stress (2026-09-28 UTC)
+
+The isolated Linux FUSE fixture forwards file operations into an owned
+throwaway directory and delays actual event-file fsync requests by 500 ms.
+A preflight observes the kernel mount and measures an actual fsync delay.
+The regression verifies the transfer queue is writable within 250 ms while
+that filesystem request remains blocked, then verifies ordered durable events
+and restart state. Three independent writer processes each persist eight
+transfers on the delayed mount, are killed without shutdown, and recover all
+24 transfers and 48 ordered events. This is a controlled delayed filesystem,
+not a hardware performance benchmark or a pause injected into product code.
+
+The ignored regression requires this explicit mount fixture and is run by
+`python3 scripts/run-rf-delayed-filesystem-proof.py`. Cargo uses the pinned
+toolchain directly. The harness bounds mount readiness and test runtime,
+cleans owned process groups, unmounts the fixture, and reaps the filesystem
+process. Writer guards kill and reap on failure. Five helper regressions
+cover normal, failed, and timed-out cleanup. RF-047's delayed-filesystem and
+crash-stress requirement is verified locally; product durability semantics
+remain unchanged. Retained evidence is
+`benchmarks/artifacts/20260928-rf-delayed-filesystem-proof.json`.
+
+
+## RF-030 Hosted Deadline Adjustment (2026-09-28 UTC)
+
+The first hosted nightly run completed 79 of 84 screenshots before the
+five-minute success-scenario deadline. Its failed receipt and screenshots
+were retained, and its owned service terminated with zero swap use. The
+local final runner had already passed from a clean checkout. The full
+84-check success scenario now has an eight-minute deadline; build and
+focused workflow scenarios retain five-minute deadlines, and the outer
+15-minute service plus 25-minute job limits remain. This adjustment does
+not count partial screenshots or a failed receipt as passing evidence.
+A fresh hosted run is required.
+
+
+## RF-006 Bounded CLI Live-Soak Ownership (2026-09-28 UTC)
+
+The CLI live-soak harness previously detached accepted peer handlers and
+indirect peer probes with raw spawn calls. Each plain/obfuscated listener
+and the server probe loop now owns a bounded 64-worker JoinSet. Completed
+work is reaped before admission; capacity overflow drops the new future,
+and shutdown rejects late work before aborting and joining existing work.
+Listener deadlines close stalled peer handlers. The server loop joins its
+probe workers on normal completion and on error. The top-level listener and
+watchdog tasks remain in one owned set; the watchdog is joined and a failed
+worker cancels the remaining tasks. No transport listener port was added.
+
+Four focused regressions prove capacity/resource release, completed-worker
+readmission, child socket closure on parent cancellation, and actual plain/
+obfuscated TCP client EOF plus listener rebinding at the soak deadline.
+The full daemon suite passes 672 tests with the separately exercised mounted
+filesystem test ignored by default; strict Clippy passes. The runtime guard
+rejects detached spawn calls in the three live-soak production owners.
+Broader RF-006 managed-service clean-runner coverage remains open.
+
+
+## RF-030 Downloaded Hosted Browser Receipt (2026-09-28 UTC)
+
+The manually dispatched daily-workflow runner at `3f0b6010` completed
+successfully in run `36382238277`. Its actual artifact was downloaded and
+verified: the receipt records the exact clean checkout, the harness hash
+matches that Git commit, and all four audit hashes match the downloaded
+reports. The success report has 84 desktop/mobile route checks and all 84
+referenced screenshots are present. Every scenario declares zero synthetic
+sweeps and no audit errors. The receipt and immutable artifact link are in
+`benchmarks/artifacts/20260928-rf-hosted-react-nightly-receipt.json`.
+RF-030's browser retention scope is verified. This manual execution of the
+daily workflow does not claim a scheduled event already occurred, deployed
+device proof, or credentialed interop certification.
+
+## RF-028 Validation-Only Chocolatey Dispatch (2026-09-28 UTC)
+
+The existing manual Chocolatey workflow gains a boolean `publish` input.
+Its default preserves the existing publication behavior; `publish=false`
+runs the same actual release download, checksum validation, tag/version
+rendering, `choco pack`, and nupkg smoke without executing the push step.
+It retains the nupkg, checksums, and source/tag/archive/package-bound receipt
+for 30 days. A 20-minute job deadline bounds this package runner. Local
+workflow/package policy and PowerShell parser checks pass. A clean Windows
+validation-only run remains required before RF-028 is closed.
+
+
+## RF-028 Published Checksum Prefix Regression (2026-09-28 UTC)
+
+The first clean Windows validation-only run failed before packing: the
+actual `release-v0.2.40` SHA256SUMS entry prefixes the Windows filename with
+`./`, while the existing workflow required a bare basename. The verifier
+now accepts exactly the bare basename or its root-relative `./` spelling,
+with an optional checksum binary marker. It still requires one unique match
+and verifies the actual archive digest. Eight regressions execute the real
+workflow PowerShell block, covering both valid spellings, the binary marker,
+and missing, duplicated, wrong-hash, foreign-directory, and suffix entries.
+A fresh hosted validation remains required; the first failure is not credited
+as successful package proof.
+
+
+## RF-028 Downloaded Windows Package Receipt (2026-09-28 UTC)
+
+Validation-only run `36383308751` at workflow source `23e53097` passed on
+Windows against the actual existing `release-v0.2.40` release. The nupkg and
+receipt were downloaded. Its package hash matches; the independently
+downloaded Windows release archive matches the published SHA256SUMS entry;
+the packed installer contains the fully qualified tag/asset URL and exact
+archive hash, and the nuspec records version 0.2.40. The receipt reports
+`publishRequested=false`. Evidence and the immutable artifact link are in
+`benchmarks/artifacts/20260928-rf-hosted-chocolatey-validation-receipt.json`.
+RF-028 clean package-runner validation is verified. This is verification of
+an existing released asset, not publication or certification of a new release.
+
+## RF-063/RF-073 Native Speed Snapshot Sharing (2026-09-28 UTC)
+
+The first maintained Live Parity run found two requests for transfer speeds
+on System, at 240–343 ms intervals: the native player's initial request and
+the System endpoint catalogue load outlasted the 200 ms sharing window. The
+one-entry Promise cache now shares that initial speed snapshot for at most
+one second. It expires at the boundary and rejects reversed/non-finite time
+inputs. The product can display a cached speed snapshot for up to one second.
+
+Two temporal regressions execute in the native test target; the Rust Web
+suite passes 88 tests, strict Clippy and WASM compilation pass. A fresh actual
+Chromium audit passes all 15 desktop/mobile route pairs with zero errors:
+System makes exactly one speed request and stays at its unchanged 39-request
+budget on both viewports. Source-bound mock evidence is retained in
+`benchmarks/artifacts/20260928-rf-native-transfer-speed-request-sharing.json`.
+This does not close deployed accessibility or credentialed interop scope.
+A fresh retained Live Parity result is still required for RF-073.
+
+
+## RF-006 Shared DHT Without a Receive Port (2026-09-28 UTC)
+
+The shared DHT path formerly bound a second mainline receive socket and
+forwarded raw datagrams from a local relay. A validated four-byte transaction
+fixture confirms the old path sends replies to that relay, changing the
+original peer identity. The initial two-byte transaction fixture is excluded
+from this evidence because the pinned library does not accept that encoding.
+
+Mainline now reuses the public socket for sending and accepts bounded
+in-process datagrams from the gateway with the kernel-observed remote
+address. It never reads the public socket itself, so the gateway remains its
+single reader. No dedicated DHT receive or forwarding port is needed.
+Packets are capped at the existing 2,048-byte parser MTU, queue capacity is
+256, and full/closed/oversized admission never blocks. Builds without the
+bundled shared transport reject shared mode rather than opening another port.
+
+Five focused regressions verify the old relay's wrong destination, the new
+actual ping/reply source and destination, equal actor/public socket ports,
+absence of a dedicated endpoint, and bounded queue/packet/closed admission.
+The daemon suite passes 675 tests with one separately exercised mount fixture
+ignored by default. Original files are preserved under the ignored
+`target/rf-shared-udp-source-backup` before editing. This closes the DHT input
+identity defect; current-profile port projection and broader shared QUIC
+layout are being checked separately against the single-port requirement.
+
+
+## RF-006 Shared QUIC Socket Adapter (2026-09-28 UTC)
+
+The client transport now exposes control/data constructors over an existing
+Quinn socket adapter. Shared endpoints send through the public socket and
+receive one classified datagram through an in-process queue; no socket bind
+or relay worker is created by the adapter. The receive owner retains GRO
+stride, remote address, destination IP, and ECN metadata. Independent native
+send pollers preserve concurrent endpoint wakeups. Each queue is capped at
+128 packets of at most 65,535 bytes, reserves capacity before copying, and
+rejects malformed, full, or closed admission without blocking.
+
+Three focused tests verify metadata, real public-port replies, admission
+bounds, and both certificate-pinned ALPN handshakes on one socket. All 88
+client tests and strict all-targets client Clippy pass. This is an internal
+transport prerequisite: daemon startup and routing still need to adopt it
+before the remaining QUIC relay ports can be removed.
+
+
+## RF-006 Native Single-Port UDP Routing (2026-09-28 UTC)
+
+Native/current startup now projects DHT, overlay UDP, and both QUIC ALPNs to
+the peer listener's actual port. A prebound public socket preserves its bind
+interface. Separate native overlay/obfuscation listener overrides fail with
+an actionable error; an explicit matching obfuscation bind is normalized to
+the shared listener. Frozen profiles retain their compatibility configuration.
+The native QUIC path creates no loopback backend or per-peer forwarding
+socket. Each endpoint receives bounded in-process packets through the client
+adapter. The gateway is the single reader and splits GRO batches while
+preserving source, destination, and ECN metadata. Existing admission caps
+remain; inspection attempts are limited before Initial decryption, and a
+one-second sweep releases expired pending/idle leases even without traffic.
+Only a completed handshake marks the address as validated.
+
+Actual encrypted traffic uncovered incorrect v1/v2 Initial salts and v2 key
+labels in the old selector. Independent rustls-encrypted fixtures now verify
+both versions and reject tampering. A protected short header can begin with
+`d`, so native DHT classification validates the bounded message instead of
+using that byte alone. Negotiated fixed-bit greasing is preserved. LAN-only
+DHT explicitly serves local peers without external bootstrap observations.
+One-shot control/data sends now await bounded cleanup in the caller's scope;
+CLI exit cannot abandon a detached cleanup worker or retain server admission.
+
+The daemon suite passes 681 tests (one separately exercised mount fixture is
+ignored by default); all 88 client tests and strict daemon/client/mainline
+Clippy pass. The full-controller/legacy-dispatch target compiles. Seven
+shutdown harness helper tests and tooling/workflow/source gates pass. Real
+concurrent certificate-pinned control/data handshakes pass with DHT enabled
+and disabled, and DHT replies reach the original remote from the shared port.
+Three live daemon cycles with all UDP services enabled and three with DHT
+and QUIC disabled observe exactly HTTP plus one peer TCP listener and one
+same-port UDP socket, clean SIGTERM exits, closed stalled clients, and TCP/UDP
+rebinding. The all-enabled fixture performs measured CLI pin-discovery/pinned
+sends for both ALPNs and a real DHT ping. Source/binary/harness hashes and dirty
+worktree provenance are retained in
+`benchmarks/artifacts/20260928-rf-native-single-port-all-enabled-proof.json`
+and `benchmarks/artifacts/20260928-rf-native-single-port-dht-disabled-proof.json`.
+CI retains both variants in its reproducibility artifact.
+
+RF-006 remains open for its broader service ownership inventory. RF-001 still
+needs complete shared-protocol proof; this selector admits a complete known
+Initial ALPN and rejects ambiguous/incomplete selection. It does not claim
+fragmented ClientHello or every legacy transport boundary is verified.
+
+
+## RF-001/RF-006 Negotiated Shared QUIC Endpoint (2026-09-28 UTC)
+
+This supersedes the prior native first-Initial ALPN-selection limitation.
+Native QUIC now has one endpoint for both control/data ALPNs. Quinn owns
+connection IDs and handshake reassembly; dispatch uses the TLS-negotiated
+protocol after a completed handshake. No Initial decryption or ALPN sniffing
+is needed in the native gateway. Multiple connections from one peer UDP
+socket can use different ALPNs without selecting conflicting backend routes.
+Disabled protocols fail at TLS negotiation. Frozen relay inspection remains
+separate and retains the corrected v1/v2 encrypted-packet regression coverage.
+
+Pending endpoint handshakes are capped at 128, each pending buffer at 64 KiB,
+and their aggregate at 8 MiB. The single ingress queue retains its 128-packet
+bound; inbound stream limits and data payload limits remain explicit. The
+existing peer/prefix attempt caps, periodic session sweep, managed accept and
+connection workers, certificate validation/pins, and shared public socket
+remain in force.
+
+Two new client regressions perform real certificate-verified handshakes with
+large ALPN offers that fragment CRYPTO across Initial datagrams. They verify
+both protocols and exact control/data payloads from the same client UDP
+endpoint, and reject a disabled data ALPN. Native daemon integration separately
+checks concurrent pinned control/data sends, DHT reply identity, and socket
+closure/rebinding with DHT enabled and disabled. All 90 client and 681 daemon
+tests pass (the separately exercised mount fixture remains ignored by
+default), strict client/daemon Clippy passes, and the full-controller/legacy
+compile and source/tooling/release gates pass. The static runtime guard rejects
+native first-ALPN inspection and detached QUIC cleanup workers.
+
+Three fresh all-enabled live cycles and three DHT/QUIC-disabled cycles retain
+one peer TCP/UDP port, no backend/forwarding socket, completed CLI probes,
+clean exits at about 0.114 seconds, closed stalled clients, and rebinding.
+Exact source/binary/harness hashes and worktree provenance are retained in
+`benchmarks/artifacts/20260928-rf-single-quic-endpoint-all-enabled-proof.json`
+and `benchmarks/artifacts/20260928-rf-single-quic-endpoint-dht-disabled-proof.json`.
+This closes the native fragmented-ALPN selection limitation; broader RF-001
+TCP/legacy boundaries and RF-006 service inventory remain open.
+
+
+## RF-006 Forwarding and Administrative Job Ownership (2026-09-28 UTC)
+
+Forwarding listeners now own a joined connection set under the existing
+128-rule/128-connection limits. The listener handle aborts on owner drop;
+forced listener cancellation drops its child set. Bidirectional tunnel pumps
+are scoped futures, so cancellation drops both pumps and their socket halves
+before remote tunnel cleanup. Activity accounting uses a drop guard, avoiding
+stale counters when a handler is aborted. Normal stop permits bounded remote
+cleanup and joins children; manager shutdown closes admission, drains rules
+concurrently, and is part of `AppState` shutdown. The standalone optional
+forwarding feature retains its explicitly requested loopback listeners; no
+native peer transport port is added by this lifecycle change.
+
+Share-rescan, both maintained administrative webhook routes, script event
+workers, and completed-download FTP jobs now register with daemon task
+ownership. Script dispatch preserves its existing concurrent-run permits and
+cannot create work after registry shutdown. The retained legacy dispatcher
+receives the same script registry parameter for diagnostic compilation.
+Forwarding tests now have a separate owner, preserving the full previous
+suite. Originals are backed up under ignored `target/rf-forwarding-source-backup`.
+
+Regressions exercise normal shutdown and forced cancellation during a stalled
+real gateway TCP/TLS setup, closure of local/gateway sockets, reclaimed
+connection permits and activity counts, listener rebinding, daemon-level
+forwarding shutdown, and rejected late script/rule admission. The forwarding
+filter runs 12 matching tests including unchanged existing data-path coverage;
+the complete daemon suite passes 684 tests with one separately exercised
+mount fixture ignored by default. Strict daemon Clippy, full-controller/legacy
+all-targets compilation, and the three-cycle all-enabled shared-peer live
+proof pass. Source hashes, test/check outcomes, and the retained live result
+are in `benchmarks/artifacts/20260928-rf-forwarding-and-service-ownership.json`.
+FTP concurrency policy, script descendant-process cleanup, remaining service
+ownership, and fresh hosted service proof remain open; this is not RF-006 closure.
+
+## RF-006 Unix Script Descendant Cancellation (2026-09-28 UTC)
+
+Integration scripts now establish a separate Unix process group before spawn.
+An owned guard kills the group when cancellation, timeout, or output collection
+failure drops the running worker. The guard drops before the Tokio child, and
+is disarmed immediately when waiting reaps the leader, avoiding subsequent
+signaling through a reusable numeric process ID. Invalid, zero, and init IDs
+are rejected. Existing output and concurrency limits remain in place.
+
+A Linux regression runs a real shell with a live sleep child and verifies no
+live descendant survives either timeout or explicit task cancellation. Its
+failure cleanup holds a kernel pidfd, so assertion failure cannot accidentally
+signal a subsequently reused PID. The original script tests are preserved in
+a separate test owner; the pre-change source remains backed up under ignored
+`target/rf-script-process-source-backup`. This covers descendants remaining in
+the owned Unix process group; Windows process-tree cleanup and deliberately
+detached jobs after a normally completed script are not covered. Broader
+service inventory and FTP concurrency policy remain RF-006 work.
+
+Validation: 686 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Hashes and scope are retained in
+`benchmarks/artifacts/20260928-rf-script-process-group-ownership.json`.
+
+## RF-028 Hosted Checksum Fixture Startup Deadline (2026-09-28 UTC)
+
+The completed Rust job `108820375569` in CI run `36388979601` failed in audit
+tooling before Cargo: the first PowerShell checksum fixture exceeded its
+10-second subprocess deadline. The remaining seven fixtures completed, and
+all eight actual PowerShell fixtures pass locally. The fixture deadline is
+now 60 seconds, retaining `subprocess.run` timeout kill/wait cleanup and all
+checksum assertions. The audit-tooling gate passes. This is internal test
+harness work; the production checksum verifier and package behavior are
+unchanged. Fresh hosted CI completion remains required, and this failed run
+is not counted as successful shared-QUIC evidence.
+
+## RF-006 Scoped WebSocket Readers and Track Processing (2026-09-28 UTC)
+
+Event, compatibility SignalR, and relay WebSocket readers are now scoped
+futures polled alongside their connection writer. Reader completion still
+drains the existing bounded frame queue; connection cancellation immediately
+drops the reader without detaching a task. A regression waits until a reader
+actually stalls, cancels the event/SignalR parent, joins it, and verifies the
+reader was dropped. Existing framing, heartbeat, subscription, and transport
+tests remain intact. Relay protocol/global-registration cancellation cleanup
+is separate remaining work and is not claimed by this reader checkpoint.
+
+Track-intent processing now uses daemon task admission and returns 503 after
+shutdown rather than reporting accepted detached work. A regression verifies
+that the intent stays Pending after rejected admission. Runtime source guards
+reject detached reader/track workers. Originals remain backed up under ignored
+`target/rf-websocket-source-backup`; no native peer port is added. Broader
+RF-006 service inventory and FTP concurrency policy remain open.
+
+Validation: 688 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and scoped outcomes are retained in
+`benchmarks/artifacts/20260928-rf-websocket-and-track-ownership.json`.
+
+## RF-006 Downloaded All-Transport Single-Port Hosted Receipt (2026-09-28 UTC)
+
+Successful hosted Rust job in run `36390159596` at exact source `a43155de`
+retained artifact `10955962868`, `ci-reproducibility-rust`. The downloaded
+all-enabled and disabled transport results each contain three successful
+live shutdown cycles with exactly one peer TCP listener and one UDP listener
+on the same numeric port, closed client sockets, and TCP/UDP rebinding.
+All-enabled probes include pinned control/data QUIC and actual DHT replies
+from the public port. Source hashes were independently checked against the
+exact Git commit; downloaded proof hashes match the reproducibility manifest.
+
+The retained receipt is
+`benchmarks/artifacts/20260928-rf-hosted-single-peer-port-receipt.json`.
+This verifies the native shared UDP/QUIC endpoint on a clean Linux runner,
+including DHT-enabled routing. The full platform matrix was still running at
+receipt download; later script/WebSocket ownership changes are not covered
+by this earlier job. Broader RF-006 and deployed interop remain open.
+
+## RF-006 CLI Probe Child Cancellation (2026-09-28 UTC)
+
+Peer accept tasks and peer/server/transfer fixture workers now use an owned
+join handle. Awaiting preserves existing results and panic reporting; dropping
+a probe, failing before its final join, or timing out requests child abortion.
+There is no detached cleanup worker. Regressions wait for real pending TCP
+listeners, then verify handle drop, timeout, and parent task cancellation
+release child resources and permit rebinding. The parent cancellation case
+joins its parent, and child drop notification confirms its listener was
+released. Normal completion and child panic results are also covered.
+
+The existing probe helpers and fixtures remain intact; the original sources
+are backed up under ignored `target/rf-cli-probe-source-backup`. Source guards
+reject raw spawns in the five maintained fixture/accept owners. This adds no
+production listener or native transport port. Broader RF-006 service inventory,
+relay registration cleanup, and FTP concurrency policy remain open.
+
+Validation: 691 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and cancellation scope are retained in
+`benchmarks/artifacts/20260928-rf-cli-probe-child-ownership.json`.
+
+## RF-006 Bounded Completed-Download FTP Admission (2026-09-28 UTC)
+
+Each daemon now owns FTP upload admission with at most 64 total admitted jobs
+and four active uploads. Full admission waits before spawning a worker, so
+completion events cannot create unbounded queued upload tasks. Accepted jobs
+retain their admission slot through queueing and upload completion. Existing
+FTP retry, connection-timeout, TLS, and transfer settings remain in effect;
+this does not introduce a transfer-duration cutoff for large files.
+
+Shutdown closes both admission and active-work gates before joining managed
+workers, wakes blocked completion callers, rejects late work, and returns
+held slots as cancellation drops futures. Regressions fill all 64 slots,
+observe exactly four stalled active jobs, verify caller backpressure and
+shutdown wakeup, confirm all accepted queued jobs execute when slots become
+available, and check normal completion/closed-registry slot release. A daemon
+fixture verifies shutdown ordering and late admission rejection. Original
+sources remain backed up under ignored `target/rf-ftp-admission-source-backup`.
+This uses no transport socket or additional native port. FTP admission policy
+is implemented locally; hosted proof, relay registration cleanup, and the
+remaining RF-006 service inventory are separate work.
+
+Validation: 695 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+The full daemon suite includes the existing real FTP protocol fixtures.
+Source/log hashes, admission limits, and scope are retained in
+`benchmarks/artifacts/20260928-rf-ftp-upload-admission.json`.
+
+## RF-006 Event Webhook Delivery Ownership (2026-09-28 UTC)
+
+The remaining direct webhook spawns were real production delivery paths,
+not test code. Both ordinary event delivery and compatibility delivery now
+use daemon task admission under their existing delivery permits. Closed
+admission drops the unstarted worker, returns its permit, and ordinary
+webhook delivery persists a failed outcome and delivery statistics; the
+compatibility path records rejected admission in the daemon log. Existing
+webhook DNS/TLS/SSRF, retry, and concurrency boundaries remain in place.
+
+The rejection regression covers both a full delivery pool and a closed task
+registry against the in-memory database, verifying failed status, error
+reason, persisted statistics, and permit recovery without sending a request.
+The previous webhook test suite is preserved in a separate test owner; its
+original source is backed up under ignored `target/rf-webhook-source-backup`.
+Runtime guards reject detached webhook workers. Cancellation outcome
+reconciliation for a delivery already running, relay registration cleanup,
+and remaining RF-006 hosted service coverage are separate work. No native
+peer listener or transport port is added.
+
+An additional regression sends an actual request to an isolated stalled HTTP
+fixture through an owned compatibility delivery worker, then joins daemon
+registry shutdown and verifies socket closure and returned delivery capacity.
+Validation: 697 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and scope are retained in
+`benchmarks/artifacts/20260928-rf-webhook-delivery-ownership.json`.
+
+## RF-006 Reserved Relay Connection Cleanup (2026-09-28 UTC)
+
+Relay connections now reserve cleanup capacity before issuing a challenge.
+There are at most 256 outstanding reservations/queued cleanup requests per
+daemon. A dropped connection synchronously removes its global hub sender and
+uses its reserved queue slot to request protocol deregistration, including
+registered-agent/request/waiter removal. No cancellation path spawns a new
+task or needs to acquire the asynchronous protocol lock. Normal connection
+completion deregisters directly and releases the reservation.
+
+One managed cleanup worker processes requests and holds a weak reference to
+daemon state, avoiding a reference cycle while waiting for work. Full
+reservation capacity applies backpressure. Shutdown closes reservation
+admission before joined worker cancellation, then explicitly clears live
+protocol connections and requests, covering queued cleanup that cannot run
+once the worker is cancelled. Completed share-upload history is retained.
+Original sources are backed up under ignored `target/rf-relay-cleanup-source-backup`.
+
+Regressions cover authenticated agent removal after a contended protocol lock,
+immediate hub sender removal, the 256-reservation limit, blocked admission
+wakeup at shutdown, active registration removal and late reservation rejection,
+retained completed share-upload history, and cancellation of a pending relay
+WebSocket reader alongside event/SignalR readers. No native peer transport
+port is added. Already-started webhook delivery outcome reconciliation and
+fresh hosted service evidence remain separate RF-006 work.
+
+Validation: 701 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes, reservation limit, and cancellation scope are retained in
+`benchmarks/artifacts/20260928-rf-relay-connection-cleanup.json`.
+
+## RF-006 Interrupted Webhook Outcome Reconciliation (2026-09-28 UTC)
+
+After joined delivery-worker shutdown, queued webhook records are reconciled
+as failed with an explicit unknown-outcome reason. Startup performs the same
+reconciliation after startup validation and before accepting work, covering
+unclean interruption. The `no-start` path returns before reconciliation.
+This records that local confirmation did not complete; it does not assert
+that the remote endpoint received nothing and does not send another request.
+Confirmed success/failure records, attempts, response data, and timestamps
+are retained. A partial index contains only queued records, avoiding a scan
+through archived delivery outcomes on shutdown/restart.
+
+A real SQLite reopen regression verifies interrupted record recovery,
+idempotence, preserved terminal outcomes/data/attempts, and use of the queued
+index in the query plan. A daemon-state regression verifies worker cancellation
+before reconciliation and the persisted shutdown reason. Original sources
+are backed up under ignored `target/rf-webhook-reconciliation-source-backup`.
+This closes the local cancelled-delivery persistence gap identified by the
+webhook ownership checkpoint. Fresh hosted service evidence and the complete
+RF-006 audit remain separate work; no native transport port is added.
+
+Validation: 703 daemon tests pass with one default-ignored mount fixture;
+strict daemon Clippy and full-controller/legacy all-targets compilation pass.
+Source/log hashes and recovery scope are retained in
+`benchmarks/artifacts/20260928-rf-webhook-outcome-reconciliation.json`.
+
+## RF-006 Completed Hosted Single-Port Matrix (2026-09-28 UTC)
+
+CI run `36390159596` at `a43155de` completed successfully across all eleven
+jobs: Rust, production web, Linux AArch64, Linux/musl x64/arm64, macOS
+x64/arm64, Windows x64, and package/deployment surfaces. The exact GitHub
+job/step receipt and link/hash to the downloaded all-enabled single-port
+artifact are retained in
+`benchmarks/artifacts/20260928-rf-hosted-a431-complete-matrix.json`.
+This is a definitive successful matrix for the shared-QUIC/DHT and forwarding
+source; subsequent lifecycle commits require their own hosted completion.
+
+## RF-066 E2E Fixture Repository Discovery (2026-09-28 UTC)
+
+Optional media discovery assumed the current directory was exactly three
+levels below the repository, so normal launches from the repo root or `web`
+could inspect the wrong fixture tree. The node harness also had a separate
+cwd assumption. Both now use one ancestor search for the workspace and daemon
+Cargo manifests. Absolute fixture directories validate independently of cwd.
+Media availability requires nonempty regular files, excluding empty files or
+directories. The fetch helper passes the script path through `execFile`
+arguments instead of interpolating a shell command.
+
+Three actual Playwright utility regressions verify discovery from five cwd
+locations, absolute fixture paths, checksum validation, rejected missing/empty/
+directory media, and an explicit failure outside a checkout. Their temporary
+presence stubs are not encoded playback media. The CI Rust job now executes
+these utility tests without launching nodes or requiring browser installation.
+The complete web suite passes 915 tests; the seven-file static manifest and
+its corruption regressions pass. Original sources remain backed up under
+ignored `target/rf-fixture-path-source-backup`.
+
+RF-066 remains open: the committed media manifest declares no downloadable
+audio/video assets, and the optional playback/sharing matrix still needs
+actual supplied or explicitly declared media. The previous wording implying
+Linux codec unavailability was unsupported; missing declarations and the cwd
+bug are independently established causes. This checkpoint does not count
+presence stubs as playback proof or alter native peer transport ports.
+
+## RF-006/RF-066 Native E2E Peer Port and Child Ownership (2026-09-28 UTC)
+
+The real-node E2E harness no longer allocates separate DHT or overlay ports.
+Its TCP listener, overlay bind, and DHT configuration use the same loopback
+peer port, matching the native transport implementation. HTTP remains the
+existing application API service. A shared configuration regression checks
+all four peer settings and rejects invalid ports.
+
+Nodes enter the harness registry before startup; failed starts call stop
+before removal. Stop records cancellation before further process launch,
+waits for a live child's close event, and clears its force-kill timer. An
+actual Node child regression verifies termination and repeated stop; a
+failed-start regression verifies early registration and cleanup. Together
+with fixture discovery, six Playwright utility tests pass without media or
+browser dependencies. CI runs both utility suites. Original harness sources
+are backed up under ignored `target/rf-e2e-single-port-source-backup`.
+
+This checkpoint does not claim cancellation of shared build commands or
+complete RF-006/RF-066 acceptance. Those ownership and playback checks remain
+part of the continuing program.
+
+## RF-066 Verified Optional Media Downloads (2026-09-28 UTC)
+
+The optional manifest now declares the genuine Sintel stereo movie and Open
+Goldberg Aria recording, with license/attribution/source metadata, exact byte
+counts, and SHA-256 pins. Independently published source sizes and SHA-1 hashes
+were checked before curating the SHA-256 pins. Both assets were subsequently
+downloaded through the hardened helper and verified again before installation.
+FFprobe identifies real H.264/AAC movie streams and a Vorbis audio stream.
+No binary is committed; the seven tracked static files retain their hashes.
+
+The Python downloader enforces manifest/count/byte budgets, safe relative paths
+without symlinks, HTTPS including redirects, 64 KiB reads, socket timeouts,
+and a per-file deadline. It writes to a temporary file, checks expected size
+and hash, and installs atomically; failed partials are removed. Invalid existing
+caches are preserved and rejected. Fetching never regenerates observed hashes.
+The shell entry point invokes this single implementation. Static corruption
+tests now copy only the seven manifest files, avoiding optional media copies.
+
+Eight offline downloader regressions, six Playwright utility checks, static
+manifest/corruption checks, and the full audit-tooling gate pass. Evidence and
+source hashes are retained in
+`benchmarks/artifacts/20260928-rf-pinned-media-fetch.json`. Movie sharing and
+streaming gates now require Sintel alone, matching their actual dependency.
+The real nine-case sharing/streaming run is pending at this checkpoint;
+RF-066 remains open until its actual acceptance evidence is complete.
+
+## RF-066 Real Invite/Contact Browser Flow (2026-09-28 UTC)
+
+The first actual optional-media run exposed product/test contract failures:
+four cases failed and five serial cases did not run. The contact UI supplied
+an invite link but omitted the username required by the current contact API.
+The native profile/invite generator also read the deliberately redacted
+session snapshot, producing a masked contact address. Native profile/invite
+display names now use the runtime/configured identity resolver already used
+by capability descriptors; session summary redaction remains intact.
+
+The web adapter decodes bounded version-1 UTF-8 invite payloads, rejects invalid
+or expired links before posting, and sends the extracted address-book username.
+Username-only contact records display as named, unverified contacts. Imports
+do not authenticate profiles or grant transport/share permissions. The real
+`invite_add_friend` browser case passes against three rebuilt native nodes,
+each using one loopback peer TCP/UDP port, with external login disabled.
+
+Validation passes 704 daemon tests (one ignored mount fixture), 930 web tests,
+strict Clippy, and full-controller/legacy all-targets compilation. Source/log
+hashes and scope are retained in
+`benchmarks/artifacts/20260928-rf-native-profile-contact-invite.json`.
+Other playback cases still use stale group setup, outgoing-share discovery,
+or raw query tokens instead of the current stream-ticket exchange. These
+failures are established by a real run and keep RF-066 open.
+
+## RF-006 Later Completed Hosted Lifecycle Matrix (2026-09-28 UTC)
+
+Run `36391848047` at exact commit `59ddda17` completed successfully across all
+eleven CI jobs, including Windows archive smoke and package/deployment surfaces.
+The retained job/step receipt is
+`benchmarks/artifacts/20260928-rf-hosted-59dd-complete-matrix.json`. It covers
+the script process-group and scoped WebSocket reader ownership checkpoints.
+Later lifecycle/media/profile changes still require their own hosted result.
+
+## RF-066 Genuine Ticketed Movie Playback (2026-09-28 UTC)
+
+Five sharing cases and two streaming cases now pass with the genuine pinned
+Sintel movie. The tests select its exact filename/content hash rather than a
+poster, discover incoming grants through the incoming endpoint, send bearer
+tokens only in `X-Share-Token`, and exchange them for short-lived stream tickets.
+Actual movie responses satisfy start/offset/suffix ranges and the 77,410,288-byte
+length. Missing/invalid tickets and forbidden query share tokens are rejected.
+The recipient UI opens the ticketed movie in a browser popup; the regression
+requires readyState at least 2, nonzero intrinsic video width, a decoded frame
+counter greater than zero, and no media error. Linux codec unavailability is
+not an established blocker for this actual browser run.
+
+Primary movie file streams now label MP4/WebM/Matroska with video MIME types;
+the frozen audio-preview mapping and audio extensions retain their contracts.
+The harness no longer treats ignored build directory mtimes as source changes,
+and future local fallback builds use locked debug Cargo. A timestamp regression
+passes with the existing six utility checks. Optional pack discovery tracks
+the declared movie/audio assets and passes the supported fixture-root setting.
+
+705 daemon tests, strict Clippy, full-controller/legacy all-targets compilation,
+seven Playwright utility tests, and static manifest/corruption checks pass.
+Source/log/binary hashes and explicit remaining scope are retained in
+`benchmarks/artifacts/20260928-rf-ticketed-movie-playback.json`. Original E2E
+sources remain in Git and the ignored `target/rf-ticketed-media-source-backup`.
+The recipient-download and per-grant concurrency cases remain open; their
+assertions are not weakened or reported as passed.
+
+## RF-006 Completed Hosted Later Ownership Matrix (2026-09-28 UTC)
+
+Run `36395807187` at clean exact commit `cf37f4bd` completed all eleven CI jobs
+successfully. Downloaded Rust artifact `10959255675` contains three disabled
+and three all-enabled single-port shutdown cycles plus reproducibility metadata.
+Proof hashes match the artifact manifest, and every transport source, lockfile,
+and configuration hash independently matches `git show` at that source.
+The full job/step receipt, metadata, and both actual proofs are retained in
+`benchmarks/artifacts/20260928-rf-hosted-cf37-complete-matrix.json`. This covers
+the later CLI, FTP, webhook, relay, and fixture-discovery changes at that commit;
+subsequent harness/media/profile/MIME changes still need their own hosted result.
+The remaining production lifecycle-command inventory is separate work.
+
+## RF-006 Joined Lifecycle Command Owner (2026-09-28 UTC)
+
+The crate root still spawned a detached task to delay shutdown/restart commands.
+That path now lives in `lifecycle_controller.rs` and enters the daemon's managed
+registry. The existing 100 ms HTTP response-flush delay, command channel, and
+bounded best-effort Soulseek disconnect behavior are preserved. Joined shutdown
+releases delayed or channel-blocked senders; closed admission drops later work.
+The crate root contains no raw `tokio::spawn` after this extraction.
+
+Two regressions verify normal delayed command delivery, canceled delay, a full
+command queue, released sender ownership, and rejected scheduling after registry
+shutdown. Validation passes 707 daemon tests (one ignored mount fixture), strict
+Clippy, full-controller/legacy all-targets compilation, module hygiene, and the
+runtime ownership guard. Three real all-enabled single-peer-port shutdown cycles
+pass with actual DHT/control-QUIC/data-QUIC activity, client closure, and socket
+reuse. Source hashes and the actual proof are retained in
+`benchmarks/artifacts/20260928-rf-lifecycle-command-owner.json`.
+Original root/lifecycle test sources remain in Git and the ignored
+`target/rf-lifecycle-command-source-backup`. Complete blocking-work inventory and
+fresh hosted completion remain separate RF-006 acceptance work.
+
+## RF-010 Hosted AUR Smoke False Positive (2026-09-28 UTC)
+
+The clean `cf37f4bd` package log contains an AUR success marker, but inspection
+found that the Docker fallback invokes `bash -s` with a heredoc without keeping
+stdin open (`docker run -i`). The script can therefore be skipped while the
+container exits successfully. That marker is not accepted as a real makepkg
+receipt; RF-010 remains open pending corrected container execution, working
+directory verification, and an actual fresh clean-runner result.
+
+## RF-010 Executed AUR Source/Prepare Smoke (2026-09-28 UTC)
+
+The Docker fallback now opens stdin with `-i`, changes into the copied package
+directory before invoking makepkg, and records the container ID for cleanup
+on success, failure, or interruption. Cleanup can remove only that validated
+ID. Both host and container paths use `--nobuild`; the previous simultaneous
+`--verifysource` flag exited before extraction and any `prepare()` function.
+Actual host makepkg now verifies and extracts both source and binary PKGBUILDs.
+
+Two offline regressions execute the actual heredoc Bash script with explicit
+Docker/package-manager doubles. They verify both makepkg calls, correct working
+directory, enabled extraction/preparation, suppression of false success on a
+failed binary package, and exact owned-container cleanup. They are part of the
+full audit-tooling gate, which passes. Source/log hashes and the doubles' limited
+scope are retained in
+`benchmarks/artifacts/20260928-rf-aur-container-smoke-execution.json`.
+Original smoke source is backed up in ignored `target/rf-aur-container-source-backup`.
+Fresh actual clean-runner Docker completion is still required for RF-010;
+the previous marker does not establish that completion.
+
+## RF-011/RF-035 Native Windows Smoke and Actual Workflow Lint (2026-09-28 UTC)
+
+Explicit Windows Smoke run `36401784119` at `9b8e52f2` failed before Rust tests:
+the memory-guard regression compared native Node cwd `D:\a\slskr\slskr` with
+Git Bash's POSIX path. It now obtains the expected native cwd outside the guard
+and compares it with native cwd inside the guard. The actual local guard
+regression passes; this is path representation correction, not a bypass.
+
+Windows Smoke now prefers the pinned rustup Cargo binary, restores Rust cache,
+and selects full Perl for vendored OpenSSL through the same helper as main CI.
+The already used main-matrix Perl implementation is extracted unchanged to
+`scripts/select-windows-perl.ps1`; PowerShell syntax validation passes.
+CI installed actionlint but did not execute it. An explicit actionlint step
+now runs, and policy requires that execution and the shared Perl helper in
+both workflows. Pinned actionlint v1.7.12 and the full existing shellcheck gate
+pass locally. No Rust wrapper, virtual-memory cap, or test-thread override is
+added to Rust commands.
+
+The failed hosted receipt, source/log hashes, and local proof scope are retained
+in `benchmarks/artifacts/20260928-rf-windows-smoke-native-cwd.json`; originals
+remain in ignored `target/rf-windows-smoke-source-backup`. Fresh actual Windows
+Smoke and hosted actionlint completion are still required before closure.
+
+## RF-006/RF-066 Owned E2E Build Commands (2026-09-28 UTC)
+
+Shared Cargo/npm promises previously had no deadline or cancellation owner.
+`BuildOwner.ts` now owns commands with a ten-minute deadline, POSIX process-group
+termination (TERM then KILL after five seconds), and Windows PID-scoped
+`taskkill /T /F` on cancellation. Command promises settle after child close. Numeric process-group targets are
+never signaled after Node reaps their leader; independently detached or orphaned
+descendants are not claimed as joined by this harness.
+Each node owns a build cancellation signal and joins its pending build waits
+before stop returns. Sharing is limited to the running build: one canceled
+consumer leaves other consumers intact, while the last consumer cancels and
+waits for cleanup. A subsequent stale build can run again instead of reusing
+a permanently resolved static promise. Cargo still runs directly with the
+pinned workspace configuration; no compiler shim or memory cap is introduced.
+
+Eleven fixture/lifecycle utility regressions pass, including real child close,
+real POSIX descendant cancellation/reaping, command deadline/failure, shared
+consumer cancellation, retry, and build freshness. A targeted TypeScript check
+passes. ESLint does not cover these TypeScript harness files, so its ignored-file
+output is not counted as lint proof. Actual Windows command-tree cleanup and
+fresh hosted utility completion remain required; the local POSIX receipt does
+not establish those. Source originals remain in ignored
+`target/rf-e2e-command-owner-source-backup` and Git history.
+
+## RF-006 External Visualizer Child Ownership (2026-09-28 UTC)
+
+The blocking-work inventory found an unbounded detached `child.wait()` for
+external visualizers in both production dispatch and the opt-in legacy oracle.
+A dedicated child registry now owns Tokio children, keeps the existing four
+semaphore permits, reaps exited children every second in a managed supervisor,
+and closes admission under the same lock used to launch. Shutdown kills and
+waits for its direct children before aborting managed tasks; the reap wait has
+a five-second deadline with logged failure and kill-on-drop fallback. No detached
+blocking wait remains in either visualizer dispatcher. Independent descendants
+are not claimed as owned or reaped by this direct-child registry.
+
+Original sources remain in ignored `target/rf-visualizer-owner-source-backup`
+and Git. Full-controller semaphore saturation fixtures retain their original
+capacity assertions. The remaining filesystem blocking-worker inventory is
+separate: bounded byte counts and awaited request futures do not prove that
+already running blocking work is joined when those requests are canceled.
+
+## RF-035 Hosted Web Lint Correction (2026-09-28 UTC)
+
+CI run `36402572470` at `e7d0dd6a` passed its new actionlint step but the Rust job
+failed at web lint. The invite decoder's ASCII-control regular expression
+violated `no-control-regex`. Equivalent character-code validation now preserves
+rejection of every code from 0 through 31 and 127, with explicit regressions for
+all 33 codes. This is an internal validation correction; invite permissions,
+verification status, payload bounds, username bounds, and expiry checks retain
+their existing behavior. Fresh hosted completion remains required.
+
+Visualiser validation checkpoint: 710 daemon tests pass (one ignored mounted
+fixture), strict all-targets Clippy passes, and full-controller/legacy all-targets
+compilation passes. Three actual all-enabled single-peer-port shutdown cycles
+pass on the rebuilt debug daemon. Web lint and all 47 invite tests pass. Actual
+proof and source/log hashes are retained in
+`benchmarks/artifacts/20260928-rf-visualizer-child-owner.json`. The eight remaining
+production blocking-worker call sites and precise cancellation limits are in
+`docs/dev/blocking-work-ownership.md`; RF-006 is not marked complete.
+
+## RF-011 Completed Named Windows Smoke (2026-09-28 UTC)
+
+Windows Smoke run `36402974583` completed successfully at `e7d0dd6a`. The
+native-cwd memory regression, pinned Rust setup, shared full-Perl helper, Rust
+format gate, and actual workspace tests all passed on Windows. The full
+job/step receipt and source/log hashes are retained in
+`benchmarks/artifacts/20260928-rf-named-windows-smoke-success.json`. This validates
+the named workflow and its setup fixes at that exact source; later runtime/share
+changes continue to require their own complete hosted matrix.
+
+## RF-066 Enforced Owner Share Stream Concurrency (2026-09-28 UTC)
+
+Owner grants previously ignored `maxConcurrentStreams` even though the E2E
+case expected it. Explicit limits from 1 through 64 now persist with the grant
+through an idempotent SQLite column migration. Existing grants default to no
+explicit limit, preserving their response contract and behavior; null clears
+an explicit limit. Limit-only updates retain the original permissions, and
+persistence failure restores only an unchanged transaction candidate, including
+its stream policy. Invalid persisted limits discard the grant rather than
+silently turning it into an unlimited grant.
+
+A bounded grant-count registry holds leases through ticketed HTTP responses.
+It tracks unlimited ticketed responses too, so setting a limit while a response
+is already active counts that response. Lowered limits deny new work until
+capacity becomes available; completion, error, and cancellation release leases.
+Capacity is scoped to the grant, and shutdown closes registry admission.
+No native transport listener or peer port is added.
+
+The repaired concurrency E2E creates an actual owner grant and exchanges its
+header bearer token for a content-bound ticket. A real paused socket holds the
+77,410,288-byte Sintel response open: the next GET returns 429, and after socket
+close a subsequent range GET returns 206. No query bearer token, ignored
+share-group payload, or SPA `/__routes` response is used. All eight real sharing
+and streaming cases pass together, including decoded movie frames. The ninth,
+recipient backfill, remains open; its owner-side metadata receipt does not
+write the recipient's downloads directory.
+
+Validation passes 716 daemon tests (one ignored mounted fixture), strict
+all-targets Clippy, full-controller/legacy compilation, targeted E2E TypeScript,
+and three actual all-enabled shared-peer-port shutdown cycles. Old E2E helper
+null handling and URL predicates were corrected without weakening assertions.
+The run also exposed harness log FileHandle cleanup and late contact-response
+registration; those remain follow-up ownership/test work. Actual proof and
+source/log hashes are retained in
+`benchmarks/artifacts/20260928-rf-owner-share-stream-concurrency.json`.
+Source originals remain in ignored `target/rf-share-stream-limit-source-backup`
+and Git. Fresh hosted completion remains separate acceptance work.
+
+## RF-006/RF-066 Joined Harness Log Ownership (2026-09-28 UTC)
+
+The actual eight-case media run exposed log FileHandles being closed only by
+garbage collection. `NodeProcessLogs.ts` now owns both handles and backpressure
+pipelines, joins writes, and closes handles before app-directory removal.
+Normal stop and failed launch use the same cleanup path. Startup work is tracked
+and joined, spawn errors reject startup instead of throwing from an event
+callback, diagnostic writes are joined, and stop interrupts TCP/health polling.
+In-memory log tails are capped at one MiB per stream while complete output is
+still written to the artifact files. `ss` diagnostics have a two-second timeout
+and 256 KiB output cap. No process, listener, or peer port is added.
+
+Thirteen utility regressions pass, including exact real child stdout/stderr
+capture, both closed file descriptors, unlaunched handles, actual failed spawn,
+startup cleanup, command ownership, and native child close. Both sharing and
+streaming specs pass the targeted TypeScript check. The contacts response wait
+now starts before navigation and asserts the actual successful JSON array;
+its old swallowed timeout is removed. All eight actual media cases pass again
+in 29.6 seconds without FileHandle garbage-collection warnings or missing-contact
+response errors. Recipient backfill and the eight blocking-worker shutdown
+joins remain open.
+
+The corrupt persisted-limit regression now uses a distinct recipient, proving
+invalid policy rejection independently of duplicate-grant filtering. That
+focused migration/persistence/reset/rollback regression passes again. Actual
+logs and source hashes are retained in
+`benchmarks/artifacts/20260928-rf-harness-log-owner.json`. Originals remain in
+ignored `target/rf-harness-log-owner-source-backup` and Git history.
+
+## RF-006/RF-010/RF-035 Completed Hosted Ownership and Packaging Matrix (2026-09-28 UTC)
+
+CI `36405007921` at exact clean commit `7a064d37` completed all eleven jobs.
+Downloaded Rust artifact `10962112931` contains three disabled and three
+all-enabled single-peer-port shutdown cycles. Proof hashes match metadata;
+transport source, seven lockfile and three configuration hashes independently
+match `git show` at that source. The all-enabled cycles use one peer TCP
+listener and UDP on the same numeric port, close clients and rebind sockets.
+
+The actual package job `108882375286` downloaded the Arch Linux Docker image
+and ran both source and binary makepkg invocations through validation,
+extraction and sources-ready. This replaces the earlier stdin false positive.
+It proves source/prepare smoke, not full package compilation or publication.
+The hosted workflow lint step executed actionlint successfully. Complete
+job/step receipts, metadata, both transport proofs, package-log hash and actual
+execution markers are retained in
+`benchmarks/artifacts/20260928-rf-hosted-7a-complete-matrix.json`. Later stream
+limit and harness log changes require their own hosted matrix. RF-006 blocking
+filesystem cancellation and external acceptance items remain open.
+
+## RF-001 Single Public Peer-Port Advertisement (2026-09-28 UTC)
+
+Native/current already rejects a dedicated obfuscation bind, but its default
+obfuscated advertised port used the local listen port rather than the public
+regular advertised port. A configured NAT mapping could therefore direct
+obfuscated peers to the wrong port. Both now advertise the same public port;
+conflicting explicit obfuscated advertisement settings fail configuration
+validation. No new listener is introduced. Frozen compatibility and remote
+peers' advertised transport ports remain separate contracts.
+
+Four current-native configuration regressions, 717 daemon tests (one ignored
+mounted-filesystem fixture), strict Clippy and three actual all-enabled
+single-peer-port shutdown cycles pass. The harness uses the platform temporary
+directory instead of hard-coded `/tmp`; its ten lifecycle tests and targeted
+TypeScript check pass locally. Sources, log hashes and the complete real socket
+proof are retained in
+`benchmarks/artifacts/20260928-rf-shared-peer-advertisement.json`. Originals
+remain in Git and ignored `target/rf-shared-advertisement-source-backup`. This
+fix does not resolve the previously retained dual-valid legacy wire ambiguity.
+
+## RF-006 Owned Diagnostic Child and Temporary Stream Cleanup (2026-09-28 UTC)
+
+The Linux dump path returned directly on `try_wait()` error without killing
+or reaping the child or resetting its ptrace authorization. `core_dump_process.rs`
+now owns the child, process group, permission and partial output. Every failure
+return and unwind goes through cleanup; a reaped leader immediately disarms
+numeric process-group targeting. Successful output is explicitly retained.
+Integration scripts and dumps reuse the same process-group guard, with safe
+standard-library process-group creation and no unsafe code.
+
+Dump admission permits one blocking worker and stays inside that worker after
+HTTP requester cancellation. This also serializes Linux's process-wide ptrace
+authorization. The existing 60-second child deadline remains. Temporary local
+stream files now live in `local_stream_file.rs`; an owned cleanup path survives
+cloned consumers and removes abandoned output on final drop. It covers returned
+dump, mesh-preview and relay files without changing their response contracts.
+Cleanup failures are logged; mounted filesystem calls still have no finite
+completion proof, and running blocking workers remain outside daemon registry
+shutdown joins. RF-006 is not closed by these changes.
+
+Validation for the diagnostic/stream ownership batch passes 722 daemon tests
+(one ignored mounted-filesystem fixture), strict all-target Clippy and
+full-controller/legacy all-target compilation. Three freshly rebuilt actual
+all-enabled single-peer-port shutdown cycles pass. Five new regressions cover
+actual child reap/output ownership, cancellation retaining the blocking-worker
+permit and last-consumer temporary-file cleanup. They do not invoke real gcore
+or grant ptrace permission. Source/log hashes and the complete transport proof
+are retained in
+`benchmarks/artifacts/20260928-rf-diagnostic-child-stream-ownership.json`.
+Original sources are retained in Git and ignored
+`target/rf-core-dump-owner-source-backup`.
+
+## RF-001 Shared Listen-Port Alias and RF-006 Script Wait Ownership (2026-09-28 UTC)
+
+A native/current obfuscation listen-port alias equal to the regular physical
+bind was accepted but retained a nonzero obfuscation listen-port projection.
+VPN synchronization consequently did not recognize that listener as shared.
+The accepted alias now projects the zero shared-listener sentinel; its physical
+port does not override the common public advertised port under a NAT mapping.
+An explicit conflicting public obfuscated advertisement remains rejected.
+The existing mapped-port regression now covers the accepted physical alias.
+
+Integration script cleanup now disarms its process-group guard only after a
+successful wait result. A wait error returns through the still-owned group
+cleanup path. There is no await between successful reaping and disarming.
+
+At the time this evidence entry was first written, RF-066 recipient backfill
+was unimplemented and the HTTP owner endpoint only acknowledged the request.
+The later RF-066 continuation entry at the end of this plan records the local
+implementation and acceptance proof. The retained design uses the authenticated,
+certificate-pinned mesh service on the shared native peer TCP port, with
+grant/recipient/permission checks, bounded confined writes, and exact
+size/SHA-256 verification. No dedicated listener or global HTTP network-filter
+exception is planned.
+
+The shared-alias/script-wait batch passes 722 daemon tests (one ignored mount
+fixture), strict all-target Clippy, full-controller/legacy all-target compile
+and three newly rebuilt all-enabled single-peer-port shutdown cycles. The
+public-port alias regression and actual transport proof, with source/log hashes,
+are retained in
+`benchmarks/artifacts/20260928-rf-shared-peer-alias-wait-ownership.json`.
+Original sources remain in Git and ignored `target/rf-shared-alias-source-backup`.
+The projection check is not deployed VPN proof, and no kernel wait error is
+injected by the existing actual script cancellation tests.
+
+## RF-066 Verified Recipient Mesh Backfill (2026-09-28 UTC)
+
+Incoming-share backfill now retrieves the owner manifest and bounded file
+ranges through the authenticated, certificate-pinned `MeshContent` service.
+The recipient selects the owner from its configured trusted mesh peers; the
+announced HTTP endpoint does not control the network destination. The owner
+revalidates the share token, direct recipient or current group membership, and
+download permission for the manifest and each range. Grant IDs, access tokens,
+and content IDs with Unicode control characters are rejected at that mesh
+boundary; a regression covers C0, DEL, and NEL values in those fields.
+Native/current profiles only are supported. Both ends bound item counts and
+total bytes; the recipient
+stages private temporary files, verifies exact size and SHA-256, then publishes
+without overwriting. Range calls are paced below the existing per-connection
+overlay rate limit and use the existing shared native peer port. The Web button
+calls the recipient's authenticated local API, with no external HTTP fetch or
+network-filter exception.
+
+The focused full-controller Rust integration passes with distinct owner and
+recipient identities. The real three-peer Playwright E2E passes the invite,
+group membership, collection announcement, manifest, and recipient backfill
+cases. The backfill downloads the 399,906-byte fixture and checks its bytes and
+SHA-256 (`2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b`)
+on disk. The focused Web collection tests pass (15 tests); changed-file Rust
+formatting and active-plan freshness pass. This proves local behavior over the
+one shared native peer port; focused owner per-grant admission is also verified locally. Fresh hosted or deployed-device evidence remains open under RF-066 and the associated live-evidence rows. A focused full-controller regression holds a stream lease from the real ticket-admission helper, rejects a second ticket under the same grant's limit of one, allows another grant concurrently, and verifies capacity recovery after release. Live socket saturation and deployed-peer evidence remain open.
+
+## RF-066 Deployed Recipient Backfill Receipt (2026-09-29 UTC)
+
+This is internal-only operational evidence; no product code or published
+behavior changed.
+
+The deployed recipient backfill was verified on kspls0 with a temporary SlskR
+owner using test account 4 and a recipient using test account 3 in an isolated
+Proton namespace. Both used their existing local peer listener on port 44508;
+the owner retained its existing public ingress on port 53514. No additional
+peer listener or public port was introduced. The recipient's temporary HTTP
+API was bound only inside its host-local test namespace.
+
+The first signed attempt exposed a test configuration error: the owner's
+`SLSKR_PEER_HOST_OVERRIDE` rewrote outbound peer destinations to the owner's
+address. Removing that override allowed the owner to probe the recipient's
+actual NAT-PMP endpoint and accept its signed capability descriptor. This is
+the required authenticated identity record for the certificate-pinned
+`MeshContent` backfill. The owner certificate pin remained unchanged.
+
+The recipient accepted the grant announcement with HTTP 201. Backfill then
+returned HTTP 200 (`downloaded`, one item, zero failures). The recipient's
+on-disk file was 131,072 bytes with SHA-256
+`a5ca21d995e6b075abf6bcb9e785f59a987e726477eb21541d86b7da494cc9ca`, matching
+the synthetic owner's fixture. The owner, recipient, temporary token, and
+fixture were removed after the proof. The original `slskd.service` was
+restored healthy with its watchdog and ingress-renewal timers active; no
+RF-066 firewall rules or test network namespace remained.
+
+This closes the deployed recipient-backfill evidence gap. The focused local
+regression still proves per-grant admission and independent-grant capacity;
+deployed concurrent-stream saturation remains open under RF-066.
+
+## RF-006 Blocking Work Inventory Checkpoint (2026-09-28 UTC)
+
+`docs/dev/blocking-work-ownership.md` classifies all nine production
+`spawn_blocking` call sites, including their bounds, cancellation behavior, and
+shutdown gaps. The inventory is complete; joined daemon shutdown for a blocking
+filesystem operation already inside a stalled mounted I/O remains unproved and
+is not represented as complete. Windows Smoke run
+[36462085991](https://github.com/snapetech/slskr/actions/runs/36462085991)
+passed its Rust, WASM, and Web checks on `46854887`, before the runtime teardown
+cap was added. Fresh hosted proof for that policy is pending. At the time of this 2026-09-28 checkpoint, the GitLab mirror was still blocked by the RF-008 loose object. That blob was repaired later on 2026-09-28, and GitLab pipeline 155 on 2026-09-29 passed on `b06c78ec`.
+
+## RF-073 Live Parity Smoke Isolation (2026-09-28 UTC)
+
+The manual Live Parity run
+[36456533118](https://github.com/snapetech/slskr/actions/runs/36456533118)
+failed in the `slskd-api` import after pip warned that the pinned package's
+target directories already existed. A clean reproduction showed that an old
+empty `slskd_api` namespace directory shadows the real package when it is
+installed into a restored Cargo target cache. The compatibility smoke now
+installs its pinned dependency into the run's unique temporary state directory.
+
+The smoke clears a previous API summary before each run so failure cannot upload
+stale success evidence. It reads no per-user configuration and uses a private
+temporary state directory that is deleted at exit. Generated TLS and mesh key material is
+therefore outside the retained artifact tree. The workflow retains only the
+smoke's passing API-call summary, rather than the target subdirectory. Its HTTPS
+listener is disabled because the compatibility calls use the authenticated
+loopback HTTP API. The peer, mesh, and DHT port settings project onto one
+dynamically selected loopback peer port; DHT rendezvous is disabled for this
+offline API smoke. The local run
+passes all 91 public `slskd-api` calls. Manual Live Parity run
+[36464045259](https://github.com/snapetech/slskr/actions/runs/36464045259) on
+`c02c77bc` passed the UI audit and smoke; the retained
+[`live-parity-36464045259` artifact](https://github.com/snapetech/slskr/actions/runs/36464045259/artifacts/10988987235)
+contains the 91-call summary. The credentialed public interop job remains
+skipped because its repository secret is absent; that evidence remains open under
+RF-072.
+
+The stale-report regression seeded an older summary in the workflow artifact
+directory, then ran without the API token. The smoke exited with its expected
+configuration error and removed the old summary before exiting. A subsequent
+authenticated local run rewrote the report after all 91 API calls passed; its
+daemon and temporary state were cleaned up.
+
+## RF-063 Hosted Wishlist Request Budget (2026-09-28 UTC)
+
+Live Parity run
+[36460398465](https://github.com/snapetech/slskr/actions/runs/36460398465)
+recorded all 30 route/viewport views before failing one mock-audit budget. The
+wishlist view made nine startup requests; its exercised row action issued the
+search POST and then refreshed the wishlist with a GET, for 11 total. The
+repeated GET interval was 812 ms, above the 200 ms cadence floor. The route's
+budget is now 11 to account for that one action and refresh. Replaying the exact
+retained Web build locally passes all 30 views with no audit errors. Hosted run
+[36464045259](https://github.com/snapetech/slskr/actions/runs/36464045259) then
+passed all 30 views and retained the audit in
+[`live-parity-36464045259`](https://github.com/snapetech/slskr/actions/runs/36464045259/artifacts/10988987235).
+Deployed accessibility remains open.
+
+## RF-011 Windows Smoke Current-Source Proof (2026-09-28 UTC)
+
+Windows Smoke run
+[36462085991](https://github.com/snapetech/slskr/actions/runs/36462085991)
+completed successfully on `46854887`. Its Rust tests, WASM check, and Web build
+all passed on the Windows runner, replacing the older `e7d0dd6a` evidence.
+
+## RF-006 Bounded Blocking Worker Runtime Teardown (2026-09-28 UTC)
+
+After managed async shutdown returns, `run()` now consumes the Tokio runtime
+with a five-second blocking-work deadline and logs when that deadline is reached.
+A focused regression holds a real `spawn_blocking` closure, confirms runtime
+teardown returns at the configured deadline, then releases the worker and
+observes it complete. This prevents ordinary blocked file work from holding the
+daemon's runtime teardown open indefinitely. The log and design explicitly do
+not claim to join an operating-system call stuck in uninterruptible kernel I/O;
+Windows Smoke run
+[36466395263](https://github.com/snapetech/slskr/actions/runs/36466395263) on
+`d4d185cc` passed the exact bounded-shutdown regression in its 694-test
+Rust run. GitHub CI run
+[36467270728](https://github.com/snapetech/slskr/actions/runs/36467270728) on
+`6e9a6c00` passed the full locked Rust workspace tests, including the bounded
+shutdown regression, then passed the shared peer-gateway shutdown proof and
+reproducibility artifact collection. Its Linux AArch64 job passed; the other
+native platform jobs remain active or queued. Later commits only changed plan
+or inventory documentation.
+
+## RF-001 Shared-Port Ambiguity Policy (2026-09-28 UTC)
+
+The user selected the single-port policy. The shared demultiplexer now has an
+explicit precedence rule: it rejects competing known initialization forms and
+unsafe nested interpretations, prefers a fully recognized init over an opaque
+unknown extension candidate for peer interoperability, rejects unknown
+alternatives that consume conflicting stream lengths, and preserves subsequent
+bytes for an unambiguous unknown frame. Existing peer vectors fail under strict
+unknown-versus-known rejection because the extension payload is opaque. The
+listener suite's 38 tests cover these cases while all peer traffic stays on the
+shared port; no wire marker or dedicated listener is introduced.
+
+
+## RF-011 Windows Formatter Line-Ending Check (2026-09-28 UTC)
+
+Windows Smoke run
+[36465244591](https://github.com/snapetech/slskr/actions/runs/36465244591)
+checked `08f76d7e` and stopped before Rust tests. The formatter diff showed
+identical Rust text with CRLF-only differences from the Windows checkout. The
+changed-file formatter now normalizes trailing CR on both source and rustfmt
+output before comparing. A synthetic CRLF copy passes the local gate alongside
+the ordinary LF source. Windows Smoke run
+[36466395263](https://github.com/snapetech/slskr/actions/runs/36466395263) on
+`d4d185cc` subsequently passed its Rust tests, WASM check, and Web build.
+
+## RF-059 kspls0 Temporary Deployed Route Audit (2026-09-28 UTC)
+
+The current source and Web bundle were served temporarily from kspls0 on the
+existing loopback HTTP slot and the shared peer/mesh/DHT port. The isolated
+instance skipped share scanning and disabled transfers; no host media or
+slskd state was mounted writable. Eight live desktop/mobile route views loaded
+with HTTP 200, all 178 observed API responses were 200, and no tested controls
+overlapped. The strict browser audit did report four blocked-inline-style CSP
+console errors on System and Integrations; they remain open for follow-up. The
+container, source revision, route counts, CSP finding, and restoration record
+are retained in
+[`20260928-rf059-kspls0-deployed-route-audit.md`](../../benchmarks/artifacts/20260928-rf059-kspls0-deployed-route-audit.md).
+The RF-059 route and bundle checks recorded in the table above are complete.
+The deployed CSP errors remained open for follow-up at this point; measuring
+performance on a physical phone is additional evidence, not a completion
+condition for RF-059.
+
+## RF-059 CSP Nonce Metadata Follow-up (2026-09-28 UTC)
+
+The kspls0 audit exposed four blocked inline-style CSP errors on System and
+Integrations. Source review found that static HTML always received a per-request
+nonce in its CSP header, while the matching `csp-nonce` meta tag was injected
+only when runtime-profile disclosure was enabled. The React code editor reads
+that meta tag to nonce its dynamic style elements. Static HTML now receives the
+nonce metadata independently; `slskr-runtime-profile` disclosure remains
+opt-in. The focused `web_static::tests::csp_nonce_is_exposed_without_disclosing_runtime_profile`
+test passes. The correction has not been deployed to kspls0 for a repeat audit,
+so the original browser finding remains open pending deployed revalidation.
+
+## RF-008/RF-067 GitLab Post-Receive Check (2026-09-28 UTC)
+
+The repaired GitLab accepted pushes through `4cc18c26`, and its internal
+`post_receive` endpoint returned HTTP 200 for the latest push at 22:39 UTC.
+Direct pipeline-table inspection
+still shows no run newer than pipeline #81 from 2026-05-17, despite the project
+having CI enabled and using the repository's default `.gitlab-ci.yml` path. The
+configured GitLab MCP token returns 401. Post-receive worker lease warnings
+were observed, but their relationship to pipeline scheduling is unproven. The
+sanitized service evidence is in
+[`20260928-gitlab-postreceive-pipeline-status.md`](../../benchmarks/artifacts/20260928-gitlab-postreceive-pipeline-status.md).
+RF-008 and RF-067 remain open pending a post-repair pipeline run.
+
+## RF-072 Live Account Preflight (2026-09-28 UTC)
+
+The credentialed matrix previously checked only `SLSKR_TEST_ACCOUNT_COUNT`
+entries (default four), then used accounts 5 and 6 for peer and social probes;
+VPN mode also defaults login probes to accounts 5–8. It resolved the public
+Soulseek hostname before discovering missing credentials. The runner now
+validates the unique union of its base account range and selected probe
+indices, rejects invalid/missing accounts before DNS lookup, and defaults the
+base range to six. A local regression covers missing account 5 in the ordinary
+matrix, missing account 6 at the default count, and missing account 7 in VPN
+mode. Both CI workflows run this regression. The credentialed local and hosted
+matrix now passes; the hosted receipt is recorded below.
+
+## RF-072 Credentialed Live Parity (2026-09-28 UTC)
+
+Eight unique account credentials from the protected local credential files
+passed the preflight. The local matrix passed four logins, one local-peer probe,
+and private-message and room-message probes. GitHub Live Parity run
+[`36499213873`](https://github.com/snapetech/slskr/actions/runs/36499213873)
+passed both its Rust UI/API job and credentialed public interop job on
+`506a5dd5`. The credentialed TSV artifact and full UI/API parity artifact are
+linked from the sanitized receipt in
+[`20260928-live-interop-hosted-summary.md`](../../benchmarks/artifacts/20260928-live-interop-hosted-summary.md).
+
+## RF-042 Live Subscription and RF-059/RF-063 Deployed Follow-up (2026-09-29 UTC)
+
+RF-042 now has authenticated live TypeScript SDK evidence from kspls0: a
+`search.started` event arrived after subscription and a second event was not
+delivered after unsubscribe. The ephemeral instance disabled persistence; local
+controller tests retain the event authentication and persistence evidence. Its
+sanitized receipt is
+[`20260929-rf042-kspls0-live-subscription.md`](../../benchmarks/artifacts/20260929-rf042-kspls0-live-subscription.md).
+
+The b42e01c5 React bundle passed an axe and CSP audit across all 15 maintained
+routes at desktop and mobile sizes (30 views), with zero violations, nonce
+mismatches, CSP console errors, or browser errors. Under 150 ms latency and 4×
+CPU throttling, each view transferred 347,827 JavaScript bytes; a production
+asset request confirmed gzip negotiation. The full result is retained in
+[`20260929-rf059-rf063-kspls0-deployed-gzip-accessibility.md`](../../benchmarks/artifacts/20260929-rf059-rf063-kspls0-deployed-gzip-accessibility.md)
+and its per-view JSON artifact. Both temporary kspls0 windows restored the
+healthy slskd service; their containers, remote env files, guards, and SSH
+tunnels were removed.
+
+This 30-view run supersedes the earlier open CSP status in this plan and
+completes the RF-059 route and bundle checks recorded in the table. It used
+phone-sized browser views and CPU/network emulation rather than a physical
+handset. No Android Debug Bridge (ADB) client or connected Android device was
+available locally or on kspls0, and the repository has no configured GitHub
+hosted-device service credentials. Real-phone performance was not measured or
+claimed; that optional measurement does not keep RF-059 open.
+
+## RF-066 Deployed Owner Stream Saturation and Current Hosted Proof (2026-09-29 UTC)
+
+This is internal-only operational evidence; no product code or published
+behavior changed.
+
+A temporary kspls0 swap used the hardened slskr-rf059:b42e01c5-trixie image
+and protected test account 4. The container used the existing single peer
+endpoint on TCP/UDP 44508, loopback HTTP on 127.0.0.1:5030, read-only root,
+temporary state, and no host media mounts. An 8 MiB sparse FLAC fixture lived
+under /run and was mounted read-only.
+
+The authenticated owner API created a collection and item, then a grant for
+test account 3 with maxConcurrentStreams=1. After issuing a share token and
+content-bound stream ticket, a real ranged HTTP response socket was held open
+without draining its body. The held request returned 206; a simultaneous
+request returned 429; after closing the held socket, a follow-up range request
+returned 206. This proves deployed owner-side admission and lease release over
+the actual ticketed stream route. This probe did not run a second recipient
+process or a signed peer announcement; the separate recipient-backfill receipt
+above records that network path.
+
+GitHub Live Parity run
+[36535159086](https://github.com/snapetech/slskr/actions/runs/36535159086)
+passed on exact source commit 0aa2bae62a051d4d65ba1f880d3a6458cdb5ca02.
+Both the credentialed public interop and Rust/API parity jobs succeeded. The
+retained artifacts are
+[credentialed interop](https://github.com/snapetech/slskr/actions/runs/36535159086/artifacts/11018351308)
+and
+[full parity](https://github.com/snapetech/slskr/actions/runs/36535159086/artifacts/11018471640).
+The ordinary push CI for this commit was still running when this receipt was
+written.
+
+The temporary container, credentials, fixture, test driver, restore script,
+and recovery timer were removed. slskd.service returned healthy; the VPN
+watchdog and ingress-renewal timers and ingress service are active, the shared
+local peer port 44508 is listening, both pre-existing Proton namespaces remain,
+and no temporary listener or RF-066 path remains.
+
+## RF-027/RF-048 Pinned Media E2E Closure (2026-09-29 UTC)
+
+Internal-only validation record; no product behavior or release-facing
+configuration changed.
+
+The pinned Sintel movie and Goldberg aria files are present in the ignored
+fixture tree and match their declared byte counts and SHA-256 digests. The
+static fixture manifest check passes, and `meta/fetch_media.py` verifies both
+cached downloads without changing the tree. From `web/`, the isolated Playwright
+harness ran `streaming.spec.ts` and `multippeer-sharing.spec.ts` with
+`SLSKR_TEST_NO_CONNECT=true`; all 9 media-dependent cases passed in 1.3 minutes
+with one worker. The harness built the current debug daemon, started three
+nodes on dynamically selected peer/API endpoints, observed health 200 on each,
+and stopped them after the suite. This closes the earlier optional-media skip
+gap for RF-027 and RF-048. The media files remain locally cached and are not
+committed.
+
+## RF-024 Current Rust Module Sizes (2026-09-29 UTC)
+
+The source-size figures in the earlier audit snapshot are historical. A bounded
+count of tracked top-level Rust modules under `crates/slskr/src` finds no
+`controller.rs`; current representative sizes are `lib.rs` 2,274 lines,
+`security_controls.rs` 2,356, `cli.rs` 2,346, `persistence.rs` 2,326, and
+`relay.rs` 2,293. The controller differential test `full_mesh_differential.rs` has 2,698
+lines. The former 18,161-line crate-root file has been split across modules
+with distinct responsibilities. The RF goal is clear module ownership with
+preserved behavior and repeatable evidence; line count alone is not a
+completion criterion.
+
+
+## RF-046 Duplicate Search Response Benchmark (2026-09-29 UTC)
+
+Internal-only diagnostic; the benchmark adds no CI timing threshold. The
+optimized production `SearchResults` fingerprint path measured a 716,366 ns
+median versus 31,642,837 ns for the former linear response scan, a 44.171x
+speedup in the retained 900-seed/900-duplicate synthetic workload. The
+workload keeps ten of eleven file entries equal so each old full-response
+comparison reaches the differing final file. This exercises the adversarial
+shape that motivated RF-046 while making no remote-peer or end-to-end claim.
+The reproducible source, host, command, limits, and JSON receipt are recorded
+in `benchmarks/artifacts/20260929-rf046-search-response-dedup.md`.
+
+## RF-038 Share Cache Allocation Benchmark (2026-09-29 UTC)
+
+Internal-only diagnostic; default builds and runtime behavior are unchanged.
+The opt-in example compares the current writer with the historical serializer
+on 50,000 generated entries and asserts identical output bytes. Across seven
+alternating trials, allocator calls were 20 versus 408,828 and requested bytes
+were 4,194,304 versus 14,370,775. The development-profile elapsed times include
+allocator instrumentation and filesystem writes, so they are retained as raw
+diagnostic values without a speedup or CI-threshold claim. Reproduction details
+and the JSON output are in
+[`20260929-rf038-share-cache-allocations.md`](../../benchmarks/artifacts/20260929-rf038-share-cache-allocations.md).
+
+## RF-045 Search Result Delta Benchmark and Restart Proof (2026-09-29 UTC)
+
+Internal-only diagnostic; no product contract or runtime behavior changed.
+The retained benchmark replays 10,000 results in 50 batches through the
+production SQLite append path and the former full-projection rewrite. It
+verified 10,000 final rows in both cases, while the append path inserted
+10,000 result rows total and the old path reinserted 255,000. Median timings
+were 31.47 ms and 799.82 ms in a synthetic in-memory SQLite workload. A
+separate file-backed child process committed all batches, was terminated
+abruptly, and its 10,000-row projection was verified after reopening. This
+proves recovery after committed writes, not a crash during a transaction.
+Source, output, environment, and limits are recorded in
+[`20260929-rf045-search-result-delta.md`](../../benchmarks/artifacts/20260929-rf045-search-result-delta.md).
+
+## RF-056 Dashboard Mutation And Search Status Cancellation (2026-09-29 UTC)
+
+Search detail hydration now passes an `AbortSignal` through the searches API
+client, and navigation/unmount aborts the request. The dashboard shares a
+component-owned controller registry across Configuration writes, Database
+cleanup/vacuum, and Webhook create/delete/test actions; unmount aborts active
+requests, abort errors remain quiet, and aborted actions do not update stale UI.
+Dashboard tests for the three affected surfaces pass 8 tests across two suites,
+and the Search component/API suites pass 45 tests. The existing chat, room, and pod history cancellation
+coverage remains in place. A user/operator release-note fragment records the
+client request lifecycle change. Hosted full-matrix proof is pending.
+
+## RF-064 Retired Legacy Pods Route Modules (2026-09-29 UTC)
+
+A tracked-source import and route review confirmed that `/pods` already renders
+the unified `Messaging` workspace and its parameterized paths redirect to
+`/messages`. The old route-shaped `Pods.jsx` (1,267 lines), its tests and CSS,
+and `VpnGatewayConfig.jsx` (870 lines, imported only by that old component)
+were unreachable from production routes. These modules were removed. The active
+Messaging suite now explicitly covers pod detail-load failure alongside its
+existing list/message failure and abort cases. The separate PortForwarding
+compatibility path and implementation remain because the repository records
+them as a maintained import boundary. Dashboard `ApiContext` is the single
+owner of API URL/key state; `AppContent` passes those values as props without
+creating competing page state. The ownership inventory gate checks these
+boundaries and fails if either retired route module reappears. The current
+Messaging/App tests and hosted full-matrix proof are pending.
+
+## RF Continuation Evidence (2026-09-29 UTC)
+
+The Dashboard polling timer now clears an already queued timeout when the tab
+becomes hidden. A 52-test local suite passes with 75.77% statement coverage;
+type-check, lint, production build, and the 260/100 KiB JavaScript/gzip budget
+pass. The kspls0 browser audit exercised six Dashboard routes at desktop and
+mobile sizes, confirmed that a forced health 503 retains the last known-good
+view, verified zero hidden-tab health/stats requests over a poll interval and
+one of each on resume, and found zero axe violations across all 12 views.
+
+A separate kspls0 audit visited all 42 maintained Web routes at desktop and
+mobile sizes (84 document views), with HTTP 200 documents, no route overlap,
+and no unexpected API responses. It disabled clicks and issued no mutations;
+it does not count as direct deployed abort/cursor/cadence evidence for RF-051,
+RF-053, RF-054, RF-055, or RF-056. The full hosted matrix for the new source
+commit also remains pending. The temporary service was removed and the
+original slskd service and listener layout were restored. Detailed records are
+in [`Dashboard audit`](../../benchmarks/artifacts/20260929-rf049-rf052-rf057-rf061-kspls0-dashboard.md)
+and [`Web route audit`](../../benchmarks/artifacts/20260929-rf056-rf064-kspls0-web-route-audit.md).
+
+## RF-008 GitLab Loose-Object Revalidation (2026-09-29 UTC)
+
+The repaired GitLab repository contains blob `272d9b69345294fa1aa98ec3a83a9383c87be9e2`; its type is `blob`, its size is 457,048 bytes, and `git hash-object` recomputes the same object ID. A full strict fsck of the GitLab project repository passes. The original damaged loose object remains in the existing backup at `/var/opt/gitlab/backups/object-repair-272d9b69345294fa1aa98ec3a83a9383c87be9e2-20260928/damaged.loose-object` (103,870 bytes, mode 0444). GitLab `main` resolves to `5b7109e20cf631a481ac2ff805b7451fb71456d6` at the time of the check; pipeline 155 on `b06c78ec` passed. Machine-reproducible checks and the boundary between this repaired Git blob and the separately unrecovered historical MinIO avatar/job-artifact objects are recorded in [`GitLab object verification`](../../benchmarks/artifacts/20260929-rf008-gitlab-object-recovery-verification.md).
+
+## RF-051/RF-053/RF-054/RF-055/RF-056 Current-Build Browser Proof (2026-09-29 UTC)
+
+The current Web build was served through Playwright on the existing local
+origin and used the existing test daemon API; no listener was started, no
+service was restarted, and browser-side request routes blocked all writes.
+The live test API confirmed that the current Messaging workspace made one
+initial read and one follow-up per endpoint after a synthetic burst of 100
+message/room hub frames. A pre-fix observation against the daemon's embedded
+bundle had caused 119 full reads per workspace endpoint in about 1.6 seconds.
+The current bundle also made no measured conversation, room, mesh transport,
+or transfer-speed requests during 10.6 seconds hidden, then resumed on
+visibility. The saved conversation returned a cursor on its full read and
+accepted a subsequent `since` read; navigation aborted a pending chat read
+with `net::ERR_ABORTED`, while unread acknowledgement writes were blocked
+before reaching the daemon. Detailed counts, response statuses, the build
+hash, and measurement limits are in
+[`current-build browser evidence`](../../benchmarks/artifacts/20260929-rf051-rf053-rf054-rf055-rf056-live-browser.md).
+
+The fix coalesces hub-triggered full workspace refreshes to at most one per
+second, serializes the refresh behind an active hydration, and clears its
+timer on unmount. The full Web suite passes 962 tests across 149 files; lint,
+production build, bundle budget, build-output verification, and subpath smoke
+pass. The release behavior is recorded in
+[`the Web messaging release note`](../../release-notes/20260929-web-messaging-event-coalescing.md).
+The current source tip still needs definitive GitHub and GitLab hosted matrix
+results before these RF rows have hosted verification.
+
+## RF-006 Hosted Share-Scan Shutdown Gate (2026-09-29 UTC)
+
+The GitHub Linux Rust job now runs
+[`run-rf-shutdown-overlap.py`](../../scripts/run-rf-shutdown-overlap.py) with
+a 20,000-file fixture after building the exact-source daemon. It overlaps a
+live share scan and distributed child connection with SIGTERM, then verifies
+clean restart, abrupt-crash recovery, socket closure, and SQLite integrity.
+The JSON receipt is added to the 30-day reproducibility artifact with its
+source and binary hashes. This is internal-only CI acceptance coverage; it
+adds no product listener or port. The hosted run was pending when this note was added; its final exact-source result appears in the later RF-006 section.
+
+
+## RF-021 Current-Source Isolated SlskR Database (2026-09-29 UTC)
+
+The exact-source binary from GitHub CI run 36613453093 initialized an isolated
+SQLite database from the current SlskR migrations. The one-shot Docker run used
+network mode none, no credentials, and no published ports; the no-start option
+exited after database initialization and Docker removed the container. The
+three RF-021 tables were initially empty. A deterministic 1,000,000-search-
+result, 500,000-transfer, 500,000-webhook-log fixture was then seeded into that
+actual schema. The 555,638,784-byte database passes PRAGMA integrity_check. Its
+read-only first/deep-page measurements use the current transfer and webhook
+composite indexes, while search results continue to use the existing
+(search_id) index. The report and machine-readable plans are in
+[the current-source database profile](../../benchmarks/artifacts/20260929-rf021-current-source-test-database.md)
+and its JSON output. This is test evidence, not production cardinality data;
+kspls0 has no production SlskR database.
+
+## RF-006 Exact-Source Hosted Shutdown Proof (2026-09-29 UTC)
+
+GitHub CI run 36613453093 executed the Linux shutdown-overlap gate from source
+69cf4141325f234bdd63c3f52df179b069607781 on a clean runner with 20,000
+fixture files. The live share scan was canceled during SIGTERM; the distributed
+socket closed, SQLite integrity passed before shutdown and after an abrupt
+SIGKILL/restart, graceful and restarted processes exited 0, and shutdown
+completed in 0.114 seconds. The retained report SHA-256 is
+a7d47f7708a8be0a5a007132da17a923050a11064bce163ec2de22b9a57f2d63 at
+[the exact-source shutdown report](../../benchmarks/artifacts/20260929-rf006-shutdown-overlap-69cf.json).
+All 11 GitHub jobs, including Package and deployment surfaces, and GitLab
+pipeline 162 passed on this source.
+
+The parent-source GitHub run 36611455407 had one Package and deployment
+surfaces setup failure: Ubuntu amd64 and arm64 apt repositories offered
+libssl3t64 versions 3.0.13-0ubuntu3.15 and 3.0.13-0ubuntu3.16, respectively.
+The later exact-source run 36613453093 passed the same gate.

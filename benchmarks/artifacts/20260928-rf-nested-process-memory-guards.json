@@ -1,0 +1,25 @@
+{
+  "scope": "Nested frontend/browser process guards",
+  "regressions": [
+    "over-limit input rejected",
+    "unverified nesting marker cannot bypass limits",
+    "fallback installs memory limit and marker",
+    "Node heap cap preserved",
+    "caller environment and repository cwd preserved",
+    "tighter nested memory request enforced",
+    "verified Linux cgroup nesting adds no virtual-address limit"
+  ],
+  "gates": [
+    "shell syntax",
+    "process-memory static policy",
+    "process-memory regression suite",
+    "audit tooling"
+  ],
+  "realCgroupVerification": [
+    "memory.max <= requested limit",
+    "memory.swap.max == 0"
+  ],
+  "maximumResidentMemoryKiB": 4194304,
+  "browserAudit": "progressing through actual Chromium routes under bounded cgroup; complete evidence pending",
+  "rustCommandsWrapped": false
+}

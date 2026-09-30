@@ -1,0 +1,54 @@
+name: React Nightly Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '43 8 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: react-nightly-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-workflows:
+    name: React mock browser workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install dependencies and Chromium
+        run: |
+          npm --prefix web ci --allow-git=root --legacy-peer-deps
+          npm --prefix web exec playwright install --with-deps chromium
+      - name: Run bounded browser workflows
+        shell: bash
+        run: |
+          unit="slskr-process-memory-guard-react-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
+          trap 'sudo systemctl stop "$unit" >/dev/null 2>&1 || true' EXIT INT TERM
+          sudo systemd-run --wait --pipe --collect \
+            --unit="$unit" --uid="$(id -u)" \
+            --working-directory="$GITHUB_WORKSPACE" \
+            --property=MemoryMax=4G --property=MemorySwapMax=0 \
+            --property=TasksMax=512 --property=RuntimeMaxSec=15min \
+            /usr/bin/env "PATH=$PATH" "HOME=$HOME" \
+            SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \
+            python3 scripts/run-react-nightly-audit.py
+      - name: Retain browser reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
+        with:
+          name: react-nightly-audit-${{ github.run_id }}
+          path: target/react-nightly-audit/**
+          if-no-files-found: error
+          retention-days: 30

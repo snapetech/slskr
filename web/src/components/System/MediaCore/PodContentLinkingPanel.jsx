@@ -28,7 +28,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const PodContentLinkingPanel = ({ contentId, setContentId, visible = true }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

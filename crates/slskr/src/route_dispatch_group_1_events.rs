@@ -133,6 +133,7 @@ async fn route_dispatch_group_1_events(
             }
             drop(_event_persistence);
             scripts::dispatch(
+                &state.managed_background_tasks,
                 state.integration_settings.read().await.scripts.clone(),
                 state.config.state_dir.join("scripts"),
                 state.config.controller_profile,
@@ -482,7 +483,7 @@ async fn route_dispatch_group_1_events(
                     });
                 };
 
-                tokio::spawn(async move {
+                state.spawn_managed_task(async move {
                     let _delivery_permit = delivery_permit;
                     let webhook_id = webhook_clone.id.clone();
                     if let Err(error) = webhooks::WebhookDispatcher::send_webhook(

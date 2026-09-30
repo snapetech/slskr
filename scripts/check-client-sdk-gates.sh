@@ -92,9 +92,9 @@ run_typescript_checks() {
     fi
     npm test -- --runInBand
     npm run lint
-    npm run build
   )
   scripts/check-web-audit.sh client-ts
+  # The package check builds once and verifies tracked dist before packing.
   scripts/check-typescript-client-package.sh
 }
 

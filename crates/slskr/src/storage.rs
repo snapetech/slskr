@@ -113,6 +113,12 @@ pub fn write_share_cache(path: &Path, entries: &[FileEntry]) -> Result<(), Strin
     fs::write(path, content).map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "rf-benchmarks")]
+#[doc(hidden)]
+pub fn rf_benchmark_write_share_cache(path: &Path, entries: &[FileEntry]) -> Result<(), String> {
+    write_share_cache(path, entries)
+}
+
 pub fn escape_cache_field(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     append_escaped_cache_field(&mut escaped, value);

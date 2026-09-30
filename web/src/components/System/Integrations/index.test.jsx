@@ -1127,11 +1127,13 @@ describe('Integrations', () => {
       />,
     );
 
-    fireEvent.click(screen.getByLabelText('Enable Pushover notifications'));
-    fireEvent.change(screen.getByLabelText('Pushover user key'), {
+    fireEvent.click(
+      await screen.findByLabelText('Enable Pushover notifications'),
+    );
+    fireEvent.change(await screen.findByLabelText('Pushover user key'), {
       target: { value: 'pushover-user' },
     });
-    fireEvent.change(screen.getByLabelText('Pushover API token'), {
+    fireEvent.change(await screen.findByLabelText('Pushover API token'), {
       target: { value: 'pushover-token' },
     });
     fireEvent.click(screen.getAllByText('Save YAML')[1]);
@@ -1171,21 +1173,23 @@ describe('Integrations', () => {
       />,
     );
 
-    expect(screen.getByText('FTP Uploads')).toBeInTheDocument();
-    expect(screen.getByText('Password Configured')).toBeInTheDocument();
+    expect(await screen.findByText('FTP Uploads')).toBeInTheDocument();
+    expect(await screen.findByText('Password Configured')).toBeInTheDocument();
     expect(screen.queryByText('*****')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText('Enable FTP completed-download uploads'));
-    fireEvent.change(screen.getByLabelText('FTP server address'), {
+    fireEvent.click(
+      await screen.findByLabelText('Enable FTP completed-download uploads'),
+    );
+    fireEvent.change(await screen.findByLabelText('FTP server address'), {
       target: { value: 'ftp.example.net' },
     });
-    fireEvent.change(screen.getByLabelText('FTP username'), {
+    fireEvent.change(await screen.findByLabelText('FTP username'), {
       target: { value: 'slskr' },
     });
-    fireEvent.change(screen.getByLabelText('FTP password'), {
+    fireEvent.change(await screen.findByLabelText('FTP password'), {
       target: { value: 'ftp-secret' },
     });
-    fireEvent.change(screen.getByLabelText('FTP remote upload path'), {
+    fireEvent.change(await screen.findByLabelText('FTP remote upload path'), {
       target: { value: '/incoming' },
     });
     fireEvent.click(screen.getAllByText('Apply Runtime')[2]);
@@ -1229,11 +1233,13 @@ describe('Integrations', () => {
       />,
     );
 
-    fireEvent.click(screen.getByLabelText('Enable FTP completed-download uploads'));
-    fireEvent.change(screen.getByLabelText('FTP server address'), {
+    fireEvent.click(
+      await screen.findByLabelText('Enable FTP completed-download uploads'),
+    );
+    fireEvent.change(await screen.findByLabelText('FTP server address'), {
       target: { value: 'ftp.example.net' },
     });
-    fireEvent.change(screen.getByLabelText('FTP password'), {
+    fireEvent.change(await screen.findByLabelText('FTP password'), {
       target: { value: 'ftp-secret' },
     });
     fireEvent.click(screen.getAllByText('Save YAML')[3]);

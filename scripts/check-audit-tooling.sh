@@ -18,8 +18,23 @@ if [[ ! -x "$transport_deriver" || ! -x "$transport_capability_deriver" || ! -x 
 fi
 
 scripts/with-process-memory-guard.sh python3 -m py_compile \
-  scripts/audit-parity-manifest.py "$transport_deriver" "$transport_capability_deriver" "$transport_test" \
+  scripts/audit-parity-manifest.py scripts/parity_audit_*.py scripts/parity_not_applicable.py \
+  scripts/parity_protocol_inventory.py \
+  scripts/run-rf-shutdown-overlap.py \
+  "$transport_deriver" "$transport_capability_deriver" "$transport_test" \
   "$lifecycle_runner" "$lifecycle_test"
+python3 scripts/test-parity-owner-boundaries.py
+python3 scripts/test-parity-webui-evidence.py
+python3 scripts/test-reproducibility-metadata.py
+python3 scripts/test-shared-tcp-shutdown-proof.py
+python3 scripts/test-fetch-media.py
+python3 scripts/test-aur-container-smoke.py
+python3 scripts/test-react-nightly-audit.py
+python3 scripts/test-rf-delayed-filesystem-proof.py
+python3 scripts/test-chocolatey-workflow-checksum.py
+python3 scripts/test-native-style-owners.py
+scripts/with-process-memory-guard.sh python3 scripts/test-react-audit-launch-cleanup.py
+scripts/with-process-memory-guard.sh python3 scripts/test-controller-inventory-order.py
 scripts/with-process-memory-guard.sh python3 "$transport_test"
 scripts/with-process-memory-guard.sh python3 "$lifecycle_test"
 

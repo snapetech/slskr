@@ -48,6 +48,7 @@ run_step "Shell syntax check" bash -n scripts/*.sh
 run_step "Release-note tooling tests" python3 scripts/test_release_notes.py
 run_step "Benchmark comparison and SQLite profiler tests" python3 -m unittest -v scripts.test_compare_benchmark scripts.test_profile_sqlite
 run_optional_step shellcheck "Shell lint" shellcheck \
+  -x \
   -e SC1090,SC2016,SC2030,SC2031,SC2034,SC2100,SC2155,SC2206,SC2317,SC2329 \
   scripts/*.sh
 run_optional_step actionlint "GitHub workflow lint" actionlint

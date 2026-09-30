@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "controlled delayed mounted FUSE filesystem; not hardware performance benchmark",
+  "sourceCommit": "cd4d0de3e97631f777edcc0709652805a83a9e96",
+  "worktreeDirty": true,
+  "startedUtc": "2026-09-28T05:27:01.444440+00:00",
+  "harnessSha256": "4fa039087e911917b5eb730ebcd98a8aad1b9638c6e0f479bc9148584c0775aa",
+  "filesystemSourceSha256": "a897f7eda86b7995aa496d51a5ce4158de721c7a1e1079bc21ca04b0fe08d48d",
+  "testSourceSha256": "4fddb7c5d4eac5e00cb2f5976bda721f541b7fe409bf8ab33352ad23b2484bf7",
+  "filesystemBinarySha256": "7b2061d2e0aa7fcb84f0bcab42ad3372c8c3626f5c4a6066178fc570e136cb69",
+  "libfuseVersion": "3.18.3",
+  "success": true,
+  "actualFuseMountObserved": true,
+  "probeFsyncSeconds": 0.500109,
+  "queueWritableDuringMountedFsync": true,
+  "killedWriterCycles": 3,
+  "recoveredTransfers": 24,
+  "recoveredOrderedEvents": 48,
+  "filesystemProcessReaped": true,
+  "validation": {
+    "daemonLibraryTests": 668,
+    "ignoredMountedFilesystemTest": "passed explicitly",
+    "strictClippy": "passed",
+    "cleanupHelperTests": 5
+  }
+}

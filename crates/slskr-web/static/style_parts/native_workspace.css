@@ -1,0 +1,212 @@
+.slskr-native-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.slskr-native-subviews {
+  background: #101819;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.slskr-native-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slskr-native-tab {
+  background: #151b1b;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.slskr-native-tab.is-active,
+.slskr-native-tab[aria-selected="true"] {
+  background: #253734;
+  border-color: #8dd7c8;
+  color: #f4efe7;
+}
+
+.slskr-native-subpanels {
+  display: grid;
+}
+
+.slskr-native-subpanel {
+  background: #0f1112;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.slskr-native-subpanel header {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.slskr-native-subpanel h4 {
+  color: #f4efe7;
+  font-size: 13px;
+  margin: 0;
+}
+
+.slskr-native-subpanel p {
+  color: #c6d0ca;
+  font-size: 12px;
+  margin: 0;
+}
+
+.slskr-native-panel-actions,
+.slskr-native-panel-fields,
+.slskr-native-panel-facts {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slskr-native-panel-actions button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.slskr-native-panel-fields label {
+  color: #c6d0ca;
+  display: grid;
+  font-size: 11px;
+  gap: 3px;
+  min-width: min(220px, 100%);
+  text-transform: uppercase;
+}
+
+.slskr-native-panel-fields input {
+  background: #081011;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.slskr-native-panel-facts span {
+  background: #151b1b;
+  border: 1px solid #34403f;
+  color: #8dd7c8;
+  font-size: 11px;
+  padding: 5px 7px;
+  text-transform: uppercase;
+}
+
+.slskr-native-filterbar {
+  align-items: center;
+  background: #101819;
+  border: 1px solid #263130;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+}
+
+.slskr-native-filterbar input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  flex: 1 1 220px;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.slskr-native-filterbar button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.slskr-native-filterbar span {
+  color: #8dd7c8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.slskr-native-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.7fr);
+}
+
+.slskr-native-main,
+.slskr-native-side,
+.slskr-native-panel {
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.slskr-native-main h3,
+.slskr-native-side h3,
+.slskr-native-panel h3 {
+  color: #f4efe7;
+  font-size: 18px;
+  margin: 0;
+}
+
+.slskr-native-side h4 {
+  color: #8dd7c8;
+  font-size: 12px;
+  margin: 4px 0 0;
+  text-transform: uppercase;
+}
+
+.slskr-native-command-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slskr-native-command-row input,
+.slskr-native-command-row select,
+.slskr-native-main textarea,
+.slskr-native-side input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.slskr-native-main textarea {
+  min-height: 112px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.slskr-native-command-row button,
+.slskr-native-side button,
+.slskr-native-row button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 10px;
+}
+

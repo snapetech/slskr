@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "frozenSlskdnRevision": "65a14a8b821de4df4ab7ef3ab3b156d7206837a3",
+  "routes": 683,
+  "repeatedInventoriesIdentical": true,
+  "firstSha256": "e90ee2d0210969f008be61678a839b6ba50de14587a4da2c114c7c1f635ca5f9",
+  "secondSha256": "e90ee2d0210969f008be61678a839b6ba50de14587a4da2c114c7c1f635ca5f9",
+  "duplicateRouteFixturePassed": true,
+  "selectionPolicy": "last declaration in lexical source-path order",
+  "sourceBudget": {
+    "maximumLines": 2500,
+    "scope": "tracked code suffixes in check-rust-module-hygiene.sh"
+  },
+  "logs": {
+    "fixture": "1c9d4ecc467e626f03d86ac2b7d68324434e087b2da42d3eb1f9c0baad786308",
+    "auditTooling": "52f40675aeb492d2bafa0a204e38f64825ca598d6d4566dc7e7e154c53449a09"
+  }
+}

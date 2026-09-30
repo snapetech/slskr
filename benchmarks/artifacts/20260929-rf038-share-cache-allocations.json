@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "workload": "share-cache serialization",
+  "entries": 50000,
+  "trials": 7,
+  "output_bytes": 2702955,
+  "current_median_ns": 23709054,
+  "legacy_median_ns": 35140391,
+  "current_median_allocation_calls": 20,
+  "legacy_median_allocation_calls": 408828,
+  "current_median_requested_bytes": 4194304,
+  "legacy_median_requested_bytes": 14370775,
+  "notes": "Synthetic diagnostic; output bytes verified identical; no CI timing threshold."
+}

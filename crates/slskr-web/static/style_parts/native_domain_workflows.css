@@ -1,0 +1,362 @@
+.slskr-native-stat {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: inline-grid;
+  gap: 2px;
+  margin: 0 6px 6px 0;
+  min-width: 92px;
+  padding: 8px;
+}
+
+.slskr-native-stat strong {
+  color: #f4efe7;
+  font-size: 14px;
+}
+
+.slskr-native-stat em {
+  color: #8dd7c8;
+  font-size: 11px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.slskr-native-graph {
+  align-items: center;
+  background: #081011;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  min-height: 180px;
+  padding: 18px;
+}
+
+.slskr-native-graph span {
+  align-items: center;
+  background: #253734;
+  border: 1px solid #8dd7c8;
+  color: #f4efe7;
+  display: flex;
+  justify-content: center;
+  min-height: 54px;
+}
+
+.slskr-transfer-head,
+.slskr-native-tabs {
+  display: grid;
+  gap: 6px;
+}
+
+.slskr-transfer-head {
+  color: #8dd7c8;
+  font-size: 11px;
+  font-weight: 800;
+  grid-template-columns: 1fr 120px 90px 90px;
+  text-transform: uppercase;
+}
+
+.slskr-native-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+}
+
+.slskr-native-tabs span {
+  background: #151b1b;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  padding: 8px;
+  text-align: center;
+}
+
+.slskr-legacy-workflow {
+  background: #0f1112;
+  border: 1px solid #263130;
+  padding: 10px 12px;
+}
+
+.slskr-legacy-workflow summary {
+  color: #8dd7c8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.slskr-legacy-workflow[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.slskr-workflow-primary,
+.slskr-workflow-inspector {
+  background: #111516;
+  border: 1px solid #263130;
+  padding: 14px;
+}
+
+.slskr-domain-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.slskr-domain-table th {
+  color: #8dd7c8;
+  font-size: 11px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.slskr-domain-table td,
+.slskr-domain-table th {
+  border-bottom: 1px solid #263130;
+  padding: 10px 8px;
+  vertical-align: top;
+}
+
+.slskr-domain-table td strong,
+.slskr-domain-table td span {
+  display: block;
+}
+
+.slskr-domain-table td span {
+  color: #9ba8a1;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.slskr-empty-workflow {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.slskr-empty-workflow strong {
+  color: #f4efe7;
+}
+
+.slskr-contract.slskr-surface-matrix {
+  border-color: #34403f;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.slskr-bulk-workbench {
+  border-bottom: 1px solid #263130;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.slskr-bulk-workbench h2,
+.slskr-bulk-workbench h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.slskr-workbench-surface {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 12px;
+}
+
+.slskr-workbench-surface header {
+  align-items: center;
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.slskr-workbench-surface h4,
+.slskr-workbench-surface h5 {
+  color: #ffd166;
+  font-size: 12px;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.slskr-workbench-surface header span,
+.slskr-workbench-surface li span {
+  color: #c6d0ca;
+  font-size: 12px;
+}
+
+.slskr-workbench-surface ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-workbench-surface li {
+  align-items: center;
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 30px;
+  padding: 7px 8px;
+}
+
+.slskr-workbench-surface code {
+  overflow-wrap: anywhere;
+}
+
+.slskr-route-columns h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-columns ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-columns li {
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.slskr-route-live {
+  border-top: 1px solid #263130;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.slskr-route-actions {
+  border: 1px solid #34403f;
+  margin-top: 0;
+  padding: 12px;
+}
+
+.slskr-route-actions h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-actions ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-actions li {
+  align-items: stretch;
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.slskr-route-actions li div {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr;
+}
+
+.slskr-action-input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 32px;
+  padding: 0 9px;
+  width: auto;
+}
+
+.slskr-action-button {
+  background: #ffd166;
+  border: 1px solid #ffd166;
+  color: #17120d;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.slskr-action-button:hover {
+  background: #f4efe7;
+  border-color: #f4efe7;
+}
+
+#slskr-action-status {
+  color: #c6d0ca;
+  margin: 10px 0 0;
+}
+
+.slskr-route-live h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-live ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-live li {
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 220px 1fr;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.slskr-runtime {
+  border-color: #5f4229;
+}
+
+.slskr-runtime li {
+  grid-template-columns: 88px 180px 1fr;
+}
+
+.slskr-probe-pending {
+  color: #ffd166;
+}
+
+.slskr-probe-ok {
+  border-color: #28604f;
+}
+
+.slskr-probe-error {
+  border-color: #7a3a3a;
+}
+
+.slskr-probe-error span {
+  color: #ffb4a8;
+}
+

@@ -1,0 +1,629 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "c07d2ced4a88953012e6728e4a86aa3011f2b04d",
+  "source": "crates/slskr/src/config_tests.rs",
+  "originalBytes": 140311,
+  "originalSha256": "3735346525e647b8b50b448582e1c66729328e470d559ee20a7952214ce85f9c",
+  "originalLines": 3797,
+  "preservedTests": 79,
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "originalFixtureBytes": 456,
+  "originalFixtureSha256": "860ab7c8edd0d2ad88440c01c4d4434878ec5386e0c6fb9d9ef336cbd93af741",
+  "registrySha256": "add2a5784f9d1e87e46ff72539f20317e2973dc17a417970c7f812217005ce83",
+  "owners": {
+    "crates/slskr/src/config_tests/federation_membership.rs": {
+      "tests": 4,
+      "lines": 239,
+      "sha256": "fb9317ae227b66329e5cb48cbdcb35ef28ffc5efb28e5d56127d7110ed798dd9"
+    },
+    "crates/slskr/src/config_tests/file_layers.rs": {
+      "tests": 12,
+      "lines": 510,
+      "sha256": "44aee5c023b7f0822562b1cf6905a44d5d1215c1404e53b74323a5fd261bbc87"
+    },
+    "crates/slskr/src/config_tests/media_integrations.rs": {
+      "tests": 7,
+      "lines": 412,
+      "sha256": "a4805b5f80e74472ae74d6ed6c0f0151743527829e9b584cee100d140f21e5dd"
+    },
+    "crates/slskr/src/config_tests/peer_transport.rs": {
+      "tests": 16,
+      "lines": 872,
+      "sha256": "34eee845b66d82c86a6574a44b5e99613288def190d36075367ab92ccc969d5b"
+    },
+    "crates/slskr/src/config_tests/runtime_policy.rs": {
+      "tests": 9,
+      "lines": 449,
+      "sha256": "9e7084a5850ce42e8d30f5f505fb5bf6f14ffc3b7952978d538619d8794275c7"
+    },
+    "crates/slskr/src/config_tests/transfer_policy.rs": {
+      "tests": 12,
+      "lines": 523,
+      "sha256": "30c02cbdc66df376c7de4b67ec8666357463664e443502d1be8595e22c527d54"
+    },
+    "crates/slskr/src/config_tests/web_security.rs": {
+      "tests": 19,
+      "lines": 845,
+      "sha256": "cc180c2fcdba5165b0dd77b39445925ce0b3400607048288ce432e929536b468"
+    }
+  },
+  "items": [
+    {
+      "test": "mesh_gateway_settings_match_frozen_defaults_and_validation",
+      "owner": "peer_transport",
+      "originalBytes": 3555,
+      "originalSha256": "6b7ef3c7c97d4667aa745ea1f869c2aaccc70a301a6caf872c9cb0a236d7ec7f",
+      "relocatedPaths": 14
+    },
+    {
+      "test": "controller_web_max_request_body_size_matches_native_layers_and_bounds",
+      "owner": "web_security",
+      "originalBytes": 1903,
+      "originalSha256": "69f0633dd4500586e089bf9a4aa1eec426c10ff1f45bbd686e78cb8bf9c7abce",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "controller_web_cors_reads_frozen_yaml_and_defaults",
+      "owner": "web_security",
+      "originalBytes": 2888,
+      "originalSha256": "b653f46f07d3be857b4ecf0fe6862250a735dbfded0b7f58cb43529807cb3aec",
+      "relocatedPaths": 10
+    },
+    {
+      "test": "controller_no_auth_passthrough_reads_yaml_and_enforces_remote_cidrs",
+      "owner": "web_security",
+      "originalBytes": 2691,
+      "originalSha256": "f50680061d8446049e11c933c5c15263004a491f59d17cb320a1452395937674",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "controller_diagnostics_dump_reads_yaml_and_enforces_no_auth_hardening",
+      "owner": "web_security",
+      "originalBytes": 2675,
+      "originalSha256": "ae18579c3ef505a06c8a1f77c3fc69abdeb5b8c38f5a36f56bf0d409dbe04caf",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "controller_remaining_hardening_rules_match_frozen_startup_policy",
+      "owner": "web_security",
+      "originalBytes": 1717,
+      "originalSha256": "47f5c47a693311c42fe6f42c8b8184a0307b252bfda7b701b4a7b90bdf9fbdea",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "controller_web_rate_limiting_reads_frozen_yaml_and_profile_defaults",
+      "owner": "web_security",
+      "originalBytes": 2954,
+      "originalSha256": "b018644c0bfc8bf5174845832ddc1f99d79429a14282787a1e7141db825687bf",
+      "relocatedPaths": 11
+    },
+    {
+      "test": "controller_surfaces_accept_dotnet_backtracking_regex_syntax",
+      "owner": "web_security",
+      "originalBytes": 807,
+      "originalSha256": "e639239db1fa87a9fe1fa7550b1ecb4b10adfa385ca1cd8e2df46ab64cce8d59",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "current_profile_consumes_canonical_auto_replace_settings",
+      "owner": "media_integrations",
+      "originalBytes": 2327,
+      "originalSha256": "e2b18f742dee6adbd88162a2fe1817f35eb05b9472f3171fb63f67896ab4d8d7",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "current_profile_accepts_upstream_filter_and_lidarr_names",
+      "owner": "media_integrations",
+      "originalBytes": 1624,
+      "originalSha256": "1057967c786ec015ae3532813b02da55c5c69189fbac28418e438b52b4720bca",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "frozen_targets_read_blacklisted_groups_from_their_distinct_yaml_paths",
+      "owner": "transfer_policy",
+      "originalBytes": 2212,
+      "originalSha256": "02477c68c74a1f7568fa5cf8e897207bcd0fb5805d5339974e0cc38156d7ccd0",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "frozen_transfer_download_settings_match_both_target_profiles",
+      "owner": "transfer_policy",
+      "originalBytes": 3221,
+      "originalSha256": "565c312f255763b6cbb749aa8716a0f2e020b41365e3f6b73fa138acd7a74dbf",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "frozen_transfer_groups_and_upload_settings_load_validate_and_preserve_null_windows",
+      "owner": "transfer_policy",
+      "originalBytes": 2672,
+      "originalSha256": "851cf6c758bb302081a7b2599abeb7efc67c79c3c00b296cc613a16bd6a5db30",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "frozen_transfer_group_validation_is_target_specific",
+      "owner": "transfer_policy",
+      "originalBytes": 2189,
+      "originalSha256": "d149d6d2f07531f74af2988b245de131369a718380931a75d47b196e1b09f2b5",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "frozen_controller_startup_aliases_drive_core_runtime_configuration",
+      "owner": "file_layers",
+      "originalBytes": 2400,
+      "originalSha256": "1d9b9c2672d850ac72cb68c9fa40b9c3a912a436647b88c45156460663242a8e",
+      "relocatedPaths": 3
+    },
+    {
+      "test": "frozen_listener_defaults_bind_the_projected_unspecified_address_and_port",
+      "owner": "peer_transport",
+      "originalBytes": 621,
+      "originalSha256": "f336d4c5f62c0ce9b4e9e99c0214aa29a00f0f1efa6cc6c40254e3167f27f39a",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "current_native_networking_defaults_consolidate_the_public_tcp_endpoint",
+      "owner": "peer_transport",
+      "originalBytes": 2690,
+      "originalSha256": "77da1eba74ec5aaab208e2072c7b2c3a90ea327845db52e50ebe3ce9fdd61166",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "native_startup_names_take_precedence_over_frozen_controller_aliases",
+      "owner": "file_layers",
+      "originalBytes": 1289,
+      "originalSha256": "c3a307d7c9323914da3cda2bda5ea5c88c6137ef45635952667f88eb00ff36e0",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "invalid_frozen_controller_alias_reports_the_exact_name",
+      "owner": "file_layers",
+      "originalBytes": 354,
+      "originalSha256": "a9b8c8a174dae7d1004cf9f47a2983aee8363d946b1bf20c04d8fc302a74774f",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "frozen_web_bind_profiles_preserve_multi_address_and_target_specific_names",
+      "owner": "web_security",
+      "originalBytes": 2274,
+      "originalSha256": "6de153e5685d08b1744437b1d09988f0ba7f00f7a3afe7907d54fb9f0be6ee54",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "frozen_directory_yaml_environment_and_target_validation_drive_storage_roots",
+      "owner": "file_layers",
+      "originalBytes": 4382,
+      "originalSha256": "81d276313aba4326343a1dab0c25aa70e895dd7696508719912e69e78e73913d",
+      "relocatedPaths": 10
+    },
+    {
+      "test": "native_rejects_loopback_listener_only_when_connecting",
+      "owner": "peer_transport",
+      "originalBytes": 2016,
+      "originalSha256": "905f793a87fb574a7fb5606e61fa08e14018809e4b88c9966277eab38ad6a3fc",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "controller_yaml_is_a_real_startup_provider_for_core_settings",
+      "owner": "file_layers",
+      "originalBytes": 5301,
+      "originalSha256": "bb635ebab23ccd0542f8b2172d069b5cfe20c2321f8b86b5201ec266cb0c3808",
+      "relocatedPaths": 3
+    },
+    {
+      "test": "controller_yaml_instance_name_matches_frozen_unvalidated_string_binding",
+      "owner": "file_layers",
+      "originalBytes": 1674,
+      "originalSha256": "8cca623f5bc57f81f12b91cf87d4fcb7416e4a20867d795e73f8fbe981474208",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "musicbrainz_yaml_projection_matches_frozen_integration_options",
+      "owner": "media_integrations",
+      "originalBytes": 1833,
+      "originalSha256": "a1c63772880db9edaf3788cd98692dc84a61a8f108d8cc6b7960928b8fd905fb",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "chromaprint_and_acoustid_settings_match_frozen_integration_options",
+      "owner": "media_integrations",
+      "originalBytes": 2513,
+      "originalSha256": "ed1cc135340764cd7be1b6cd2cf1d7086c6e4c35a8d43e428856dcc16b7b2ed2",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "frozen_share_directories_preserve_aliases_exclusions_and_raw_values",
+      "owner": "transfer_policy",
+      "originalBytes": 1310,
+      "originalSha256": "6f244912dde25ad01100cbe24bc93c9f19723fcef37141cbfcc150ce5c922168",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "controller_yaml_precedes_frozen_environment_aliases_while_native_names_win",
+      "owner": "file_layers",
+      "originalBytes": 1252,
+      "originalSha256": "3ee359b8b6a0361ffd69c003c47f4efa909076f5a4c4794d3743f9a7375fc338",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "controller_yaml_startup_provider_rejects_symlinks",
+      "owner": "file_layers",
+      "originalBytes": 986,
+      "originalSha256": "26655f9e6981d63de1b2809a8692cbf81a2c9d37d626d11da131523c88149791",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "config_file_reader_rejects_oversized_files",
+      "owner": "file_layers",
+      "originalBytes": 665,
+      "originalSha256": "874d000be4dc0bf8040bf7fa9af905393be8f8c8a131367b527405dd9fce49cf",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "config_file_reader_rejects_non_regular_paths",
+      "owner": "file_layers",
+      "originalBytes": 594,
+      "originalSha256": "6c4c3f7ab97b28a752ba1997a2b7fa0c3a6767014bba62d4fa29705c1fc2c20e",
+      "relocatedPaths": 1
+    },
+    {
+      "test": "config_file_reader_rejects_symlinks",
+      "owner": "file_layers",
+      "originalBytes": 864,
+      "originalSha256": "5ebc0a5bd50f9784060f98a15b5206ab15b7acf437438c321454c5c7cb3289eb",
+      "relocatedPaths": 1
+    },
+    {
+      "test": "config_file_reader_parses_small_files",
+      "owner": "file_layers",
+      "originalBytes": 592,
+      "originalSha256": "68a9b2f8912b413dce52695939487e6db4adc65dc028cad055e95d2ccd5f43aa",
+      "relocatedPaths": 1
+    },
+    {
+      "test": "config_sensitive_value_detection_covers_secrets",
+      "owner": "web_security",
+      "originalBytes": 900,
+      "originalSha256": "3b214b40a15b64a84dcf89f93cf8a4c61565ffaa37157c4acd62add23249abbf",
+      "relocatedPaths": 9
+    },
+    {
+      "test": "lidarr_url_rejects_embedded_credentials_before_projection",
+      "owner": "media_integrations",
+      "originalBytes": 1014,
+      "originalSha256": "8a403d10b2cd4c510e901491e6b45e673103c917961b23cbfbe0adfd714d996d",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "trusted_proxy_cidrs_parse_from_env_and_file",
+      "owner": "web_security",
+      "originalBytes": 939,
+      "originalSha256": "7a176e7b66e04a6b3783af98cdeec6bf76139d2ca571869ee7c90d486dfbb5b3",
+      "relocatedPaths": 5
+    },
+    {
+      "test": "api_token_rejects_blank_env_and_file_values",
+      "owner": "web_security",
+      "originalBytes": 923,
+      "originalSha256": "891ea5071e4dc42d100ff08b7858a784ecaa194360100767a2630179f03c8747",
+      "relocatedPaths": 5
+    },
+    {
+      "test": "role_api_tokens_are_distinct_and_never_serialized",
+      "owner": "web_security",
+      "originalBytes": 1285,
+      "originalSha256": "504c11338b8bf3e8fe0c7f4b82bc529cfa18bb9ab1a7ea1b194d50a4d6c5e518",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "sanitized_config_is_valid_json",
+      "owner": "web_security",
+      "originalBytes": 383,
+      "originalSha256": "5c58af378dcf11ecccc25003c9a044cbe890c3646fb2c04ab4f009b8d13d6100",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "controller_profile_is_explicit_bounded_and_projected",
+      "owner": "runtime_policy",
+      "originalBytes": 1662,
+      "originalSha256": "1cce0d6c9b44ded3ade58e3d3e4dda2e956957b73d6218f49bf74fa67e33a5ea",
+      "relocatedPaths": 12
+    },
+    {
+      "test": "gold_star_club_autojoin_is_profile_aware_and_configurable",
+      "owner": "federation_membership",
+      "originalBytes": 2626,
+      "originalSha256": "6b19666d2b1185b8092d87e3033041e2f327ddeb9a5c49580f0fe045b973ba32",
+      "relocatedPaths": 15
+    },
+    {
+      "test": "api_token_rejects_unrepresentable_env_and_file_values",
+      "owner": "web_security",
+      "originalBytes": 1196,
+      "originalSha256": "e59f06343915f13adc8ecf9615fc1a54d8d96a6b09a6f6ab5b4038aea8e506b5",
+      "relocatedPaths": 5
+    },
+    {
+      "test": "api_token_length_matches_http_header_capacity",
+      "owner": "web_security",
+      "originalBytes": 1150,
+      "originalSha256": "da71478e281cb9f5e6661965ca95171d35bbc56787ff5bd43671107501b4061f",
+      "relocatedPaths": 7
+    },
+    {
+      "test": "trusted_proxy_cidrs_reject_invalid_prefixes",
+      "owner": "web_security",
+      "originalBytes": 345,
+      "originalSha256": "19954f7913ef384c4dbfeffe4681237d8e6ac480afbd9a538ffc745c40101c0a",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "peer_response_timeout_rejects_zero",
+      "owner": "peer_transport",
+      "originalBytes": 346,
+      "originalSha256": "de9ad7eb0107cd7bbcde87e6d8cf20d7f2e19c6c09ddc0df55d7b538cbb82088",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "soulseek_connection_defaults_bounds_and_target_difference_are_exact",
+      "owner": "peer_transport",
+      "originalBytes": 2346,
+      "originalSha256": "e3ef26a70452e628cd4ab55dd2cd79c5a82bf6f8b7b4943e545b43f317256d6e",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "private_message_auto_response_is_opt_in_bounded_and_redacted",
+      "owner": "peer_transport",
+      "originalBytes": 1734,
+      "originalSha256": "34d0e1fef65a675cd5e1232dbda3e143b96638c8b0b353fe54d87860f7bcdeac",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "runtime_intervals_reject_zero_and_unrepresentable_values",
+      "owner": "runtime_policy",
+      "originalBytes": 678,
+      "originalSha256": "ffbf534ef5889cbabbc5f8bcb3cdac8a925e2003e6f35d77545990d7339814d5",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "transfer_auto_retry_defaults_match_the_frozen_client_policy",
+      "owner": "transfer_policy",
+      "originalBytes": 863,
+      "originalSha256": "d9ae3898e0504aad962099a4ec749f28b09d309a9f8397e2a5624f4ea215b484",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "transfer_auto_retry_bounds_are_enforced_at_startup",
+      "owner": "transfer_policy",
+      "originalBytes": 1093,
+      "originalSha256": "b86e5832714ff94766b66d1b4e08cebf47a6a93c67de387d04c85817305e82b2",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "transfer_auto_retry_preserves_fractional_tolerance_and_frozen_boundary_rounding",
+      "owner": "transfer_policy",
+      "originalBytes": 1032,
+      "originalSha256": "9eb6896bb2e2921c055e6de9fbd3805f44027d0e318e2b2126f6ee3f33a92b16",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "managed_blacklist_parses_cidr_p2p_and_dat_ranges",
+      "owner": "transfer_policy",
+      "originalBytes": 1465,
+      "originalSha256": "7478a3ecfd5e719801553919cbe687df0864783d6762f9f9caac023bb8013ad0",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "managed_blacklist_preserves_target_specific_p2p_colon_handling",
+      "owner": "transfer_policy",
+      "originalBytes": 1340,
+      "originalSha256": "710bce6630502edff744bc757eee317f480c233985f3eec039c102e127c6089c",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "controller_swagger_defaults_split_by_target_and_honors_environment",
+      "owner": "web_security",
+      "originalBytes": 1101,
+      "originalSha256": "ed8ea504ada7390ee4ed2cf6a47cfd3fe1b17de83492df05de398487fa29dc81",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "controller_metrics_defaults_split_by_target_and_enforce_credentials",
+      "owner": "web_security",
+      "originalBytes": 2149,
+      "originalSha256": "65a7db3cc0d7fa69438bc4713c684b59a6711eda7331898d5fabd7027d435fef",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "controller_web_auth_defaults_match_frozen_profiles",
+      "owner": "web_security",
+      "originalBytes": 1634,
+      "originalSha256": "18867fe4e6814e953b4f321f77f97d928bc9b00b6ed8a097a37afee39d969db3",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "controller_headless_defaults_false_and_honors_environment",
+      "owner": "runtime_policy",
+      "originalBytes": 767,
+      "originalSha256": "36a4faa8c236082b8681a186961490347a7bb0ea313f1aa1be766332c2ff0513",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "controller_startup_flags_default_false_and_honor_environment",
+      "owner": "runtime_policy",
+      "originalBytes": 1975,
+      "originalSha256": "0a74dbf53b1bc13eaafa7aa02c61ba5d8f69e82e57b147bc771d63d137d44364",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "transfer_rescue_defaults_match_the_frozen_client_policy",
+      "owner": "transfer_policy",
+      "originalBytes": 826,
+      "originalSha256": "522a63598156475adfc6e96bec0e3ffb49f4587876f40e3a2f65b815a28719d3",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "transfer_rescue_bounds_are_enforced_at_startup",
+      "owner": "transfer_policy",
+      "originalBytes": 973,
+      "originalSha256": "58a6a32ef5594f1f97e2a57422c48ed7c69ce76cb90b19f4bbbb502bf025c692",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "soulseek_obfuscation_defaults_to_regular_first_compatibility",
+      "owner": "peer_transport",
+      "originalBytes": 1643,
+      "originalSha256": "ebbda93576ba28123438dfda5edbe5f32fea988b2633205658b43f7005d32278",
+      "relocatedPaths": 9
+    },
+    {
+      "test": "controller_profile_does_not_expose_native_type1_obfuscation_layers",
+      "owner": "peer_transport",
+      "originalBytes": 1236,
+      "originalSha256": "6cbe1f72c9daee9da60eda0d908982dc28af18905b99e0f8afa98a2243eba713",
+      "relocatedPaths": 3
+    },
+    {
+      "test": "pod_join_signature_modes_are_validated",
+      "owner": "federation_membership",
+      "originalBytes": 1096,
+      "originalSha256": "45e1a7e5271fd3e1d5ae45c570d8667f4c745ccd42777127fda07e3cb1c4bf1c",
+      "relocatedPaths": 9
+    },
+    {
+      "test": "virtual_soulfind_v2_defaults_disabled_and_honors_explicit_enable",
+      "owner": "federation_membership",
+      "originalBytes": 1650,
+      "originalSha256": "482a50f38b754ea04d2175f15b4040bd786b2a0f17ed7ce988519a7739751918",
+      "relocatedPaths": 10
+    },
+    {
+      "test": "federation_settings_match_target_defaults_file_layers_and_bounds",
+      "owner": "federation_membership",
+      "originalBytes": 3578,
+      "originalSha256": "2c76d32c9bb1cc576b256a1b36838a288746acb06f45e7c977672582ec74da7d",
+      "relocatedPaths": 9
+    },
+    {
+      "test": "trusted_mesh_peers_are_bounded_pinned_and_redacted",
+      "owner": "peer_transport",
+      "originalBytes": 2666,
+      "originalSha256": "9ec320a24cffa18c97fd4ee0a8bccdaabc0c4f22393664c312fc17c87cb2af1f",
+      "relocatedPaths": 6
+    },
+    {
+      "test": "trusted_mesh_peer_config_rejects_ambiguous_or_unpinned_identities",
+      "owner": "peer_transport",
+      "originalBytes": 1256,
+      "originalSha256": "21cd4af4831f7fc1d50d636ab545d2a625812505d333953508f062fc1a864d4a",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "soulseek_profile_and_distributed_defaults_match_frozen_targets",
+      "owner": "peer_transport",
+      "originalBytes": 612,
+      "originalSha256": "77a45c4a900614e029aa840d2ae90545c70bf0a8a2417b90096a57f32b3307a0",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "soulseek_profile_and_distributed_layers_apply_in_one_contract",
+      "owner": "peer_transport",
+      "originalBytes": 2221,
+      "originalSha256": "2f7488579c7375b2909814d3adf8e93301f72c946e8009ca4c9068bb687accad",
+      "relocatedPaths": 8
+    },
+    {
+      "test": "soulseek_profile_and_distributed_validation_is_bounded",
+      "owner": "peer_transport",
+      "originalBytes": 1622,
+      "originalSha256": "747ee74485865f9053d697e2a72f313d810aa491dc12ec04a817d3d7f8231447",
+      "relocatedPaths": 11
+    },
+    {
+      "test": "daemon_foundation_contracts_load_as_one_runtime_policy",
+      "owner": "runtime_policy",
+      "originalBytes": 3827,
+      "originalSha256": "f41b8a7184b8ddc57418962252bc3631b9a0c206199eaa01fc4731f01c440e73",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "daemon_foundation_validation_rejects_unsafe_values",
+      "owner": "runtime_policy",
+      "originalBytes": 589,
+      "originalSha256": "057c49882d5719a0b456ed2501c9d3b8ac088cf737b31ccb1a21ba3617ee5fe0",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "core_workflow_contracts_load_as_one_runtime_policy",
+      "owner": "runtime_policy",
+      "originalBytes": 2427,
+      "originalSha256": "3e1e89e55c237e0bac76685dab6d2a3935f400a588b28f95e214d283f907f244",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "core_workflow_validation_rejects_out_of_range_values",
+      "owner": "runtime_policy",
+      "originalBytes": 726,
+      "originalSha256": "5d592bd7e3427a4b3a8bcffd9b1967f03dcd0b47af14cbe119a98f19910d2046",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "advanced_networking_security_contracts_load_as_one_runtime_policy",
+      "owner": "peer_transport",
+      "originalBytes": 6220,
+      "originalSha256": "a3c217f829780c1c0b886c0fceda00ad58ef74f43d440ba97f3b8f7f4926908f",
+      "relocatedPaths": 4
+    },
+    {
+      "test": "advanced_networking_validation_rejects_inconsistent_security_limits",
+      "owner": "peer_transport",
+      "originalBytes": 839,
+      "originalSha256": "c46701b10a79a40a482fe9b7b2400e30cb8636ee1a28d95b5193edcd39ba4665",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "signal_system_environment_layers_and_bounds_match_slskdn",
+      "owner": "runtime_policy",
+      "originalBytes": 2536,
+      "originalSha256": "ff8c2a54f0c8c0759bb23bc481e730f3835feb8782e31b4dafa878096211b933",
+      "relocatedPaths": 9
+    },
+    {
+      "test": "media_advanced_service_contracts_load_as_one_runtime_policy",
+      "owner": "media_integrations",
+      "originalBytes": 4459,
+      "originalSha256": "efeae211ca721bc5d290d6e0f7be687b6fa3c52c471b88f157e3a0f34fd3910f",
+      "relocatedPaths": 2
+    },
+    {
+      "test": "media_advanced_service_validation_rejects_unsafe_values",
+      "owner": "media_integrations",
+      "originalBytes": 862,
+      "originalSha256": "3127f53c2ad022a3b7ecff8e9144615f4f1b9d96f1db5a8f7f126d534d8b5ddf",
+      "relocatedPaths": 2
+    }
+  ],
+  "registryLines": 41,
+  "gates": [
+    {
+      "command": "cargo test -p slskr --lib config::tests",
+      "result": "passed",
+      "logSha256": "a4a1fb86b366683e5e735186ed9ef5ba0ca66476385e8d7f0f187d12f564b09a"
+    },
+    {
+      "command": "cargo test -p slskr --lib",
+      "result": "passed",
+      "logSha256": "c1c580676a0ca0f9d86043a320c1898cc490175e2d0f8cda602c962c1075e695"
+    },
+    {
+      "command": "cargo clippy -p slskr --all-targets -- -D warnings",
+      "result": "passed",
+      "logSha256": "5375ab4403fbfdba3ea891e48bf444018d43f79183645bf724892c8151ebb80c"
+    },
+    {
+      "command": "cargo check -p slskr --all-targets --features full-controller-tests,legacy-route-dispatch",
+      "result": "passed",
+      "logSha256": "8970f05d034b8b3cb3bb863756bc7ea3c7f72af8786388118c98e93ad75f1865"
+    }
+  ]
+}

@@ -142,7 +142,7 @@ async fn route_dispatch_group_3_admin_controls(
                     });
                 };
 
-                tokio::spawn(async move {
+                state.spawn_managed_task(async move {
                     let _delivery_permit = delivery_permit;
                     let webhook_id = webhook_clone.id.clone();
                     if let Err(error) = webhooks::WebhookDispatcher::send_webhook(

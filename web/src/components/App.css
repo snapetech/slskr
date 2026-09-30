@@ -232,6 +232,16 @@ body {
     text-underline-offset: 0.18em;
 }
 
+.login-https-hint .login-https-hint-link {
+    color: #155c89 !important;
+    text-decoration: underline !important;
+    text-underline-offset: 0.15em;
+}
+
+:root.dark .login-https-hint .login-https-hint-link {
+    color: #8cc9ff !important;
+}
+
 .app-content a[href]:hover,
 .app-content a[href]:focus-visible {
     text-decoration: underline;

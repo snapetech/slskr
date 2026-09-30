@@ -1,0 +1,883 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "5ca8584e270ead7a895c080265b2f65009da13c1",
+  "source": "crates/slskr-web/src/search_planning.rs",
+  "originalBytes": 108197,
+  "originalLines": 2857,
+  "originalSha256": "693ac82b73a1f04914397ea8159d1c154cad8914ff02b8d869cb8c7e25a949b8",
+  "originalLibrarySha256": "ea1721807b84acb386788e9e485593d6a21f728de4c721c601ee928d4aff1d2a",
+  "librarySha256": "f18728f7672bd4e4e02d0e559232b4977c2b749c80833c68c61f53790e8860a1",
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedFunctionDeclarations": 75,
+  "publicDeclarations": [
+    "automation_dry_run_report",
+    "automation_history_report",
+    "automation_summary_from_state",
+    "build_player_radio_plan",
+    "build_player_radio_search_path",
+    "build_search_action_preview",
+    "build_similar_queue_candidates",
+    "deduplicate_search_response_groups",
+    "default_experience_preferences",
+    "experience_preferences_report",
+    "format_search_action_preview",
+    "player_now_playing_text",
+    "player_party_text",
+    "player_radio_copy_text",
+    "player_radio_queries",
+    "player_radio_query_from_now_playing_body",
+    "player_similarity_score",
+    "player_transfer_text",
+    "player_visualizer_text",
+    "rank_search_candidate",
+    "search_planner_report",
+    "similar_queue_search_queries"
+  ],
+  "owners": {
+    "crates/slskr-web/src/search_planning_owners/browser_local_preferences.rs": {
+      "lines": 520,
+      "sha256": "88c191c5879f6f5a7d6d1c9502e2c8fd5981eaff21a572f8c17ff839bd63185a"
+    },
+    "crates/slskr-web/src/search_planning_owners/experience_reports.rs": {
+      "lines": 154,
+      "sha256": "f6dc1beabfffc57c2c57cc279493d65d5407ff49caa3eb3a74b8fdcddd1caf63"
+    },
+    "crates/slskr-web/src/search_planning_owners/player_browser_controls.rs": {
+      "lines": 279,
+      "sha256": "957ed4f37ff0b76634b24acc0653cddd380b49ce6705044dd3320dacdd9ad91f"
+    },
+    "crates/slskr-web/src/search_planning_owners/player_queue_planning.rs": {
+      "lines": 161,
+      "sha256": "be55bbfa5e29aac02f0a69c993aaa88dd90859366b7678e624ee8e14a824203a"
+    },
+    "crates/slskr-web/src/search_planning_owners/player_radio_planning.rs": {
+      "lines": 216,
+      "sha256": "0441a0989ed0db9c7af2dd879ef7587987c12b5f7d36ad6acafdc5c02d5528d5"
+    },
+    "crates/slskr-web/src/search_planning_owners/player_status_projection.rs": {
+      "lines": 87,
+      "sha256": "775e58fbf0427c079edcb912dd03d51f643008552ef6608cb6133ca344950706"
+    },
+    "crates/slskr-web/src/search_planning_owners/search_previews.rs": {
+      "lines": 282,
+      "sha256": "89eee8eb66552b8163cdb09bf3c999012a4e20abb6ef91c71e1f1c51b294fba8"
+    },
+    "crates/slskr-web/src/search_planning_owners/search_ranking.rs": {
+      "lines": 401,
+      "sha256": "8b9d3d449870a11abcdca86b23a68b2766c418fdf7962b3e43a4e9d623d98a63"
+    },
+    "crates/slskr-web/src/search_planning_owners/visualizer_startup.rs": {
+      "lines": 279,
+      "sha256": "61c715c61890fab203bcf72f63eca01890f5457d8a2fad71767279d945878a31"
+    },
+    "crates/slskr-web/src/search_planning_owners/workspace_action_mounting.rs": {
+      "lines": 297,
+      "sha256": "798e3cff78eeca163b99731b9e713ec3b6978d3347936a2dab9919c3676ff750"
+    },
+    "crates/slskr-web/src/search_planning_owners/workspace_table_controls.rs": {
+      "lines": 195,
+      "sha256": "270651692d4797c7b4b3959243a60ee0fb444bf0be8a04c836af950e1cfb8118"
+    }
+  },
+  "items": [
+    {
+      "kind": "fn",
+      "name": "default_experience_preferences",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 491,
+      "originalSha256": "c7b30c62014a9c766d2017e8c3ed5b2bd6971bc6ccf1fecae827af238de91516",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "preference_string",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 286,
+      "originalSha256": "fa2be9ff3bd426de2be5e0bf5aa0641d5e5fa7c58b5591116c14ad954bdea2a3",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "preference_bool",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 228,
+      "originalSha256": "2ac9d41a502de24412b4c9bc24b49d7981d47832bde8a079b944b75086de095b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "experience_preferences_report",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 1930,
+      "originalSha256": "4c6e28f60850a2122e58bb0d1c70ef6972bfa2f97065a1679d588f12b00c1cb5",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "automation_summary_from_state",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 544,
+      "originalSha256": "a09d8cf9e98ea6db3cfa53216591ab09c1602dd841e420f23581fc36b181e8df",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "automation_dry_run_report",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 472,
+      "originalSha256": "aa5f994bd359ccc34ecc861a1425fd92086fbf60052ea9a99e634055cd876e8d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "automation_history_report",
+      "owner": "experience_reports",
+      "wasmOnly": false,
+      "originalBytes": 1853,
+      "originalSha256": "dfc3f0447876abf5214df08446401e4e40c645d4fe9a89e00cd78fc45fce5e16",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "file_extension",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 240,
+      "originalSha256": "51818dd2f9821d23b4339794e9d1d8af6164c3b5667ad7e16a491b68799ceaad",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_response_files",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 366,
+      "originalSha256": "3a03d3194e79c9e7d340aec564e39601af61a7b7f9197cca0f25b57c332c78aa",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_file_name",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 123,
+      "originalSha256": "ab0e176d000c466e4a870fbbf9641151efe2d02c89addf3636dbf03623050e74",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_file_size",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 189,
+      "originalSha256": "75ceaa20a21d523e2a8235eae998137ee52e4de9d82cb58707695f3ea213f0f9",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_file_number",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 193,
+      "originalSha256": "94ea907175c70814fe4ec8037acab8e20529b1cf2e64d97f634784c8c91221ad",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_tokens",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 528,
+      "originalSha256": "e9df34cc3e684f82d183d9b583f010bc3c7b3f2e7c1302ee7019b5b0862762d4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_lossless_extension",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 158,
+      "originalSha256": "01c16b57c01a7cd3075de21ae0314413ada2e3602164cfedd4e26511c5b25562",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_lossy_extension",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 124,
+      "originalSha256": "7f28d8cbd2822d0fe11089fbcd85671828117e160cdc73cc195ef18ecb858917",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "is_artwork_extension",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 119,
+      "originalSha256": "06f482514ad219aa98e945ba2e995080f01792a9f8fdb9c0f0a935c9df7877c6",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "clamp_i64",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 85,
+      "originalSha256": "b5f9ef3276a24ace01f4c91e5368d65e143b45b35d95564c92a4cc97fe3ab9dc",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "push_unique_reason",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 224,
+      "originalSha256": "d543da5bf37a778fecad678918ba9df05290e670a29b14db025a044074cd83b0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rank_search_candidate",
+      "owner": "search_ranking",
+      "wasmOnly": false,
+      "originalBytes": 11894,
+      "originalSha256": "3bf70c5639072f9dd646d3770ca3089398a67bf3b1cd007dacffbdfd74bbd053",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "search_provider_labels",
+      "owner": "search_previews",
+      "wasmOnly": false,
+      "originalBytes": 752,
+      "originalSha256": "3839dde6f3477fe76122bba7bfe0401aa840675485c82c560427286263a32304",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "search_response_signature",
+      "owner": "search_previews",
+      "wasmOnly": false,
+      "originalBytes": 1185,
+      "originalSha256": "a795b32cb456c45f24b16c4df4913374bd1a03c4c744a11d40f767c212905f4b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "deduplicate_search_response_groups",
+      "owner": "search_previews",
+      "wasmOnly": false,
+      "originalBytes": 1539,
+      "originalSha256": "b462c3539069da6097bbe3b4c5d58f57338b03eeeab951d980ef904425c205ff",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "build_search_action_preview",
+      "owner": "search_previews",
+      "wasmOnly": false,
+      "originalBytes": 2874,
+      "originalSha256": "7dee267d3cf6df3dff482a803bcecfbc6f507c5b6ebb181b58f3c0c02ef2d568",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "format_search_action_preview",
+      "owner": "search_previews",
+      "wasmOnly": false,
+      "originalBytes": 1109,
+      "originalSha256": "9f1528b9c6ece8b907baa9c26245add977f948249640448ad45326c85fc7e3d7",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "search_planner_report",
+      "owner": "search_previews",
+      "wasmOnly": false,
+      "originalBytes": 1498,
+      "originalSha256": "4911c8a2fe292ffe1f883f45de423d73620f4c5aafa78d4f5b4e42a567926b6b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "json_track_field",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 352,
+      "originalSha256": "d81719759e9078ed61e31e7f14c332e46cfa1640931cd61c0880097759aa68e0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "unique_nonempty",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 330,
+      "originalSha256": "f40fbda2d1bf0ed293cab07d53576ac095305c6d53be4c2c4f22210d84501f15",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "unique_nonempty_case_insensitive",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 412,
+      "originalSha256": "be3e54b69b733bb717a4a4230762a8bd748ef1d10f9dd8f8cb1fb2c392194bae",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_radio_tags",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 782,
+      "originalSha256": "0a6f67c4995c8a0343b8d07c6fd2f83aba25da5e49ca1633a3e25b7d0c362b06",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "build_player_radio_plan",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 2974,
+      "originalSha256": "c085fe9c02c913da35b36147da2be7b31899215fcdd6a2a4459095412f913e38",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "percent_encode_query",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 373,
+      "originalSha256": "cdd33a126fc75d5bbe48b1087c54e65436512ac337e1452e62ba52d153cb92d9",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "build_player_radio_search_path",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 251,
+      "originalSha256": "c8a578208b2a23f62ee7cd93983c7e3a0c16f411a37bcce39e03a3992e4b9420",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_radio_queries",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 298,
+      "originalSha256": "e123abe66d2af33b2def2219b73434e4deb2cf35c53b3d9a955967d2665920c9",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "quote_if_needed",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 281,
+      "originalSha256": "a657acca327212583a9b8366c5e6d046813a5620e45130073f265c8e90420044",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_radio_copy_text",
+      "owner": "player_radio_planning",
+      "wasmOnly": false,
+      "originalBytes": 376,
+      "originalSha256": "82aecc7692970d1e68f2ed319904aca83d737a254eb928baa290fa1272b75f2d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_auto_queue_tags",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 530,
+      "originalSha256": "eb90cb14dd4259b16c714bc6b53d3cd45bfebf81407ef49035f035ca947b31e0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_title_tokens",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 512,
+      "originalSha256": "f8340ebe9595987e47d635b99ce340deff7f7a53e12c751d0838cf570e2afa50",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_similarity_score",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 1281,
+      "originalSha256": "88e155d5ad5b702cecbf0feeadd1f6b7e4d1b90700c734bbacb4853ea6c1b02f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "build_similar_queue_candidates",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 1561,
+      "originalSha256": "9d5a9395aceb9463d527e4f2200028bc7b9451e0dae3b19787c895efbe42ffa6",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "similar_queue_search_queries",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 574,
+      "originalSha256": "9a8b994c8539a47a1ddcfd5ddcb96181d1bb3ef35cc37629167d5bc52ed1d038",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_radio_query_from_now_playing_body",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 300,
+      "originalSha256": "2d66f25a33e364607109d86633b59acd1e67149814d7e9c2e24376a70062588d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "current_player_track",
+      "owner": "player_queue_planning",
+      "wasmOnly": false,
+      "originalBytes": 333,
+      "originalSha256": "94ca3a06aa813a262ce8643fabc77d69b5a1e61ba557a8b3ca35b69fa8dcbd58",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_ratings_storage",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 158,
+      "originalSha256": "57674781c3019d4e8207c927d07531ba80476e99c38de052a95d5fe7fe81ae44",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "read_player_rating",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 562,
+      "originalSha256": "11c1c9957c4756b28d606d101bcdc35a8ed1e010a4eda0540fc423af22c0e8f8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "write_player_rating",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 787,
+      "originalSha256": "93ad50e5377ce09a51f09ee97147bf0a858b3a18c9bf5afa67be634620f62dc5",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_player_rating_controls",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 1286,
+      "originalSha256": "d76865b331d69cc8fcfe6d949f3facaba4e6417271fe9df77e7e4f0ea9df0cdd",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_player_radio_controls",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 496,
+      "originalSha256": "a3110f80951dfce10df996816be956ae8bf24772e8ec001028287f2a934b65ae",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "open_player_radio_search",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 1043,
+      "originalSha256": "33fdff6a05fb92fae06ed636d74e1fc415ae432f5d4d8cc924110ba85860dd95",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_audio_element",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 271,
+      "originalSha256": "678f3099c62a141abffb6216c0afb71502e49bbbc17ffb8bd90cd4b80ccd3ffe",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "toggle_player_audio",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 610,
+      "originalSha256": "c7979cc855576fc3e79c3a20d61c177434d2b77562b7ed1323af510f1b2d4445",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_player_controls",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 5294,
+      "originalSha256": "91f853404e8cec4bb0028c272f11393b8fd5d35f99665049fdc4138c337238e4",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "set_player_status",
+      "owner": "player_browser_controls",
+      "wasmOnly": true,
+      "originalBytes": 234,
+      "originalSha256": "5e5cb3bff00253f75a073802e1502112fb9352f22c835f724c63c382a99b14a0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "update_data_card_count",
+      "owner": "workspace_table_controls",
+      "wasmOnly": true,
+      "originalBytes": 736,
+      "originalSha256": "f470b08e2077c6c4c0ca2cc4deafdc9408bbd54061d26aa69c683f137e054b0c",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "sort_data_card_table",
+      "owner": "workspace_table_controls",
+      "wasmOnly": true,
+      "originalBytes": 2009,
+      "originalSha256": "2fe2244aaf9ccbbf0031cd0000b66112468eebe98083e808e9a12db8aa9801ca",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "table_cell_text",
+      "owner": "workspace_table_controls",
+      "wasmOnly": true,
+      "originalBytes": 328,
+      "originalSha256": "2046587a368f556db91d9fb891753277a84e70f46004600444129118951688f7",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "select_data_card_record",
+      "owner": "workspace_table_controls",
+      "wasmOnly": true,
+      "originalBytes": 1416,
+      "originalSha256": "0da505dceca167275539ce6d70d1314b2b61ed4ec8914f3d388d3b87a1f51906",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_workspace_tabs",
+      "owner": "workspace_table_controls",
+      "wasmOnly": true,
+      "originalBytes": 2646,
+      "originalSha256": "711cfa5390bc4eb72296f1cc14b0c7a5e82beaffbece83755d4b05817558aef2",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "storage_json_object",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 703,
+      "originalSha256": "e273891a5e48d47ad3f7485fbf0e58bcc6bd21488c1046ed3e7969cc4444068a",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "write_storage_json_object",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 336,
+      "originalSha256": "89c212316e2e85d5cb93a3edb3d8ee90fd5dfcf2fd5f6c5ed8d1f44fea69e778",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "remove_storage_item",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 211,
+      "originalSha256": "1a3841da1a4fef4ba4aa59be5cb1c52f5605e1444a49f0d684b6261d1e5f241b",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "collect_experience_form",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 913,
+      "originalSha256": "9a102e65a1d89138c3e3c2a70b6ce3adff22a3d72c6d15485196834c64af0f8e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "apply_experience_form",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 1457,
+      "originalSha256": "026967a31049128271f546fa7f7afd3f1d9c3a4cbcef125f234f746c1b66f327",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "default_automation_state",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 430,
+      "originalSha256": "337bdbc4315e62059661155c64bf261ed11b442ce401647d23ac9776581340d8",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "apply_automation_state",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 1167,
+      "originalSha256": "9898a77c737ce15c6dc9c46b1e96c59ed3617925abd71fdfa0bd287fdf768402",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_browser_local_panels",
+      "owner": "browser_local_preferences",
+      "wasmOnly": true,
+      "originalBytes": 17868,
+      "originalSha256": "2b0498cbeab4a7d3d9f1d0f85d9754477f9d94e88d205594e86436497d46ce7f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_toolbar_actions",
+      "owner": "workspace_action_mounting",
+      "wasmOnly": true,
+      "originalBytes": 7899,
+      "originalSha256": "4bcf76c7fd6de9226cdaf8a7e8efed9a9c303f29d8e23e9c141738db2cacc28e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "mount_route_actions",
+      "owner": "workspace_action_mounting",
+      "wasmOnly": true,
+      "originalBytes": 4436,
+      "originalSha256": "80c07705c43653f10f88afa4541dd85bfc5c8d043f25483732d7f0ce5f7bba34",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "refresh_runtime_status",
+      "owner": "workspace_action_mounting",
+      "wasmOnly": true,
+      "originalBytes": 1094,
+      "originalSha256": "de094d7d9d0a270c85293675f74bc052053ae25a7bdf1f157871a03ea4fc3cc9",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "player_now_playing_text",
+      "owner": "player_status_projection",
+      "wasmOnly": false,
+      "originalBytes": 1339,
+      "originalSha256": "ea2d8a431fe05eb1735697d1a700cc81dd8e91aa70920ac22fb9298e4a96fe7f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_transfer_text",
+      "owner": "player_status_projection",
+      "wasmOnly": false,
+      "originalBytes": 656,
+      "originalSha256": "c979bbe38282eddd6cb980b344c17887debb1cc517bf0aa9dfb40b2c29953067",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_party_text",
+      "owner": "player_status_projection",
+      "wasmOnly": false,
+      "originalBytes": 390,
+      "originalSha256": "e79d867919c2437f91a6d61732bc1923fa91bad95ff9197ac0feb2dd6530c445",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "player_visualizer_text",
+      "owner": "player_status_projection",
+      "wasmOnly": false,
+      "originalBytes": 427,
+      "originalSha256": "1f4db70b522f7a38e68a1c7654dcdf670bf0f5650c2f827823bc871bc7327e08",
+      "relocations": 0
+    },
+    {
+      "kind": "struct",
+      "name": "RustyMilkImportedPreset",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 141,
+      "originalSha256": "c26726bdd79f22e297976e4c2b0b55a3f19a8f9af686493858c821c46ccbf954",
+      "relocations": 3
+    },
+    {
+      "kind": "struct",
+      "name": "RustyMilkPlaylist",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 160,
+      "originalSha256": "5f58c6f03193b73e94c325834bfc365cf3c952f5afc6b0f7c29361246eeccc74",
+      "relocations": 4
+    },
+    {
+      "kind": "struct",
+      "name": "RustyMilkAutomationState",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 189,
+      "originalSha256": "6c5e45e20ffe9eaafd0d1c7f64724a5501edcb5bf529521ef3b06d9d82c85150",
+      "relocations": 5
+    },
+    {
+      "kind": "impl",
+      "name": "RustyMilkAutomationState",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 261,
+      "originalSha256": "ec21fa5df1a4e1bf385f59824ba44a238cfb74546ebe20eee98d20ffccbac82a",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_IMPORTED_PRESETS_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 119,
+      "originalSha256": "316bc9ee564a39eedb58aa89eca39f0e19b295bb3bdcc6ffc30f132dfbea4b9b",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_FAVORITE_PRESETS_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 119,
+      "originalSha256": "0d31ade0cb74e8ec3e27cd6914e9ae17d625cc7d6f0dc6cb8223a7875b58f978",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_PRESET_SEARCH_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 113,
+      "originalSha256": "a9025cabebd2ccef7fe4f263b72701e1fe387f17f08064ae67c095d971dbb85e",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_PLAYLISTS_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 112,
+      "originalSha256": "f347e8dc32d8cbefdffd8485a39fa8822927f440afeaaf0310e66d0f8092b402",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 123,
+      "originalSha256": "b097f89ba6945db7b3269a46d9d3160edf7c9aa59c54966e0a1d2f33e15bdcd3",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_AUTOMATION_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 114,
+      "originalSha256": "1237c6e5973e44076089807a49acf379b8edf09d5c7d996c093e9f181862e599",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_FPS_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 97,
+      "originalSha256": "46fa145bd58ba9f1c467906d9bdaa91b8be047bcd394df013c0afac4e7fabd7d",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_QUALITY_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 102,
+      "originalSha256": "1fb3ea70bdfe248810fdc6a845739c358f76fe7561386d7f71b435f98f1f5ce8",
+      "relocations": 1
+    },
+    {
+      "kind": "const",
+      "name": "RUSTYMILK_TEXTURE_ASSETS_STORAGE_KEY",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 115,
+      "originalSha256": "e5de4acce8f8c13ac7f8089ff83a56c830c0c88f0d8e931098de77bdc2d933af",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "toggle_rustymilk_visualizer",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 518,
+      "originalSha256": "86ec279faa8f6091c9e786334cb15c74575ee59b95abd1db842a116e68c2d2f0",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "start_rustymilk_visualizer",
+      "owner": "visualizer_startup",
+      "wasmOnly": true,
+      "originalBytes": 8187,
+      "originalSha256": "7d24aa1cbac0b6f238fc5e456582f2659bfe6ee7eca4417d03c5f5da81e4d871",
+      "relocations": 1
+    }
+  ],
+  "publicBindingsMatchOriginal": true,
+  "validation": {
+    "tests": {
+      "passed": true,
+      "sha256": "b43966fcadf42ff475f67eb28f552daaa7f540fa42ada112b1951a2fcd2d985f"
+    },
+    "clippy": {
+      "passed": true,
+      "sha256": "bce631316c8a356e285798046ac864acdb7b7a6f4d6d14e802c9a0a00079c7f9"
+    },
+    "wasm": {
+      "passed": true,
+      "sha256": "b143cc36c690769d3c5c89408d50f527e9b6828ab02f58614ea9ad88ec74e151"
+    }
+  }
+}

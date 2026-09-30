@@ -166,7 +166,8 @@ for dockerfile in Dockerfile packaging/docker/release.Dockerfile; do
   done
 done
 
-for expected in 'target' '**/target' 'node_modules' 'web/build'; do
+for expected in 'target' '**/target' 'node_modules' 'web/build' \
+  '.env' '.env.*' '**/.env' '**/.env.*' '.secrets' '**/.secrets'; do
   if ! rg -n -F -- "$expected" .dockerignore >/dev/null; then
     printf 'package artifact matrix check failed: source Docker context exclusion missing: %s\n' "$expected"
     status=1

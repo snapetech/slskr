@@ -123,79 +123,6 @@ fn collect_json_ld_issuer_values(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::extract_oidc_issuers;
-
-    const WEB_ID: &str = "https://profile.example/profile/card#me";
-
-    #[test]
-    fn turtle_profile_extracts_relative_and_absolute_issuers() {
-        let profile = br#"@prefix solid: <http://www.w3.org/ns/solid/terms#>.
-
-<#me>
-  solid:oidcIssuer <https://issuer.example/oidc>;
-  solid:oidcIssuer <../issuer-two>.
-"#;
-
-        let issuers = extract_oidc_issuers(profile, Some("text/turtle; charset=utf-8"), WEB_ID)
-            .expect("valid Turtle profile");
-        assert_eq!(
-            issuers,
-            [
-                "https://issuer.example/oidc".to_owned(),
-                "https://profile.example/issuer-two".to_owned()
-            ]
-        );
-    }
-
-    #[test]
-    fn json_ld_profile_preserves_duplicate_array_issuers() {
-        let profile = br#"{
-          "@context": {"solid": "http://www.w3.org/ns/solid/terms#"},
-          "@id": "https://profile.example/profile/card#me",
-          "solid:oidcIssuer": [
-            {"@id": "https://issuer.example/oidc"},
-            {"@id": "https://issuer.example/oidc"}
-          ]
-        }"#;
-
-        let issuers = extract_oidc_issuers(profile, Some("application/ld+json"), WEB_ID)
-            .expect("valid JSON-LD profile");
-        assert_eq!(
-            issuers,
-            ["https://issuer.example/oidc", "https://issuer.example/oidc"]
-        );
-    }
-
-    #[test]
-    fn rdf_xml_profile_extracts_issuer() {
-        let profile = br#"<?xml version="1.0"?>
-<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-         xmlns:solid="http://www.w3.org/ns/solid/terms#">
-  <rdf:Description rdf:about="https://profile.example/profile/card#me">
-    <solid:oidcIssuer rdf:resource="https://issuer.example/oidc" />
-  </rdf:Description>
-</rdf:RDF>"#;
-
-        let issuers = extract_oidc_issuers(profile, Some("application/rdf+xml"), WEB_ID)
-            .expect("valid RDF/XML profile");
-        assert_eq!(issuers, ["https://issuer.example/oidc"]);
-    }
-
-    #[test]
-    fn malformed_profile_is_rejected_instead_of_reported_as_empty() {
-        let error = extract_oidc_issuers(
-            br#"@prefix solid: <http://www.w3.org/ns/solid/terms#>.
-<#me> solid:oidcIssuer ."#,
-            Some("text/turtle"),
-            WEB_ID,
-        )
-        .expect_err("malformed RDF must fail closed");
-        assert!(error.contains("invalid Solid RDF profile"), "{error}");
-    }
-}
-
 fn solid_problem_response(status: u16, title: &str, detail: &str) -> HttpResponse {
     let status_text = match status {
         400 => "400 Bad Request",
@@ -287,5 +214,78 @@ pub(super) fn solid_private_or_reserved(ip: IpAddr) -> bool {
                 || (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
                 || (octets[0] & 0xfe) == 0xfc
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_oidc_issuers;
+
+    const WEB_ID: &str = "https://profile.example/profile/card#me";
+
+    #[test]
+    fn turtle_profile_extracts_relative_and_absolute_issuers() {
+        let profile = br#"@prefix solid: <http://www.w3.org/ns/solid/terms#>.
+
+<#me>
+  solid:oidcIssuer <https://issuer.example/oidc>;
+  solid:oidcIssuer <../issuer-two>.
+"#;
+
+        let issuers = extract_oidc_issuers(profile, Some("text/turtle; charset=utf-8"), WEB_ID)
+            .expect("valid Turtle profile");
+        assert_eq!(
+            issuers,
+            [
+                "https://issuer.example/oidc".to_owned(),
+                "https://profile.example/issuer-two".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn json_ld_profile_preserves_duplicate_array_issuers() {
+        let profile = br#"{
+          "@context": {"solid": "http://www.w3.org/ns/solid/terms#"},
+          "@id": "https://profile.example/profile/card#me",
+          "solid:oidcIssuer": [
+            {"@id": "https://issuer.example/oidc"},
+            {"@id": "https://issuer.example/oidc"}
+          ]
+        }"#;
+
+        let issuers = extract_oidc_issuers(profile, Some("application/ld+json"), WEB_ID)
+            .expect("valid JSON-LD profile");
+        assert_eq!(
+            issuers,
+            ["https://issuer.example/oidc", "https://issuer.example/oidc"]
+        );
+    }
+
+    #[test]
+    fn rdf_xml_profile_extracts_issuer() {
+        let profile = br#"<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:solid="http://www.w3.org/ns/solid/terms#">
+  <rdf:Description rdf:about="https://profile.example/profile/card#me">
+    <solid:oidcIssuer rdf:resource="https://issuer.example/oidc" />
+  </rdf:Description>
+</rdf:RDF>"#;
+
+        let issuers = extract_oidc_issuers(profile, Some("application/rdf+xml"), WEB_ID)
+            .expect("valid RDF/XML profile");
+        assert_eq!(issuers, ["https://issuer.example/oidc"]);
+    }
+
+    #[test]
+    fn malformed_profile_is_rejected_instead_of_reported_as_empty() {
+        let error = extract_oidc_issuers(
+            br#"@prefix solid: <http://www.w3.org/ns/solid/terms#>.
+<#me> solid:oidcIssuer ."#,
+            Some("text/turtle"),
+            WEB_ID,
+        )
+        .expect_err("malformed RDF must fail closed");
+        assert!(error.contains("invalid Solid RDF profile"), "{error}");
     }
 }

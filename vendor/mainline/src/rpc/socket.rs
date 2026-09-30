@@ -29,6 +29,7 @@ pub struct KrpcSocket {
     next_tid: u32,
     socket: UdpSocket,
     outbound_socket: Option<Arc<UdpSocket>>,
+    incoming_packets: Option<flume::Receiver<(Vec<u8>, SocketAddrV4)>>,
     pub(crate) server_mode: bool,
     inflight_requests: InflightRequests,
     last_cleanup: Instant,
@@ -42,7 +43,18 @@ impl KrpcSocket {
         let port = config.port;
         let bind_addr = config.bind_address.unwrap_or(Ipv4Addr::UNSPECIFIED);
 
-        let socket = if let Some(port) = port {
+        let socket = if config.incoming_packets.is_some() {
+            config
+                .outbound_socket
+                .as_ref()
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "shared ingress requires an outbound socket",
+                    )
+                })?
+                .try_clone()?
+        } else if let Some(port) = port {
             UdpSocket::bind(SocketAddr::from((bind_addr, port)))?
         } else {
             match UdpSocket::bind(SocketAddr::from((bind_addr, DEFAULT_PORT))) {
@@ -56,11 +68,14 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_read_timeout(Some(READ_TIMEOUT))?;
+        if config.incoming_packets.is_none() {
+            socket.set_read_timeout(Some(READ_TIMEOUT))?;
+        }
 
         Ok(Self {
             socket,
             outbound_socket: config.outbound_socket.clone(),
+            incoming_packets: config.incoming_packets.clone(),
             next_tid: 0,
             server_mode: config.server_mode,
             inflight_requests: InflightRequests::new(request_timeout),
@@ -148,7 +163,18 @@ impl KrpcSocket {
             self.inflight_requests.cleanup();
         }
 
-        match self.socket.recv_from(&mut buf) {
+        let received = if let Some(incoming) = self.incoming_packets.as_ref() {
+            match incoming.recv_timeout(READ_TIMEOUT) {
+                Ok((packet, peer)) if packet.len() <= MTU => {
+                    buf[..packet.len()].copy_from_slice(&packet);
+                    Ok((packet.len(), SocketAddr::V4(peer)))
+                }
+                _ => Err(std::io::Error::from(ErrorKind::WouldBlock)),
+            }
+        } else {
+            self.socket.recv_from(&mut buf)
+        };
+        match received {
             Ok((amt, SocketAddr::V4(from))) => {
                 let bytes = &buf[..amt];
 

@@ -1,4 +1,70 @@
 use super::*;
+use flate2::{write::GzEncoder, Compression};
+
+fn web_static_accepts_gzip(accept_encoding: Option<&str>) -> bool {
+    let Some(accept_encoding) = accept_encoding else {
+        return false;
+    };
+    let mut wildcard_accepted = false;
+    let mut saw_wildcard = false;
+
+    for item in accept_encoding.split(',') {
+        let mut parts = item.trim().split(';');
+        let coding = parts.next().unwrap_or_default().trim();
+        if coding.is_empty() {
+            continue;
+        }
+
+        let quality = parts
+            .filter_map(|parameter| parameter.trim().split_once('='))
+            .find_map(|(name, value)| {
+                name.trim()
+                    .eq_ignore_ascii_case("q")
+                    .then_some(value.trim())
+            })
+            .map_or(Some(1.0_f32), |value| value.parse::<f32>().ok());
+        let accepted =
+            quality.is_some_and(|value| value.is_finite() && value > 0.0 && value <= 1.0);
+
+        if coding.eq_ignore_ascii_case("gzip") {
+            return accepted;
+        }
+        if coding == "*" {
+            saw_wildcard = true;
+            wildcard_accepted = accepted;
+        }
+    }
+
+    saw_wildcard && wildcard_accepted
+}
+
+fn web_static_gzip_body(
+    body: Vec<u8>,
+    content_type: &str,
+    accept_encoding: Option<&str>,
+) -> Result<(Vec<u8>, bool), String> {
+    let is_compressible = content_type.starts_with("text/")
+        || matches!(
+            content_type,
+            "application/json; charset=utf-8" | "image/svg+xml"
+        );
+    if !is_compressible || body.len() < 1024 || !web_static_accepts_gzip(accept_encoding) {
+        return Ok((body, false));
+    }
+
+    // Keep the deployed aggregate below the repository's 600 KiB gzip budget.
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    std::io::Write::write_all(&mut encoder, &body)
+        .map_err(|error| format!("static gzip compression failed: {error}"))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|error| format!("static gzip compression failed: {error}"))?;
+    if compressed.len() < body.len() {
+        Ok((compressed, true))
+    } else {
+        Ok((body, false))
+    }
+}
 
 fn web_static_content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|extension| extension.to_str()) {
@@ -19,16 +85,30 @@ fn web_static_content_type(path: &Path) -> &'static str {
     }
 }
 
-fn inject_web_runtime_profile(
+fn inject_web_runtime_metadata(
     bytes: Vec<u8>,
     file: &Path,
     runtime_profile: ControllerProfile,
     expose_runtime_profile: bool,
     csp_nonce: Option<&str>,
 ) -> Vec<u8> {
-    if !expose_runtime_profile
-        || file.file_name().and_then(|name| name.to_str()) != Some("index.html")
-    {
+    if file.file_name().and_then(|name| name.to_str()) != Some("index.html") {
+        return bytes;
+    }
+
+    let mut metadata = String::new();
+    if expose_runtime_profile {
+        metadata.push_str(&format!(
+            "<meta name=\"slskr-runtime-profile\" content=\"{}\">",
+            runtime_profile.as_str()
+        ));
+    }
+    if let Some(csp_nonce) = csp_nonce {
+        metadata.push_str(&format!(
+            "<meta name=\"csp-nonce\" content=\"{csp_nonce}\">"
+        ));
+    }
+    if metadata.is_empty() {
         return bytes;
     }
 
@@ -40,15 +120,6 @@ fn inject_web_runtime_profile(
         return bytes;
     };
     let insertion_point = marker_start + marker.len();
-    let mut metadata = format!(
-        "<meta name=\"slskr-runtime-profile\" content=\"{}\">",
-        runtime_profile.as_str()
-    );
-    if let Some(csp_nonce) = csp_nonce {
-        metadata.push_str(&format!(
-            "<meta name=\"csp-nonce\" content=\"{csp_nonce}\">"
-        ));
-    }
     let mut output = Vec::with_capacity(bytes.len() + metadata.len());
     output.extend_from_slice(&bytes[..insertion_point]);
     output.extend_from_slice(metadata.as_bytes());
@@ -342,6 +413,7 @@ pub(super) async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     configured_content_path: Option<&Path>,
     runtime_profile: ControllerProfile,
     expose_runtime_profile: bool,
+    accept_encoding: Option<&str>,
     include_body: bool,
     keep_alive: bool,
     extra_headers: &str,
@@ -356,17 +428,24 @@ pub(super) async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     } else {
         None
     };
-    let bytes = inject_web_runtime_profile(
+    let bytes = inject_web_runtime_metadata(
         read_bounded_web_static_file_under_root(&root, &file)?,
         &file,
         runtime_profile,
         expose_runtime_profile,
         csp_nonce.as_deref(),
     );
+    let (bytes, compressed) = web_static_gzip_body(bytes, content_type, accept_encoding)?;
     let connection_header = if keep_alive { "keep-alive" } else { "close" };
+    let content_encoding_header = if compressed {
+        "Content-Encoding: gzip\r\n"
+    } else {
+        ""
+    };
     let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {connection_header}\r\n{}{}\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {connection_header}\r\nVary: Accept-Encoding\r\n{}{}{}\r\n",
         bytes.len(),
+        content_encoding_header,
         security_headers(&file, csp_nonce.as_deref()),
         extra_headers,
     );
@@ -1433,4 +1512,70 @@ pub(super) fn fallback_dashboard_html() -> String {
             "__VERSION__",
             &format!("{CLIENT_MAJOR_VERSION}.{CLIENT_MINOR_VERSION}"),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+
+    #[test]
+    fn csp_nonce_is_exposed_without_disclosing_runtime_profile() {
+        let html = inject_web_runtime_metadata(
+            b"<html><head></head><body></body></html>".to_vec(),
+            Path::new("index.html"),
+            crate::config::ControllerProfile::Native,
+            false,
+            Some("test-nonce"),
+        );
+        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
+
+        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
+        assert!(!html.contains("slskr-runtime-profile"));
+
+        let html = inject_web_runtime_metadata(
+            b"<html><head></head><body></body></html>".to_vec(),
+            Path::new("index.html"),
+            crate::config::ControllerProfile::Native,
+            true,
+            Some("test-nonce"),
+        );
+        let html = String::from_utf8(html).expect("injected HTML should remain UTF-8");
+
+        assert!(html.contains("<meta name=\"slskr-runtime-profile\" content=\"native\">"));
+        assert!(html.contains("<meta name=\"csp-nonce\" content=\"test-nonce\">"));
+    }
+
+    #[test]
+    fn static_gzip_negotiation_respects_explicit_quality_and_wildcard() {
+        assert!(web_static_accepts_gzip(Some("gzip, br")));
+        assert!(web_static_accepts_gzip(Some("br, *;q=0.5")));
+        assert!(!web_static_accepts_gzip(Some("gzip;q=0, *;q=1")));
+        assert!(!web_static_accepts_gzip(Some("br, gzip;q=invalid")));
+        assert!(!web_static_accepts_gzip(None));
+    }
+
+    #[test]
+    fn static_gzip_compresses_text_and_preserves_the_original_payload() {
+        let body = b"<main>static dashboard content</main>".repeat(128);
+        let (compressed, did_compress) =
+            web_static_gzip_body(body.clone(), "text/html; charset=utf-8", Some("gzip"))
+                .expect("gzip encoding should succeed");
+
+        assert!(did_compress);
+        assert!(compressed.len() < body.len());
+        let mut decoder = GzDecoder::new(compressed.as_slice());
+        let mut decoded = Vec::new();
+        decoder
+            .read_to_end(&mut decoded)
+            .expect("gzip payload should decode");
+        assert_eq!(decoded, body);
+
+        let (unchanged, did_compress) =
+            web_static_gzip_body(body.clone(), "image/png", Some("gzip"))
+                .expect("binary content should remain unchanged");
+        assert!(!did_compress);
+        assert_eq!(unchanged, body);
+    }
 }

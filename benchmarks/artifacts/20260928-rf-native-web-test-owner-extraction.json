@@ -1,0 +1,948 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseRevision": "ab24f5a9320ae21930aa1d0e862da14dcd1fb49f",
+  "source": "crates/slskr-web/src/web_tests.rs",
+  "originalBytes": 156690,
+  "originalLines": 4092,
+  "originalSha256": "990c4df341dacf264682b28493f04547dfcbf516ad31a9c9d1c772075c356a6e",
+  "originalLibrarySha256": "930cf64e5416c33b4473498bf60a87b1c888f2b04c47cda5f21f9cc6a5940b85",
+  "librarySha256": "c2f785d0ac14342723cc871d615857328ea83528efc8d3499bce167de2bb8d5f",
+  "originalWrapperBytes": 26,
+  "exactSourceReconstruction": true,
+  "reversedRelocationsMatchOriginal": true,
+  "preservedTests": 86,
+  "registryLines": 32,
+  "registrySha256": "b63a7bfa61451d3b748e4708bf65c16acdcf1c8bc7d071545b0d676a2c66d648",
+  "owners": {
+    "crates/slskr-web/src/web_tests/fixtures.rs": {
+      "lines": 80,
+      "tests": 0,
+      "sha256": "3ec11632e751eb77bf33533684a2e51b0ed0e3270e35020af1fe7d537d725a90"
+    },
+    "crates/slskr-web/src/web_tests/native_actions.rs": {
+      "lines": 604,
+      "tests": 10,
+      "sha256": "99abae5806def88048ecc44680c030d3d5ce7809b9b19782bf7576f322a14a9e"
+    },
+    "crates/slskr-web/src/web_tests/player_search.rs": {
+      "lines": 346,
+      "tests": 4,
+      "sha256": "0ebfe19fdc31b0d91d823d56680cc34a6f7cd972b7dec735b820f7bd5bfd7ef8"
+    },
+    "crates/slskr-web/src/web_tests/response_projection.rs": {
+      "lines": 205,
+      "tests": 6,
+      "sha256": "77ab1ec92e5263482bb41bdc87f2371bb89c240caa64f637f0cf5fffcd43d935"
+    },
+    "crates/slskr-web/src/web_tests/route_inventory.rs": {
+      "lines": 233,
+      "tests": 11,
+      "sha256": "38b123e3a401394a464a877ab8218ca41150c7b2d9d31abebf13d0fb63db2147"
+    },
+    "crates/slskr-web/src/web_tests/rustymilk_geometry.rs": {
+      "lines": 314,
+      "tests": 7,
+      "sha256": "afcbc350abe91cffadca4f3342f8a99a30ff05029924554ba38cf8a21a0ad317"
+    },
+    "crates/slskr-web/src/web_tests/rustymilk_gpu.rs": {
+      "lines": 334,
+      "tests": 6,
+      "sha256": "e03eb5933682a3ebbc14bdad6db71abe26f8803826dc204bc8d8969b2614eead"
+    },
+    "crates/slskr-web/src/web_tests/rustymilk_presets.rs": {
+      "lines": 475,
+      "tests": 12,
+      "sha256": "f0c33376318910228dcb1389557e498d9eba1aabfeb90c109b0c5dd4a729ec55"
+    },
+    "crates/slskr-web/src/web_tests/rustymilk_runtime.rs": {
+      "lines": 413,
+      "tests": 13,
+      "sha256": "5bcdf0b5b621e8d71ba530c83b1e35847d5c77b75f008a11289f4739e490952c"
+    },
+    "crates/slskr-web/src/web_tests/rustymilk_shaders.rs": {
+      "lines": 138,
+      "tests": 4,
+      "sha256": "b5741edbca808e541e66df09c7c8f3497be11a7d0737aa295dd5f71bc9453577"
+    },
+    "crates/slskr-web/src/web_tests/shell_lifecycle.rs": {
+      "lines": 158,
+      "tests": 5,
+      "sha256": "dbce3f0574446533be98ea70a4411fe67d1191a3c4e0d195c707e109aeb63d32"
+    },
+    "crates/slskr-web/src/web_tests/workflow_rendering.rs": {
+      "lines": 766,
+      "tests": 8,
+      "sha256": "c42ddda76b86e3c2c4c9fee4519b8fc1f32c9300c019dc90d222c6eb9f82c019"
+    }
+  },
+  "fileDependencyRelocations": [
+    {
+      "owner": "route_inventory",
+      "originalPath": "../../../docs/rust-ui-parity-ledger.md",
+      "relocatedPath": "../../../../docs/rust-ui-parity-ledger.md",
+      "targetSha256": "3ffe7951147259d5fff876f99a7c5b0f299a9a5f5a92d4b9e36a51d4a642f1aa"
+    },
+    {
+      "owner": "shell_lifecycle",
+      "originalPath": "../static/styles.css",
+      "relocatedPath": "../../static/styles.css",
+      "targetSha256": "c538f439895b881ddcd60d10b15bdd361f4c11c22a021cd4e0c1a340ae704a9f"
+    }
+  ],
+  "items": [
+    {
+      "kind": "use",
+      "name": null,
+      "owner": "registry",
+      "isTest": false,
+      "originalBytes": 18,
+      "originalSha256": "2f3b91631290d7c341b16362577695da0f3f471593de8e7fb921f287908d4031",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "REACT_ROUTES",
+      "owner": "registry",
+      "isTest": false,
+      "originalBytes": 95,
+      "originalSha256": "9a79359196cebb92f906b978c8b83d8df033f933aaafb4963fede9b1de6e8ad0",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "REACT_NAV",
+      "owner": "registry",
+      "isTest": false,
+      "originalBytes": 98,
+      "originalSha256": "0c1c61b8471b5a6a74bd394ef87135863cfa1337a89fcbbb3cf48c0237460e44",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "REACT_HEADER",
+      "owner": "registry",
+      "isTest": false,
+      "originalBytes": 94,
+      "originalSha256": "72a13dfeec1096bbcbd3519a4e106eff65a9ec6f0737f97faef7ff3df54d324d",
+      "relocations": 0
+    },
+    {
+      "kind": "const",
+      "name": "STATIC_INDEX",
+      "owner": "registry",
+      "isTest": false,
+      "originalBytes": 69,
+      "originalSha256": "1fc0ccbb6a495ec48269badcb07c284758ec7eb2beae20a6450fe6184c98133f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rounded_vec",
+      "owner": "fixtures",
+      "isTest": false,
+      "originalBytes": 174,
+      "originalSha256": "9705a9bd47eaa6a10001ba5f62fe73e96403e34f74b13c17d71b2320bd4ee37e",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "populated_route_html",
+      "owner": "fixtures",
+      "isTest": false,
+      "originalBytes": 3214,
+      "originalSha256": "7fd20a02f15a53d776aaa73819be08c4a03f8d9722594f9961579582aaa74e9f",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "api_endpoints_are_versioned",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 185,
+      "originalSha256": "03817b9b27b9206c6d3b18140565e0e244bb5f10df65505aca2fe17c6073908d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "shell_contains_primary_routes",
+      "owner": "shell_lifecycle",
+      "isTest": true,
+      "originalBytes": 5120,
+      "originalSha256": "b11a39264c264bf795a09fff844ce2612067420603d2edf3e834d74b2fd2f847",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_player_surface_summarizes_live_payloads",
+      "owner": "player_search",
+      "isTest": true,
+      "originalBytes": 3741,
+      "originalSha256": "7bfa9ee45dfc81ddc1780ad2c1b66e16efd8bfa6b0535c0054bd98b3d0591bf4",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_parser_and_frame_state_are_deterministic",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1093,
+      "originalSha256": "90eef2de6b1effe052796a675e810294666b429327dd87576728edeaf7882a9f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_evaluates_parsed_frame_equations",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1501,
+      "originalSha256": "29bca866398eae72d4e55e767812c35d84391d91c67b235306a4df6cdeab525b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_uses_audio_samples_for_custom_waves",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1917,
+      "originalSha256": "2f84b203c8ba90a0d571d726a76aed3151f57f9eded44e0f59500a8b61cd99aa",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_uses_waveform_function_in_equations",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 952,
+      "originalSha256": "595285746871339471e2a5785ae7f07370fbe5c77279044ce56a53e54d712afb",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_persists_q_registers_across_frames",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 699,
+      "originalSha256": "9796b7eade25351a19c28230dcb4fc37fc7a10b41e62f871cadd80ccd5006d15",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_feeds_mouse_state_into_equations",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1362,
+      "originalSha256": "861574a2e1884ca8ed789db2d155088eebf32e043f1ed85c70f2faeaedc94d4f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_resets_when_source_changes",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 960,
+      "originalSha256": "efaf53b5b484863134380ad9b72688ff13547de6bfcd1e6287a8a8bd40287330",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_persists_indexed_entry_state",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 866,
+      "originalSha256": "307be6ab4164d46be93e31600ce9071c84fc1e1d8fbab2dab80a92a79c544caf",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_runtime_merges_entry_q_registers_in_js_order",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1061,
+      "originalSha256": "377281066151e7061a6ef8b5f3cdbd0603d3b80115111d6c29e7cb07cc13b641",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_parser_matches_js_fixture_shapes",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 2320,
+      "originalSha256": "684401939ad717b80fa07072e41b3a3bc2b9fd021284f76bfb1200ca63c00942",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_expression_vm_matches_js_compatibility_cases",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 3361,
+      "originalSha256": "c13c7f19fbd0cd25fbae7a6eb6124c3aca2b85d7f53a79e24df310a2a60360a4",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_expression_vm_samples_fft_data",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1037,
+      "originalSha256": "207b4b67b2b02b0ad96603da7044cc54ada8185fc6df373e8f3d00ef5cdbc850",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_expression_vm_supports_megabuf_state",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 977,
+      "originalSha256": "654d7596a92b2bc5e387d3f6bfe55cd2f2278b379684bfc03ce4e5b8b3ef5ee2",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_rand_varies_by_call_and_frame_scope",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 1141,
+      "originalSha256": "53b8fa5d74a91da0fc323240524c606735206ab4fbf270969436a4fdab72b8da",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_fragment_parser_and_serializer_match_js_shapes",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 1747,
+      "originalSha256": "74d79981c5083437ff6b4691a14905546118d42d573caf960184195b1f4578cc",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_serializer_keeps_custom_primitives",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 627,
+      "originalSha256": "e136163bc4eff00f782d458b42ac6b28d38e157bd1935a3886e142d63c8c4d65",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_shader_translator_handles_glsl_safe_subset",
+      "owner": "rustymilk_shaders",
+      "isTest": true,
+      "originalBytes": 1173,
+      "originalSha256": "804f73db88f4ff728729ac5c38d9c7db62c250405d50b62905038f73a51159a8",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_shader_translator_handles_temps_textures_and_conditionals",
+      "owner": "rustymilk_shaders",
+      "isTest": true,
+      "originalBytes": 2490,
+      "originalSha256": "b765a37174e7e283fef4d01208d6c6d1437a6dba4e76406eee39b3184f707650",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_shader_translator_rejects_unsafe_subset",
+      "owner": "rustymilk_shaders",
+      "isTest": true,
+      "originalBytes": 869,
+      "originalSha256": "91738ab0f41d2ab18fee5a3ff24d36fd51b9a7a9688d8206c002d2fac8ed4469",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_shader_translator_generates_wgsl_subset",
+      "owner": "rustymilk_shaders",
+      "isTest": true,
+      "originalBytes": 1844,
+      "originalSha256": "761b959b5f55cf48413d8cd3ca3e742ec0ac05eb3ddb394af045d5ca40f9aaa0",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_primitive_state_evaluators_match_js_runtime",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 2250,
+      "originalSha256": "9906c148c7a91ed3a30ef7ee26155ce8ca943af5bb9e44f116b3f054e611e249",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_custom_wave_vertices_match_js_point_mapping",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 2089,
+      "originalSha256": "3b6b6a35779a316ece0b2be5703dd4408dd2cabf2e6d7411ff9f9ba10db42386",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_main_waveform_vertices_match_js_modes",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 1951,
+      "originalSha256": "c946e421a198c36a82555edf1d662492f80da3a0cec6edccf45d7d7648ba699d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_shape_vertices_match_js_geometry",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 1056,
+      "originalSha256": "51babdd1545895e110e0fc9d4c80dcec65f29e698bed4cf7abfe18521eed2e84",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_textured_primitives_match_js_geometry",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 1643,
+      "originalSha256": "c4e1af8a683b96591f24eb21e74d8a4adb95c9487e5281e988fc7704dd32255d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_webgpu_vertex_packers_match_js_shapes",
+      "owner": "rustymilk_gpu",
+      "isTest": true,
+      "originalBytes": 1420,
+      "originalSha256": "d7d009c95ea42047b57d1f8eba261b873e5775fe03c2ae59e0f4163c8659f78f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_webgpu_textured_vertex_packers_match_js_shapes",
+      "owner": "rustymilk_gpu",
+      "isTest": true,
+      "originalBytes": 750,
+      "originalSha256": "82bc45103382a13932b03a7ab99dc49b14269444cc167cfba4abdaebcd853d76",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_webgpu_domain_packers_match_js_renderer",
+      "owner": "rustymilk_gpu",
+      "isTest": true,
+      "originalBytes": 2529,
+      "originalSha256": "082376eeb2144d50c9834ecdcca64a390774c718c0333dca2ada61f9839b8a65",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_webgpu_frame_batches_pack_runtime_primitives",
+      "owner": "rustymilk_gpu",
+      "isTest": true,
+      "originalBytes": 2405,
+      "originalSha256": "78246ce760ca51a6ae72fd00609cdca58071da9aac17bde7681f7e0fcc5367c6",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_shape_fill_vertex_colors_match_js_edges",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 1257,
+      "originalSha256": "44ddf304a7fbe7743b595f05d06bbfd9067e8b1b4e571b2e100abc566f32b5f7",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_frame_set_renders_milk2_composite_entries",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 1435,
+      "originalSha256": "f07ed149ddf9ca758d524aed50a9be39df31141b0bc85a74b55fa86c1df0f405",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_frame_set_runtime_persists_each_preset_state",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 1576,
+      "originalSha256": "dd11b1e1d44d498353c0a1be3812fe495e6f1a1bb7585b0061fbc68903d5dbee",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_webgpu_frame_set_batches_keep_composite_offsets",
+      "owner": "rustymilk_gpu",
+      "isTest": true,
+      "originalBytes": 2486,
+      "originalSha256": "eae7c3029891d4a74c4f09f0bf99b866f4f7ff63f15b5c7c8788f972d4780b98",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_validation_reports_secondary_milk2_errors",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 557,
+      "originalSha256": "28f39cd659e9b6c4746693daec922e709bbeab3e40571fd0c80cec4872af4a16",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_webgpu_batch_summary_json_exposes_wasm_contract",
+      "owner": "rustymilk_gpu",
+      "isTest": true,
+      "originalBytes": 2124,
+      "originalSha256": "bfb7b3e9eabf0433830048fff9850d19cf3f5d7795e4c54ff0102a7934c12dcf",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_per_pixel_equations_build_warp_mesh",
+      "owner": "rustymilk_runtime",
+      "isTest": true,
+      "originalBytes": 813,
+      "originalSha256": "95552b76f6ca96ccdb04c314c8c66067d74a14ebcf397bd8ada81e2db6a6d29b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_borders_and_motion_vectors_match_js_geometry",
+      "owner": "rustymilk_geometry",
+      "isTest": true,
+      "originalBytes": 1264,
+      "originalSha256": "cffadb0972d88eaf8e8523ae5820dffcfd6ecbed286d3cc67ae1c4bd4eed9244",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_compatibility_reports_before_rendering",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 1078,
+      "originalSha256": "06358771a7c0ec8ee1d8248a6419ed25d708712ca956b29b712ad540bc76d2e7",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_preset_compatibility_accepts_supported_first_slice",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 873,
+      "originalSha256": "43c60b02c76b920c32c58f0f456b79b19722136af3831b1a8cd146434090d5ab",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_import_validation_accepts_only_supported_presets",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 706,
+      "originalSha256": "520aa288f0c2403494d011714032853317ab6241d1012d94f117dc67d322324b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_compatibility_matrix_tracks_dense_primitive_pressure",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 1191,
+      "originalSha256": "4a0ffcd5dd0dc24daed038603a4dcb6514c3f900ebedc00befdb8225d0b98482",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rustymilk_compatibility_matrix_tracks_q_register_and_webgpu_gaps",
+      "owner": "rustymilk_presets",
+      "isTest": true,
+      "originalBytes": 2384,
+      "originalSha256": "f95fa04245ec4b4993a5b3d38805c13ac730699799d984075095c729b48baa7d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_player_surface_builds_similar_queue_candidates",
+      "owner": "player_search",
+      "isTest": true,
+      "originalBytes": 2863,
+      "originalSha256": "20ac0a05a6e6d4ed9befd1317a567ac361aea1e203f6a9a5dd99025f62591d12",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_browser_local_system_panels_match_react_surfaces",
+      "owner": "player_search",
+      "isTest": true,
+      "originalBytes": 1816,
+      "originalSha256": "7632bb90cd06205a6602204a348cc4fc44c3dec2cca4319a47275fa1fdace76b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_search_planner_matches_react_search_helpers",
+      "owner": "player_search",
+      "isTest": true,
+      "originalBytes": 4933,
+      "originalSha256": "e948f3d61efb98c62ac017571c08e51686d65db5bf6761e0a228add7ea72593f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "static_index_supports_direct_nested_route_loads",
+      "owner": "shell_lifecycle",
+      "isTest": true,
+      "originalBytes": 360,
+      "originalSha256": "504a6e5a339779835ecec106ce70abcb9d3659b532c9e38782d2776428d08497",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "runtime_probe_html_escapes_api_values",
+      "owner": "response_projection",
+      "isTest": true,
+      "originalBytes": 350,
+      "originalSha256": "df8719a4b13d3604a3af91dd5f364b21e29b2c9b11f999b7bba297502e205a87",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "runtime_probes_cover_public_and_session_status",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 422,
+      "originalSha256": "b01aa51f3a0f2643bdb5014f9e55b5ded3e29ae7166ed8ce4d9fd078ec4ae33e",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_route_pages_cover_current_route_inventory",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 473,
+      "originalSha256": "f781a0f88399a4b3ad89fab2ca80a289efd770aa75440547334fddc9254c24bc",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "route_normalization_handles_dynamic_routes",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 498,
+      "originalSha256": "f7ee1a232d4577b77e6e6196ab2ab0267e9be7ef52034cee7acec2b52916ddd5",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "route_pages_render_api_surface",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 1193,
+      "originalSha256": "fc417762d430e2b1dc9ee3161183d3106bc017e68e98794258cb01c6581e03dd",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "active_route_refresh_contract_keeps_hidden_panes_lazy",
+      "owner": "shell_lifecycle",
+      "isTest": true,
+      "originalBytes": 1510,
+      "originalSha256": "97a538f6622a6c1cb5f9474eacd430a445d0ac1016767a952609039649cfb01d",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "route_pages_render_domain_workflows_before_developer_details",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 5144,
+      "originalSha256": "827ddf9309b4fb3a544d4fcf30ff5fe6b6ef0014fcb9e8c0b46e14922cbb37f2",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "route_workflows_render_populated_api_rows",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 6735,
+      "originalSha256": "29013223ffb7810f0afce6a62fa8e0237876e228df23f92759065695ca218f07",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "array_data_cards_render_filterable_table_and_csv_views",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 1392,
+      "originalSha256": "682e4dde7b08adce8dce78c247497f78bff11b44ac8eb4357353381fd5f7bb4a",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "shell_prioritizes_functional_webui_over_migration_inventory",
+      "owner": "shell_lifecycle",
+      "isTest": true,
+      "originalBytes": 483,
+      "originalSha256": "7f74465f4bf50d6599f4ff98c3013b84edddf5ace3deab949be01ff781ca8749",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "wishlist_history_renderer_escapes_remote_fields_and_rejects_malformed_json",
+      "owner": "response_projection",
+      "isTest": true,
+      "originalBytes": 659,
+      "originalSha256": "0f96389565c21503c6f1198f242236f8002ef9e1db475c402844620f24fcf271",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "transfer_attempt_renderer_escapes_attempt_history",
+      "owner": "response_projection",
+      "isTest": true,
+      "originalBytes": 607,
+      "originalSha256": "2c91c57114ea1ad172dad991fb40efe8ed55c1be24d5f68d570f62949b237970",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_ui_parity_ledger_tracks_closure_instead_of_stale_gaps",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 577,
+      "originalSha256": "e803c5d0ec25af95d8c1647ab85411c8b7dd0629c16c03a0f01a5ca149fa5918",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "route_probe_urls_use_concrete_paths",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 683,
+      "originalSha256": "19a5289d9ba41d6c5e030c6abc0876e122fadc7c52008410649d3e9068dd390b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_actions_render_core_mutations",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 2588,
+      "originalSha256": "8fff429c96dcf2585f81ec59cc9601d4012f5e1c53cdbccd9d29635c578fbd3e",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_workflow_labels_resolve_to_real_route_actions",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 3190,
+      "originalSha256": "e608c586367222c4b1b30ee22c2eaffbfa49caa45769e2e0501fba16c38bb20f",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_action_fallbacks_are_domain_specific",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 528,
+      "originalSha256": "7f100757f429dcea7658a06f4fa53fcb31d885f62d5c6af72bf45999c98f595b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_subpanels_cover_deep_route_workflows",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 3122,
+      "originalSha256": "331b50bcee77066c39879ed829e1b34fbdcb1bd99b4a8efa4eafccca633365e6",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_primary_workspaces_include_react_like_structures",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 7188,
+      "originalSha256": "f0f125c132b88f62b1e38da67a4b2096df999ebfcd6ea3e0cc23cfde2714049c",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_tables_expose_domain_row_action_sets",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 2091,
+      "originalSha256": "6ea2bc627c69f6042f02fdb36549e6639501e95616a6b3d86f3621965d13b01b",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_editor_surfaces_cover_modal_workflows",
+      "owner": "workflow_rendering",
+      "isTest": true,
+      "originalBytes": 2437,
+      "originalSha256": "429d6d9425ef4c6e0011351b68639698e058c1f6bd00e855f9d97ef27e140a4c",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_shell_contains_in_app_confirmation_modal_styles",
+      "owner": "shell_lifecycle",
+      "isTest": true,
+      "originalBytes": 558,
+      "originalSha256": "85f0544e4c3d5372e4373f0c402ad1e9b5ac44ea0c7f40fca467c99ffabd0dde",
+      "relocations": 1
+    },
+    {
+      "kind": "fn",
+      "name": "rust_action_bodies_are_json_safe",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 2558,
+      "originalSha256": "71e61fd3d5e1e137e50ba922a2b77af50539e14cccef9772c1ae8bbe457f46f1",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_row_actions_are_marked_for_selected_row_execution",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 607,
+      "originalSha256": "74a9113d8a519a46b94b06334456a56f411c80580188ba7f5a7a9632a0fa9f5c",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_rows_expose_structured_domain_action_values",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 8572,
+      "originalSha256": "11b932832f6b97826fd222c5ebfe6ee07b0f0d480f0879db8fb5a09d85870d43",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_action_paths_reject_untrusted_route_params",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 1833,
+      "originalSha256": "9085341f1475afd8029122fa152dd024e7a063ec5670309790a968b9da08d753",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "route_action_lookup_uses_current_route_surface",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 2122,
+      "originalSha256": "5ee245b660094ab4f0589833234fa0442f981950e86791f0837ddeb37c0c8735",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_route_summaries_parse_live_response_shapes",
+      "owner": "response_projection",
+      "isTest": true,
+      "originalBytes": 2306,
+      "originalSha256": "5f25ac8f56f87f7a362761946a137b7ed1bc1a4bdb6c2e3950b2185e0c822d15",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "native_workspaces_parse_nested_live_domain_payloads",
+      "owner": "response_projection",
+      "isTest": true,
+      "originalBytes": 3351,
+      "originalSha256": "91d409a8781e24112f95abad272024d331fb5b68b6b35d86f3a0f731ea5182a5",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_route_summaries_escape_live_response_values",
+      "owner": "response_projection",
+      "isTest": true,
+      "originalBytes": 554,
+      "originalSha256": "fbce4e8957c7fc5c9e3cc64b09becd083df9997fe803e13100aa0c5312cd1383",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "bulk_surface_matrix_covers_every_route_group",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 933,
+      "originalSha256": "836437dc35d36dae62e58cc307d0d6546dee39354b26b009cc1b198efbe2b02c",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "bulk_workbench_renders_all_surface_catalogs",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 903,
+      "originalSha256": "71d6a8cfe4ee1e204c3a4466dcf5a669c3a4cd17e9776220de5f82db930e81a1",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "every_route_surface_has_bulk_catalog_entries",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 428,
+      "originalSha256": "dd68831c230b891f2b064054b9fc01d350a6bf8a2102aca6cd91ddfff0ed6703",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_route_inventory_matches_current_react_route_surface",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 1106,
+      "originalSha256": "a7b21afe9d52d9e53f88c3a2b7d9111e21d31063dfb09e80471fb15b47b7d759",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "rust_nav_inventory_matches_current_react_navigation",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 1025,
+      "originalSha256": "5961666be2ef011c79f37098e1e3d80359c9f1848af8f7da6b41ca8c169c1861",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "api_contract_inventory_covers_core_old_ui_surfaces",
+      "owner": "route_inventory",
+      "isTest": true,
+      "originalBytes": 688,
+      "originalSha256": "a1302be06df824c4f159af147c5043665caa85c14cefcc1c32f215110649e8b1",
+      "relocations": 0
+    },
+    {
+      "kind": "fn",
+      "name": "route_actions_cover_core_old_ui_surfaces",
+      "owner": "native_actions",
+      "isTest": true,
+      "originalBytes": 2635,
+      "originalSha256": "bbdc870e2119fcc6710137d3928cac87b64ef5f9ce24e6cd67a6f920decfb39e",
+      "relocations": 0
+    }
+  ],
+  "gates": [
+    {
+      "command": "cargo test -p slskr-web --lib",
+      "result": "passed",
+      "logSha256": "118999252253553de24f21d8ec87ad9107d2f4690632aa9d0d8e606d349777a9"
+    },
+    {
+      "command": "cargo clippy -p slskr-web --all-targets -- -D warnings",
+      "result": "passed",
+      "logSha256": "d653f9f7c8dc521ed3d3dc3600ce9901dfc081c00878d016428a4a47d9e5ecc3"
+    },
+    {
+      "command": "cargo check --locked -p slskr-web --target wasm32-unknown-unknown",
+      "result": "passed",
+      "logSha256": "3fe980a0f9709b0a2d093ea2a65202e1e589d4893ac71be4272c165923b9e527"
+    }
+  ]
+}
