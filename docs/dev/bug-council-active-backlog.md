@@ -5,8 +5,8 @@ A green all-phases council run is not proof that no bugs exist; this file
 records the active discovery piles that still need review, splitting, or
 burn-down.
 
-Scan date: 2026-09-30
-Source digest: d1160a51a9c94c92828149e1688814819b677003c9e65a9f598bc2439b02eccf
+Scan date: 2026-10-01
+Source digest: 24d95621c1bdf93e82f1caa91355abc3e5170423bd13ef95fc12e2538989f136
 
 Every council scan candidate class must have a row below with the current
 candidate count. `scripts/check-council-active-backlog.sh` fails when a class is
@@ -26,7 +26,7 @@ Status meanings:
 | `Constructor/mutable collection candidates` | 10 | Guarded | Current constructor candidates are classified in `docs/dev/council-scan-inventory.md`; the accepted Python mutable-input bug is fixed and Rust constructors own or clone their inputs. | Reopen only when fresh candidates are not covered by BUG-032 or the existing ownership evidence. |
 | `Protocol count/length candidates` | 163 | Guarded | Current count/length candidates are classified; accepted raw-frame, transfer-chunk, and protocol loop-bound bugs are fixed, with taint/adversarial gates covering high-risk parser paths. | Reopen only when a fresh wire-derived allocation/read/loop flow is not covered by BUG-033, BUG-035, BUG-040, or existing bounded-count evidence. |
 | `Protocol scalar emission candidates` | 310 | Guarded | The widened production-module scalar scan was reviewed by narrowing and signed-conversion class. Four wrapping paths in share metadata, distributed state, wishlist scheduler state, and user timestamps were fixed; remaining length/code emissions are bounded, checked, or inventory-tested. | Reopen only when a fresh protocol-visible narrowing path lacks a checked conversion or discriminant inventory evidence. |
-| `Resolver/raw stream candidates` | 1076 | Guarded | Current raw stream candidates are classified; accepted raw-frame and connect-timeout bugs are fixed, and daemon/SDK stream paths are covered by timeout, resolver, and frame-size guards. The fresh count was regenerated from the current refactor worktree. | Reopen only when a fresh direct socket/resolver/read path lacks timeout, address policy, or size-bound evidence. |
+| `Resolver/raw stream candidates` | 1082 | Guarded | Current raw stream candidates are classified; accepted raw-frame and connect-timeout bugs are fixed, and daemon/SDK stream paths are covered by timeout, resolver, and frame-size guards. The fresh count was regenerated from the current refactor worktree. | Reopen only when a fresh direct socket/resolver/read path lacks timeout, address policy, or size-bound evidence. |
 | `Task/cancellation/lifecycle candidates` | 1448 | Guarded | Current lifecycle candidates are classified; accepted TypeScript timer/default bugs are fixed. Daemon/WebSocket/webhook/script/port-forward ownership is covered by bounded channels, timeouts, and shutdown tests; plain HTTP, HTTPS, and Unix HTTP listeners share a 256-connection cap and handlers are joined by their lifecycle owner. The fresh count was regenerated from the current refactor worktree. | Reopen only when a fresh spawn/timeout/channel path lacks shutdown, bounded queue, or cleanup evidence. |
 | `Example Web API candidates` | 321 | Guarded | Current web/API examples are classified; stale WebSocket auth examples are fixed and remaining examples are covered by token, unsafe-open, CORS, and docs freshness gates. The fresh count was regenerated from the current refactor worktree. | Reopen only when a fresh example bypasses the SDK auth helpers, hard-codes secrets, or contradicts deployment posture. |
 | `Async void boundaries` | 0 | Existing guard | The current scan has no async-void candidates in the scoped source trees; async operations either return their result or are explicitly owned by a task boundary. | Reopen when a fresh candidate appears. |
