@@ -7,7 +7,18 @@ cd "$repo_root"
 required="${SLSKR_SECURITY_SCANS_REQUIRED:-0}"
 semgrep_image="${SLSKR_SEMGREP_IMAGE:-semgrep/semgrep:1.167.0}"
 trivy_image="${SLSKR_TRIVY_IMAGE:-aquasec/trivy:0.72.0}"
+external_reference_relative=""
 status=0
+
+if [[ -n "${SLSKR_UPSTREAM_GIT_REPO:-}" && -d "$SLSKR_UPSTREAM_GIT_REPO" ]]; then
+  repo_realpath="$(cd "$repo_root" && pwd -P)"
+  upstream_realpath="$(cd "$SLSKR_UPSTREAM_GIT_REPO" && pwd -P)"
+  case "$upstream_realpath" in
+    "$repo_realpath"/*)
+      external_reference_relative="${upstream_realpath#"$repo_realpath"/}"
+      ;;
+  esac
+fi
 
 section() {
   printf '\n==> %s\n' "$1"
@@ -52,8 +63,13 @@ run_or_record() {
 }
 
 run_semgrep() {
+  local semgrep_exclude_args=()
+  if [[ -n "$external_reference_relative" ]]; then
+    semgrep_exclude_args+=(--exclude "$external_reference_relative/**")
+    printf 'Excluding external parity checkout from Semgrep scan: %s\n' "$external_reference_relative"
+  fi
   if command -v semgrep >/dev/null 2>&1; then
-    run_or_record "Semgrep security scan" semgrep scan --config auto --error
+    run_or_record "Semgrep security scan" semgrep scan --config auto --error "${semgrep_exclude_args[@]}"
     return
   fi
 
@@ -68,7 +84,7 @@ run_semgrep() {
       -v "$repo_root:/src" \
       -w /src \
       "$semgrep_image" \
-      semgrep scan --config auto --error
+      semgrep scan --config auto --error "${semgrep_exclude_args[@]}"
     return
   fi
 
@@ -84,12 +100,19 @@ run_semgrep() {
 run_trivy() {
   local ignore_args=()
   local docker_ignore_args=()
+  local trivy_skip_args=()
   if [[ -f "$repo_root/.trivyignore" ]]; then
     ignore_args+=(--ignorefile "$repo_root/.trivyignore")
     docker_ignore_args+=(--ignorefile /src/.trivyignore)
   fi
+  if [[ -n "$external_reference_relative" ]]; then
+    # Release parity checks check out another repository under the workspace.
+    # Its dependencies do not belong to slskR's release security surface.
+    trivy_skip_args+=(--skip-dirs "./$external_reference_relative")
+    printf 'Excluding external parity checkout from Trivy scan: %s\n' "$external_reference_relative"
+  fi
   if command -v trivy >/dev/null 2>&1; then
-    run_or_record "Trivy filesystem scan" trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "${ignore_args[@]}" .
+    run_or_record "Trivy filesystem scan" trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "${trivy_skip_args[@]}" "${ignore_args[@]}" .
     return
   fi
 
@@ -104,7 +127,7 @@ run_trivy() {
       -v "$repo_root:/src" \
       -w /src \
       "$trivy_image" \
-      fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "${docker_ignore_args[@]}" .
+      fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "${trivy_skip_args[@]}" "${docker_ignore_args[@]}" .
     return
   fi
 
