@@ -19,7 +19,10 @@ pick_free_port() {
   python3 - <<'PY'
 import socket
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
+    # The daemon's Soulseek listener binds on 0.0.0.0. Probe the same address
+    # space so a loopback-only bind or TIME_WAIT socket on another local IP
+    # cannot make the selected port look free when the wildcard bind is not.
+    sock.bind(("0.0.0.0", 0))
     print(sock.getsockname()[1])
 PY
 }
