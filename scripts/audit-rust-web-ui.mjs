@@ -57,7 +57,7 @@ const apiRequestCountBudgets = new Map([
   ['/sharegroups', 20],
   ['/shared', 20],
   ['/browse', 8],
-  ['/system', 39],
+  ['/system', 40], // Route data and player refresh can straddle the 1s shared speed snapshot on loaded runners.
 ]);
 const MIN_REPEATED_API_REQUEST_INTERVAL_MS = 200;
 
@@ -398,8 +398,11 @@ try {
       if (audit.apiRequestBudget.enabled) {
         const apiRequestCountBudget = apiRequestCountBudgets.get(path);
         if (routeResult.apiRequestCount > apiRequestCountBudget) {
+          const endpointCounts = apiRequestMetrics
+            .map(({ endpoint, count }) => `${endpoint}=${count}`)
+            .join(', ');
           audit.errors.push(
-            `${path} ${viewport.name}: API request count ${routeResult.apiRequestCount} exceeds the ${apiRequestCountBudget}-request route budget`,
+            `${path} ${viewport.name}: API request count ${routeResult.apiRequestCount} exceeds the ${apiRequestCountBudget}-request route budget (${endpointCounts})`,
           );
         }
         for (const metric of apiRequestMetrics) {
