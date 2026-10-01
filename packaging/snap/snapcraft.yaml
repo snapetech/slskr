@@ -1,6 +1,6 @@
 name: slskr
 base: core22
-version: '0.2.41'
+version: '0.2.42'
 summary: Rust Soulseek daemon with bundled Web UI
 description: |
   slskR is a Rust Soulseek client and daemon with a local web interface.
@@ -24,19 +24,19 @@ parts:
   slskr:
     plugin: dump
     source:
-      - on amd64: https://github.com/snapetech/slskr/releases/download/release-v0.2.41/slskr-v0.2.41-x86_64-unknown-linux-gnu.tar.gz
-      - on arm64: https://github.com/snapetech/slskr/releases/download/release-v0.2.41/slskr-v0.2.41-aarch64-unknown-linux-gnu.tar.gz
+      - on amd64: https://github.com/snapetech/slskr/releases/download/release-v0.2.42/slskr-v0.2.42-x86_64-unknown-linux-gnu.tar.gz
+      - on arm64: https://github.com/snapetech/slskr/releases/download/release-v0.2.42/slskr-v0.2.42-aarch64-unknown-linux-gnu.tar.gz
     source-type: file
     override-pull: |
       craftctl default
       case "${CRAFT_ARCH_BUILD_FOR:-${SNAPCRAFT_ARCH_BUILD_FOR:-}}" in
         amd64)
-          archive="slskr-v0.2.41-x86_64-unknown-linux-gnu.tar.gz"
-          expected="0c782ada01d2bf99755ed406fbabae574eafa1b1148fbb377b3642d2178e688f"
+          archive="slskr-v0.2.42-x86_64-unknown-linux-gnu.tar.gz"
+          expected="430106715561b36b074d67e8d951db6fdb03e05c77a59a291b0a05c418f342c8"
           ;;
         arm64)
-          archive="slskr-v0.2.41-aarch64-unknown-linux-gnu.tar.gz"
-          expected="6e92864e6aaaa6537da49f1ba0f6852644a5b53fa0ad53f5890273f7155f7121"
+          archive="slskr-v0.2.42-aarch64-unknown-linux-gnu.tar.gz"
+          expected="a2c4ab90476f5bce9c6bb6b7402623935bfe1839cbd260fb79e2aa506bf51dfb"
           ;;
         *)
           echo "unsupported Snap architecture: ${CRAFT_ARCH_BUILD_FOR:-${SNAPCRAFT_ARCH_BUILD_FOR:-}}" >&2
