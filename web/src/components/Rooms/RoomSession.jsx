@@ -498,6 +498,7 @@ class RoomSession extends Component {
                     <Segment className="room-input">
                       <Input
                         action={{
+                          'aria-label': `Send message to ${room.name || room.roomName || 'room'}`,
                           className: 'room-message-button',
                           disabled: !this.validInput() || sending,
                           icon: (
@@ -513,6 +514,7 @@ class RoomSession extends Component {
                         input={
                           <input
                             autoComplete="off"
+                            aria-label={`Message in ${room.name || room.roomName || 'room'}`}
                             data-lpignore="true"
                             id="room-message-input"
                             type="text"

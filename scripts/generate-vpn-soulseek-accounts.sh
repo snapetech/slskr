@@ -56,13 +56,33 @@ quote_env() {
   printf '%q' "$1"
 }
 
-mkdir -p "$(dirname "$output_file")"
-chmod 700 "$(dirname "$output_file")"
-tmp="$(mktemp)"
+output_directory="$(dirname "$output_file")"
+mkdir -p "$output_directory"
+chmod 700 "$output_directory"
+if [[ -L "$output_file" ]]; then
+  echo "refusing to replace a symlinked generated account file: $output_file" >&2
+  exit 1
+fi
+if [[ -e "$output_file" && ! -f "$output_file" ]]; then
+  echo "generated account output must be a regular file: $output_file" >&2
+  exit 1
+fi
+tmp="$(mktemp "$output_directory/.generated-soulseek-accounts.XXXXXX")"
+final_tmp="$(mktemp "$output_directory/.generated-soulseek-accounts.XXXXXX")"
 chmod 600 "$tmp"
+chmod 600 "$final_tmp"
+trap 'rm -f "$tmp" "$final_tmp"' EXIT
 
 if [[ -f "$output_file" ]]; then
-  grep -v -E '^(SLSKR_TEST_ACCOUNT_COUNT|SLSKR_TEST_[0-9]+_(USERNAME|PASSWORD))=' "$output_file" > "$tmp" || true
+  if grep -v -E '^(SLSKR_TEST_ACCOUNT_COUNT|SLSKR_TEST_[0-9]+_(USERNAME|PASSWORD))=' "$output_file" > "$tmp"; then
+    :
+  else
+    grep_status=$?
+    if [[ "$grep_status" -ne 1 ]]; then
+      echo "failed to read existing generated account file: $output_file" >&2
+      exit "$grep_status"
+    fi
+  fi
 fi
 
 index="$start_index"
@@ -106,8 +126,9 @@ count=$((index - 1))
 {
   printf 'SLSKR_TEST_ACCOUNT_COUNT=%s\n' "$count"
   cat "$tmp"
-} > "$output_file"
-chmod 600 "$output_file"
+} > "$final_tmp"
+chmod 600 "$final_tmp"
+mv -f -- "$final_tmp" "$output_file"
 rm -f "$tmp"
 
 echo "generated $created account(s); output=$output_file; highest_index=$count"

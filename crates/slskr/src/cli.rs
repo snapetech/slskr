@@ -851,7 +851,9 @@ async fn plain_peer_probe() -> Result<(), String> {
     let response = time::timeout(timeout, peer.receive())
         .await
         .map_err(|_| "plain user-info response timed out".to_owned())?
-        .map_err(|error| format!("plain user-info response failed: {error}"))?;
+        .map_err(|error| {
+            format!("plain user-info response failed at advertised port {port}: {error}")
+        })?;
     if !matches!(response, PeerMessage::UserInfoResponse(_)) {
         return Err(format!("unexpected plain peer response: {response:?}"));
     }

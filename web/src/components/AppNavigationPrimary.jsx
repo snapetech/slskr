@@ -22,7 +22,11 @@ const AppNavigationPrimary = ({
   navActivity,
   version,
 }) => (
-              <div className="navigation-primary">
+              <div
+                aria-label="Primary navigation"
+                className="navigation-primary"
+                role="navigation"
+              >
                 {version.isCanary && (
                   <Menu.Item>
                     <Icon

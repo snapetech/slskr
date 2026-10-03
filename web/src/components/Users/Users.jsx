@@ -11,7 +11,7 @@ import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import User from './User';
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Icon, Input, Item, Loader, Segment } from 'semantic-ui-react';
+import { Header, Icon, Input, Item, Loader, Segment } from 'semantic-ui-react';
 
 const toText = (value, fallback = '') => {
   if (typeof value === 'string' || typeof value === 'number') return String(value);
@@ -145,6 +145,16 @@ const Users = () => {
 
   return (
     <div className="users-container">
+      <Header
+        as="h1"
+        data-testid="users-page-heading"
+      >
+        <Icon name="users" />
+        <Header.Content>
+          Users
+          <Header.Subheader>Look up a Soulseek username</Header.Subheader>
+        </Header.Content>
+      </Header>
       <Segment
         className="users-segment"
         raised
@@ -209,6 +219,7 @@ const Users = () => {
           ) : user == null ? (
             <PlaceholderSegment
               caption="No user info to display"
+              headingAs="h2"
               icon="users"
             />
           ) : (

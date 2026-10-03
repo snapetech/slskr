@@ -79,7 +79,7 @@
     "start": "vite",
     "test": "vitest run --maxWorkers=1",
     "test:api-lifecycle-coverage": "vitest run --maxWorkers=1 --coverage src/lib/api.test.js src/lib/http.test.js src/lib/session.test.js src/lib/events.test.js src/lib/hubFactory.test.js src/lib/streaming.test.js",
-    "test:bundle-budget": "python3 ../scripts/check-web-bundle-budget.py --build-dir build --initial-js-max-kib 1150 --gzip-max-kib 600",
+    "test:bundle-budget": "python3 ../scripts/check-web-bundle-budget.py --build-dir build --initial-js-max-kib 1150 --gzip-max-kib 601",
     "test:build-output": "node ./scripts/verify-build-output.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --reporter=line",

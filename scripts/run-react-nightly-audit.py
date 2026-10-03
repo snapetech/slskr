@@ -66,10 +66,24 @@ def validate_audit(audit, scenario):
     viewports = {route.get('viewport') for route in routes}
     if scenario == 'success' and viewports != {'desktop', 'mobile'}:
         raise RuntimeError('success audit must cover desktop and mobile')
+    if scenario == 'success' and any(route.get('visiblePageLoaders') != 0 for route in routes):
+        raise RuntimeError('success audit contains a page that is still loading')
+    if scenario == 'success' and any(route.get('visibleErrorStates') != 0 for route in routes):
+        raise RuntimeError('success audit contains a page-level error state')
+    if scenario == 'success' and any(route.get('accessibilityViolations') != [] for route in routes):
+        raise RuntimeError('success audit contains a WCAG A/AA accessibility violation')
+    if scenario == 'success':
+        search_views = [route for route in routes if route.get('route') == '/searches']
+        if len(search_views) != 2 or any(
+                route.get('visibleSearchResultRows', 0) < 1
+                or route.get('searchResultsVisibleInInitialViewport') is not True
+                for route in search_views):
+            raise RuntimeError('success audit does not show search results in both initial viewports')
     responses = [response for route in routes for response in route.get('apiResponses', [])]
     if not responses:
         raise RuntimeError(f'{scenario} has no observed UI requests')
-    return {'renderChecks': len(routes), 'observedUiResponses': len(responses),
+    return {'renderChecks': len(routes), 'completedViews': len(routes),
+            'observedUiResponses': len(responses),
             'viewports': sorted(viewports)}
 
 

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "real Chromium against deterministic mock responses",
+  "sourceCommit": "748e0a469d80708634e374769552e569f11d574b",
+  "worktreeDirty": true,
+  "startedUtc": "2026-10-02T20:36:03.943153+00:00",
+  "harnessSha256": "2f1d1b9395c648cb15e0517009786c8a6e87524945eed1a594c6ff91f33e9243",
+  "scenarios": [],
+  "success": false,
+  "error": "/home/keith/Documents/code/slskR/scripts/with-process-memory-guard.sh exited 1; see /home/keith/Documents/code/slskR/target/react-nightly-audit-overflow/success.log"
+}

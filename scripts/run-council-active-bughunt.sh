@@ -22,17 +22,31 @@ write_section() {
 
   {
     printf '\n## %s\n' "$title"
-    rg -n --with-filename --pcre2 --hidden \
+    if rg -n --with-filename --pcre2 --hidden \
       --glob '!.git/**' \
       --glob '!.council/**' \
       --glob '!target/**' \
       --glob '!**/node_modules/**' \
       --glob '!**/dist/**' \
       --glob '!**/build/**' \
+      --glob '!**/e2e/**' \
+      --glob '!**/examples/**' \
+      --glob '!**/__tests__/**' \
       --glob '!**/tests/**' \
+      --glob '!**/*_test.go' \
+      --glob '!**/controller_tests/**' \
+      --glob '!**/focused_controller_tests/**' \
+      --glob '!**/*_tests.*' \
       --glob '!**/*.test.*' \
       --glob '!**/*.spec.*' \
-      "$pattern" "$@" || true
+      "$pattern" "$@"; then
+      :
+    else
+      local status=$?
+      if [[ "$status" -ne 1 ]]; then
+        return "$status"
+      fi
+    fi
   } >>"$report"
 }
 
@@ -47,6 +61,8 @@ candidate lines are bugs or that no bugs exist.
 Classification rule: any accepted row must be ledgered, fixed with behavior
 coverage, sibling-swept, and promoted into a durable gate before closure.
 EOF
+printf '# Generated: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >>"$report"
+printf '# Source digest: %s\n' "$(python3 scripts/council-source-digest.py)" >>"$report"
 
 write_section \
   "Protocol-controlled allocations and lengths" \
@@ -72,6 +88,16 @@ write_section \
   "Browser injection, token storage, and opener boundaries" \
   'innerHTML\s*=|dangerouslySetInnerHTML|document\.write\(|eval\(|new Function\(|localStorage|sessionStorage|window\.open|target=.{0,1}_blank' \
   web dashboard client-ts
+
+write_section \
+  "Go SDK transport, decoding, and filesystem boundaries" \
+  'io\.(ReadFull|LimitReader|Copy)|binary\.Read|json\.(NewDecoder|Unmarshal)|make\(\[\]byte|http\.Client|\.Do\(|Dial(?:Context)?\(|ResolveTCPAddr|url\.Parse|filepath\.(Join|EvalSymlinks)|os\.(Open|Create|Remove|Rename)|exec\.Command' \
+  client-go
+
+write_section \
+  "Python SDK transport, decoding, and filesystem boundaries" \
+  'readexactly|struct\.(unpack|pack)|asyncio\.(open_connection|create_connection|wait_for|create_task|gather)|subprocess\.|pickle\.|requests\.(get|post|put|delete|request)|httpx\.(get|post|put|delete|request)|urllib\.request\.|Path\(|\.read_bytes\(|\.write_bytes\(|\bopen\(|urlopen\(|socket\.|int\.from_bytes|create_subprocess|urlsplit\(|urlunsplit\(|urlencode\(|quote\(|aiohttp\.ClientSession|\.ws_connect\(|\.request\(|\.iter_chunked\(|json\.loads' \
+  client-python/slskr
 
 write_section \
   "Suppressed CI and script failures" \

@@ -44,6 +44,16 @@ if [ ! -x "$runner" ]; then
 fi
 
 require_literal "run-council-scan.sh" "$runner"
+require_literal "run-council-active-bughunt.sh" "$runner"
+require_literal "test-council-active-bughunt.sh" "$runner"
+require_literal "test-council-scan-errors.sh" "$runner"
+require_literal "test-cross-client-validation-result.sh" "$runner"
+require_literal "check-bug-ledger-ids.py" "$runner"
+require_literal "test-bug-ledger-ids.py" "$runner"
+require_literal "test-generated-account-file-safety.sh" "$runner"
+require_literal "test-certification-phases.sh" "$runner"
+require_literal "check-council-active-bughunt.sh" "$runner"
+require_literal "scripts/check-browser-injection-sinks.sh" "$repo_root/scripts/check-remediation-baseline.sh"
 require_literal "check-council-freshness.sh" "$runner"
 require_literal "check-council-active-backlog.sh" "$runner"
 require_literal "check-council-inventory-closure.sh" "$runner"
@@ -57,6 +67,11 @@ require_literal 'scripts/check-bug-council-all-phases.sh' "$repo_root/scripts/ch
 require_literal "check-council-freshness.sh" "$repo_root/scripts/check-remediation-baseline.sh"
 require_literal "bug-council-active-backlog.md" "$repo_root/scripts/check-remediation-baseline.sh"
 require_literal "check-council-inventory-closure.sh" "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "scripts/run-council-active-bughunt.sh" "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "scripts/test-council-active-bughunt.sh" "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "scripts/test-council-scan-errors.sh" "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "scripts/test-cross-client-validation-result.sh" "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "scripts/check-council-active-bughunt.sh" "$repo_root/scripts/check-remediation-baseline.sh"
 
 assert_phase_done "Mirror council process docs"
 assert_phase_done "Severity/confidence retrofit"
@@ -67,6 +82,7 @@ assert_phase_done "Council bughunt entrypoint"
 assert_phase_done "All-phases council runner"
 assert_phase_done "Active backlog"
 assert_phase_done "Inventory closure"
+assert_phase_done "Active bughunt freshness and inventory"
 
 if [ "$failed" -ne 0 ]; then
   exit 1

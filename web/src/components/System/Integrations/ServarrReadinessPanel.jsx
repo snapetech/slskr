@@ -189,8 +189,10 @@ const ServarrReadinessPanel = ({ options }) => {
           </Label>
         </div>
         <Table
+          aria-label="Servarr integration readiness checks"
           celled
           compact
+          tabIndex={0}
         >
           <Table.Header>
             <Table.Row>

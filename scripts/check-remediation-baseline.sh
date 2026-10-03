@@ -62,6 +62,7 @@ GATES=(
   scripts/check-web-no-auth-passthrough-differential.sh
   scripts/check-web-rate-limiting-differential.sh
   scripts/check-web-request-body-limit-differential.sh
+  scripts/check-browser-injection-sinks.sh
   scripts/check-browser-token-persistence.sh
   scripts/check-unsafe-blank-opens.sh
   scripts/check-websocket-auth-coverage.sh
@@ -94,6 +95,9 @@ GATES=(
   scripts/check-docs-freshness.sh
   scripts/test-check-docs-freshness.sh
   scripts/check-plan-freshness.sh
+  scripts/check-bug-ledger-ids.py
+  scripts/test-bug-ledger-ids.py
+  scripts/test-certification-phases.sh
   scripts/test-check-plan-freshness.sh
   scripts/check-council-freshness.sh
   scripts/test-check-council-freshness.sh
@@ -101,6 +105,12 @@ GATES=(
   scripts/check-reproducibility-metadata.sh
   scripts/check-council-loop.sh
   scripts/check-bug-council-all-phases.sh
+  scripts/run-council-active-bughunt.sh
+  scripts/test-council-active-bughunt.sh
+  scripts/test-council-scan-errors.sh
+  scripts/test-generated-account-file-safety.sh
+  scripts/test-cross-client-validation-result.sh
+  scripts/check-council-active-bughunt.sh
   scripts/check-council-negative-space.sh
   scripts/check-council-active-backlog.sh
   scripts/check-council-inventory-closure.sh
@@ -134,5 +144,8 @@ fi
 for gate in "${GATES[@]}"; do
   run_gate "$gate"
 done
+
+printf '\n==> python3 scripts/test-react-nightly-audit.py\n'
+python3 scripts/test-react-nightly-audit.py
 
 printf '\nRemediation baseline passed.\n'

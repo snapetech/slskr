@@ -35,8 +35,10 @@ const AppHeaderMenu = ({
   user,
 }) => (
             <Menu
+              aria-label="Session controls"
               className="right"
               inverted
+              role="navigation"
             >
               <ModeSpecificConnectButton
                 runtimeProfile={runtimeProfile}

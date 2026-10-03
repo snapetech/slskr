@@ -1,7 +1,6 @@
 import { Switch } from '../../Shared';
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { Icon, Table } from 'semantic-ui-react';
+import { Button, Table } from 'semantic-ui-react';
 
 const ShareTable = ({ onClick, shares }) => {
   return (
@@ -39,19 +38,35 @@ const ShareTable = ({ onClick, shares }) => {
             )
           }
         >
-          {shares.map((share) => (
-            <Table.Row key={`${share.host}+${share.localPath}`}>
+          {shares.map((share, index) => {
+            const hasLocalPath = typeof share.localPath === 'string' && share.localPath.trim() !== '';
+            const localPath = hasLocalPath ? share.localPath : 'Path unavailable';
+
+            return (
+              <Table.Row key={`${share.host}+${share.localPath ?? index}`}>
               <Table.Cell>{share.host}</Table.Cell>
-              <Table.Cell onClick={() => onClick(share)}>
-                <Icon name="folder" />
-                <Link to="#">{share.localPath}</Link>
+              <Table.Cell>
+                <Button
+                  aria-label={hasLocalPath
+                    ? `Browse shared directory ${share.localPath}`
+                    : 'Shared directory path unavailable'}
+                  basic
+                  compact
+                  disabled={!hasLocalPath}
+                  icon="folder"
+                  onClick={() => onClick(share)}
+                  type="button"
+                >
+                  {localPath}
+                </Button>
               </Table.Cell>
               <Table.Cell>{share.directories ?? '?'}</Table.Cell>
               <Table.Cell>{share.files ?? '?'}</Table.Cell>
               <Table.Cell>{share.alias}</Table.Cell>
               <Table.Cell>{share.remotePath}</Table.Cell>
             </Table.Row>
-          ))}
+            );
+          })}
         </Switch>
       </Table.Body>
     </Table>

@@ -510,6 +510,7 @@ class Footer extends Component {
             <div
               className="slskr-footer-stats"
               aria-label="Transport health"
+              role="group"
             >
               <Icon
                 className={

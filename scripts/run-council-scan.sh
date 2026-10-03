@@ -9,9 +9,18 @@ scan_rg() {
   shift
   local tmp
   tmp="$(mktemp)"
-  rg -n --glob '!target/**' --glob '!web/node_modules/**' --glob '!dashboard/node_modules/**' \
+  if rg -n --glob '!target/**' --glob '!web/node_modules/**' --glob '!dashboard/node_modules/**' \
     --glob '!client-ts/node_modules/**' --glob '!**/dist/**' --glob '!**/package-lock.json' \
-    "$@" >"$tmp" || true
+    "$@" >"$tmp"; then
+    :
+  else
+    local status=$?
+    if [[ "$status" -ne 1 ]]; then
+      rm -f "$tmp"
+      printf 'candidate scan failed for %s (rg exit %s)\n' "$title" "$status" >&2
+      return "$status"
+    fi
+  fi
   local count
   count="$(wc -l <"$tmp" | tr -d ' ')"
   printf '| %s | %s |\n' "$title" "$count"

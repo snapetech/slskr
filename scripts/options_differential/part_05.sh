@@ -362,7 +362,7 @@ run_listener_scenario() {
     wait_for_advertised_port "$fixture_status" "$new_port" 5 "$log"
     wait_for_advertisement_count "$fixture_status" 5 "$log"
     capture_listener_stage "$target" "$base_url" "$suite" port-restarted 0.0.0.0 "$new_port" \
-      "$old_port" "$new_port" "$host_ip" "$fixture_status"
+      __released_port_not_sampled__ "$new_port" "$host_ip" "$fixture_status"
 
     local advertisement_before_ip
     advertisement_before_ip="$(advertisement_count "$fixture_status")"
@@ -375,8 +375,11 @@ run_listener_scenario() {
       exit 1
     fi
     wait_for_advertisement_count "$fixture_status" 5 "$log"
+    # The original port has been released across later reconfigurations; a
+    # different process can legitimately reuse it, so do not attribute a raw
+    # TCP response there to this daemon.
     capture_listener_stage "$target" "$base_url" "$suite" ip-watched "$host_ip" "$new_port" \
-      "$old_port" "$new_port" "$host_ip" "$fixture_status"
+      __released_port_not_sampled__ "$new_port" "$host_ip" "$fixture_status"
 
     stop_daemon
     start_no_connect_daemon "$target" "$root" "$implementation" "$state" "$log" \
@@ -386,7 +389,7 @@ run_listener_scenario() {
     wait_for_direct_user_info_state "$host_ip" "$new_port" open "$log"
     wait_for_advertisement_count "$fixture_status" 7 "$log"
     capture_listener_stage "$target" "$base_url" "$suite" ip-restarted "$host_ip" "$new_port" \
-      "$old_port" "$new_port" "$host_ip" "$fixture_status"
+      __released_port_not_sampled__ "$new_port" "$host_ip" "$fixture_status"
 
     capture_request "$suite" listener-validation-bad-ip POST \
       "$base_url/api/v0/options/yaml/validate" \
@@ -1825,4 +1828,3 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
 PY
   printf 'status=200\ncontent-type=application/json\n' >"$suite/mesh.meta"
 }
-

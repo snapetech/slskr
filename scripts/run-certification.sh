@@ -44,6 +44,8 @@ while [[ $# -gt 0 ]]; do
 done
 export vpn_endpoints
 
+"$repo_root/scripts/validate-certification-phases.sh" "$phases"
+
 # --- Credential loading ---
 if [[ -f "$env_file" ]]; then
     set -a
@@ -271,6 +273,29 @@ run_netns_command() {
     "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "$@"
 }
 
+prepare_commons_fixtures() {
+    local fixture_dir="$1"
+    SLSKR_COMMONS_FIXTURE_DIR="$fixture_dir" \
+        "$repo_root/scripts/verify-open-commons-fixtures.sh" 2>&1
+}
+
+peer_address_metadata() {
+    grep -oE 'port=[0-9]+ obfuscation_type=[0-9]+ obfuscated_port=[0-9]+' <<<"$1" | tail -1 || true
+}
+
+peer_address_has_usable_endpoint() {
+    local metadata="$1"
+    local pattern='^port=([0-9]+) obfuscation_type=([0-9]+) obfuscated_port=([0-9]+)$'
+    [[ "$metadata" =~ $pattern ]] || return 1
+
+    local regular_port="${BASH_REMATCH[1]}"
+    local obfuscation_type="${BASH_REMATCH[2]}"
+    local obfuscated_port="${BASH_REMATCH[3]}"
+    [[ "$regular_port" =~ ^[1-9][0-9]*$ ]] \
+        || { [[ "$obfuscation_type" == "1" ]] \
+            && [[ "$obfuscated_port" =~ ^[1-9][0-9]*$ ]]; }
+}
+
 run_vpn_cargo_retry() {
     local max_attempts="$1" delay="$2" namespace="$3" config="$4"
     shift 4
@@ -284,8 +309,15 @@ run_vpn_cargo_retry() {
             printf '%s' "$output"
             return 0
         fi
+        case "$output" in
+            *"peer did not advertise a plain listener port"*|\
+            *"peer did not advertise rotated obfuscation"*)
+                printf '%s' "$output"
+                return "$status"
+                ;;
+        esac
         if [[ $attempt -lt $max_attempts ]]; then
-            log info "  $namespace transport attempt $attempt failed; retrying after cooldown" >&2
+            log info "  $namespace attempt $attempt failed; retrying after ${delay}s" >&2
             sleep "$delay"
         fi
     done
@@ -521,7 +553,13 @@ run_phase_a() {
     duration_ms=$(( (t1 - t0) / 1000000 ))
 
     if [[ $status -eq 0 ]]; then
-        record_test "A" "A2" "peer-address resolution" "pass" "$duration_ms" "metadata resolved via isolated VPN"
+        local address_metadata
+        address_metadata="$(peer_address_metadata "$output")"
+        if ! peer_address_has_usable_endpoint "$address_metadata"; then
+            record_test "A" "A2" "peer-address resolution" "fail" "$duration_ms" "server returned no usable listener endpoint${address_metadata:+; $address_metadata}"
+        else
+            record_test "A" "A2" "peer-address resolution" "pass" "$duration_ms" "metadata resolved via isolated VPN; $address_metadata"
+        fi
     else
         record_test "A" "A2" "peer-address resolution" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
     fi
@@ -545,7 +583,7 @@ run_phase_a() {
     if [[ $status -eq 0 ]]; then
         record_test "A" "A3" "plain-peer message" "pass" "$duration_ms" "UserInfo round-trip via isolated VPN"
     else
-        record_test "A" "A3" "plain-peer message" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
+        record_test "A" "A3" "plain-peer message" "fail" "$duration_ms" "$(echo "$output" | tail -5 | tr '\n' ' ')"
     fi
 
     # A4 — Obfuscated peer message
@@ -567,13 +605,13 @@ run_phase_a() {
     if [[ $status -eq 0 ]]; then
         record_test "A" "A4" "obfuscated-peer message" "pass" "$duration_ms" "type-1 obfuscated round-trip via isolated VPN"
     else
-        record_test "A" "A4" "obfuscated-peer message" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
+        record_test "A" "A4" "obfuscated-peer message" "fail" "$duration_ms" "$(echo "$output" | tail -5 | tr '\n' ' ')"
     fi
 
     # A5 — Indirect peer
     t0="$(date +%s%N)"
     set +e
-    output="$(run_vpn_cargo "cert-a5" "$probe_config" \
+    output="$(run_vpn_cargo_retry 2 5 "cert-a5" "$probe_config" \
         -- \
         SLSK_USERNAME="$probe_username" \
         SLSK_PASSWORD="$probe_password" \
@@ -583,10 +621,20 @@ run_phase_a() {
         bash -c '
             set -euo pipefail
             private_port=2236
-            mapping="$(natpmpc -g "${PROTON_NATPMP_GATEWAY:-10.2.0.1}" -a 0 "$private_port" tcp 60 2>&1)"
+            mapping=""
+            if mapping="$(natpmpc -g "${PROTON_NATPMP_GATEWAY:-10.2.0.1}" -a 0 "$private_port" tcp 60 2>&1)"; then
+                :
+            else
+                mapping_status=$?
+                safe_mapping="$(sed -E "s/([0-9]{1,3}\\.){3}[0-9]{1,3}/<ip>/g" <<<"$mapping" | tr "\\n" " ")"
+                printf "NAT-PMP mapping failed for local port %s (exit=%s): %s\\n" \
+                    "$private_port" "$mapping_status" "$safe_mapping" >&2
+                exit "$mapping_status"
+            fi
             public_port="$(awk '\''/Mapped public port/ { for (i = 1; i <= NF; i++) if ($i == "port") { print $(i + 1); exit } }'\'' <<<"$mapping")"
             if [[ -z "$public_port" ]]; then
-                printf "%s\n" "$mapping" >&2
+                printf "NAT-PMP mapping output did not include a public port for local port %s\\n" \
+                    "$private_port" >&2
                 exit 1
             fi
             export SLSK_INDIRECT_LISTENER_BIND="0.0.0.0:$private_port"
@@ -603,7 +651,7 @@ run_phase_a() {
     if [[ $status -eq 0 ]]; then
         record_test "A" "A5" "indirect-peer ConnectToPeer/PierceFirewall" "pass" "$duration_ms" "indirect connection established via isolated VPN"
     else
-        record_test "A" "A5" "indirect-peer ConnectToPeer/PierceFirewall" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
+        record_test "A" "A5" "indirect-peer ConnectToPeer/PierceFirewall" "fail" "$duration_ms" "$(echo "$output" | tail -5 | tr '\n' ' ')"
     fi
 }
 
@@ -630,22 +678,37 @@ run_phase_b() {
     }
 
     local t0 t1 duration_ms output status
+    local commons_fixture_dir="${SLSKR_COMMONS_FIXTURE_DIR:-$repo_root/target/open-commons-fixtures}"
+    local commons_fixture_path="$commons_fixture_dir/commons-click-track.ogg"
+    local fixture_ready=0 fixture_error=""
+    if fixture_error="$(prepare_commons_fixtures "$commons_fixture_dir")"; then
+        fixture_ready=1
+    else
+        status=$?
+        fixture_error="fixture preparation failed (exit=$status): $(tail -3 <<<"$fixture_error" | tr '\n' ' ')"
+    fi
 
     # B1 — Download fixture via fixture-peer-smoke (local server + client, SHA-256 verified)
     t0="$(date +%s%N)"
     set +e
-    if [[ -n "$vpn_config" ]]; then
+    if [[ "$fixture_ready" -ne 1 ]]; then
+        output="$fixture_error"
+        status=1
+    elif [[ -n "$vpn_config" ]]; then
         output="$(run_vpn_cargo "cert-b1" "$vpn_config" \
             -- \
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_FILE="$commons_fixture_path" \
             SLSKR_PROBE_OUTPUT=json \
             cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+        status=$?
     else
-        output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json \
+        output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_FILE="$commons_fixture_path" SLSKR_PROBE_OUTPUT=json \
             timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+        status=$?
     fi
-    status=$?
     set -e
     t1="$(date +%s%N)"
     duration_ms=$(( (t1 - t0) / 1000000 ))
@@ -662,20 +725,26 @@ run_phase_b() {
     # B2 — Large fixture download (100KB pattern)
     t0="$(date +%s%N)"
     set +e
-    if [[ -n "$vpn_config" ]]; then
+    if [[ "$fixture_ready" -ne 1 ]]; then
+        output="$fixture_error"
+        status=1
+    elif [[ -n "$vpn_config" ]]; then
         output="$(run_vpn_cargo "cert-b2" "$vpn_config" \
             -- \
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_FILE="$commons_fixture_path" \
             SLSKR_LARGE_TRANSFER_SIZE=100000 \
             SLSKR_PROBE_OUTPUT=json \
             cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+        status=$?
     else
         output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_FILE="$commons_fixture_path" \
             SLSKR_LARGE_TRANSFER_SIZE=100000 SLSKR_PROBE_OUTPUT=json \
             timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+        status=$?
     fi
-    status=$?
     set -e
     t1="$(date +%s%N)"
     duration_ms=$(( (t1 - t0) / 1000000 ))
@@ -689,19 +758,25 @@ run_phase_b() {
     # B3 — Upload proof: use fixture-peer smoke as upload proxy test
     t0="$(date +%s%N)"
     set +e
-    if [[ -n "$vpn_config" ]]; then
+    if [[ "$fixture_ready" -ne 1 ]]; then
+        output="$fixture_error"
+        status=1
+    elif [[ -n "$vpn_config" ]]; then
         output="$(run_vpn_cargo "cert-b3" "$vpn_config" \
             -- \
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_FILE="$commons_fixture_path" \
             SLSKR_PROBE_OUTPUT=json \
             cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+        status=$?
     else
         output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_FILE="$commons_fixture_path" \
             SLSKR_PROBE_OUTPUT=json \
             timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+        status=$?
     fi
-    status=$?
     set -e
     t1="$(date +%s%N)"
     duration_ms=$(( (t1 - t0) / 1000000 ))
@@ -923,9 +998,16 @@ run_phase_c() {
     fi
 
     # C6 — Browse complete shares
-    local fixture_path="$repo_root/target/open-commons-fixtures/commons-click-track.ogg"
-    if [[ ! -f "$fixture_path" ]]; then
-        "$repo_root/scripts/verify-open-commons-fixtures.sh" >/dev/null
+    local commons_fixture_dir="${SLSKR_COMMONS_FIXTURE_DIR:-$repo_root/target/open-commons-fixtures}"
+    local fixture_path="$commons_fixture_dir/commons-click-track.ogg"
+    local fixture_output=""
+    if fixture_output="$(prepare_commons_fixtures "$commons_fixture_dir")"; then
+        :
+    else
+        status=$?
+        record_test "C" "C6" "browse-complete-shares" "fail" 0 \
+            "fixture preparation failed (exit=$status): $(tail -3 <<<"$fixture_output" | tr '\n' ' ')"
+        return 0
     fi
     t0="$(date +%s%N)"
     set +e
@@ -1110,10 +1192,24 @@ run_phase_e() {
     # E5 — Soak with NAT-PMP (short bounded soak, runs inside VPN netns)
     if [[ -n "$username1" && -n "$password1" ]]; then
         local e5_log="$output_dir/e5-natpmp-$timestamp.log"
-        t0="$(date +%s%N)"
+        local soak_binary="$repo_root/target/debug/slskr"
+        local soak_build_output=""
+        local soak_build_status=0
         set +e
-        if [[ -n "$vpn_config" ]]; then
-            output="$(run_netns_command "cert-e5" "$vpn_config" timeout 60 env \
+        soak_build_output="$(cargo build -q -p slskr 2>&1)"
+        soak_build_status=$?
+        set -e
+
+        if [[ "$soak_build_status" -ne 0 ]]; then
+            record_test "E" "E5" "soak-with-natpmp" "fail" 0 \
+                "soak binary build failed: $(tail -3 <<<"$soak_build_output" | tr '\n' ' ')"
+        else
+            t0="$(date +%s%N)"
+            set +e
+            if [[ -n "$vpn_config" ]]; then
+                output="$(run_netns_command "cert-e5" "$vpn_config" timeout 60 env \
+                SLSKR_SOAK_SKIP_BUILD=1 \
+                SLSKR_MATRIX_BINARY="$soak_binary" \
                 SLSKR_SOAK_CREDENTIAL_FILE=/dev/null \
                 SLSK_USERNAME="$username1" \
                 SLSK_PASSWORD="$password1" \
@@ -1127,8 +1223,10 @@ run_phase_e() {
                 SLSK_SOAK_ACTIVE_PROBES=0 \
                 SLSK_SOAK_DEFAULT_SEARCH=0 \
                 "$repo_root/scripts/run-live-soak-proton-natpmp.sh" "$e5_log" 2>&1)"
-        else
-            output="$(timeout 60 env \
+            else
+                output="$(timeout 60 env \
+                SLSKR_SOAK_SKIP_BUILD=1 \
+                SLSKR_MATRIX_BINARY="$soak_binary" \
                 SLSKR_SOAK_CREDENTIAL_FILE=/dev/null \
                 SLSK_USERNAME="$username1" \
                 SLSK_PASSWORD="$password1" \
@@ -1141,17 +1239,18 @@ run_phase_e() {
                 SLSK_SOAK_ACTIVE_PROBES=0 \
                 SLSK_SOAK_DEFAULT_SEARCH=0 \
                 "$repo_root/scripts/run-live-soak-proton-natpmp.sh" "$e5_log" 2>&1)"
-        fi
-        status=$?
-        set -e
-        t1="$(date +%s%N)"
-        duration_ms=$(( (t1 - t0) / 1000000 ))
+            fi
+            status=$?
+            set -e
+            t1="$(date +%s%N)"
+            duration_ms=$(( (t1 - t0) / 1000000 ))
 
-        if [[ $status -eq 0 ]]; then
-            record_test "E" "E5" "soak-with-natpmp" "pass" "$duration_ms" "10s bounded soak completed"
-        else
-            record_test "E" "E5" "soak-with-natpmp" "fail" "$duration_ms" \
-                "soak exit status=$status: $(tail -3 "$e5_log" 2>/dev/null | tr '\n' ' ')"
+            if [[ $status -eq 0 ]]; then
+                record_test "E" "E5" "soak-with-natpmp" "pass" "$duration_ms" "10s bounded soak completed"
+            else
+                record_test "E" "E5" "soak-with-natpmp" "fail" "$duration_ms" \
+                    "soak exit status=$status: $(tail -3 "$e5_log" 2>/dev/null | tr '\n' ' ')"
+            fi
         fi
     else
         record_test "E" "E5" "soak-with-natpmp" "fail" 0 "need credentials"
@@ -1242,7 +1341,16 @@ run_phase_g() {
     local natpmp_vpn_config
     natpmp_vpn_config="$(resolve_proton_config "${SLSKR_CERTIFY_NATPMP_LABEL:-p1}")" || \
         natpmp_vpn_config="$vpn_config"
-    if [[ -n "$natpmp_vpn_config" ]]; then
+    local soak_build_output=""
+    local soak_build_status=0
+    set +e
+    soak_build_output="$(cargo build -q -p slskr 2>&1)"
+    soak_build_status=$?
+    set -e
+    if [[ "$soak_build_status" -ne 0 ]]; then
+        record_test "G" "G3" "natpmp-soak-5s" "fail" 0 \
+            "soak binary build failed: $(tail -3 <<<"$soak_build_output" | tr '\n' ' ')"
+    elif [[ -n "$natpmp_vpn_config" ]]; then
         local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
         local g3_log="$output_dir/g3-natpmp-$timestamp.log"
         sleep 3
@@ -1252,6 +1360,8 @@ run_phase_g() {
         # shellcheck disable=SC2016
         output="$(run_netns_command "cert-g3" "$natpmp_vpn_config" \
             timeout 30 env \
+                SLSKR_SOAK_SKIP_BUILD=1 \
+                SLSKR_MATRIX_BINARY="$repo_root/target/debug/slskr" \
                 SLSKR_SOAK_CREDENTIAL_FILE=/dev/null \
                 SLSK_USERNAME="$username1" \
                 SLSK_PASSWORD="$password1" \
@@ -1291,9 +1401,11 @@ run_phase_g() {
                 PROTON_NATPMP_LIFETIME=30 \
                 PROTON_NATPMP_RENEW_SECONDS=10 \
                 SLSK_LISTEN_PORT=2241 \
-                SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2242 \
-                SLSK_SOAK_SECONDS=5 \
-                timeout 15 "$soak_script" /dev/null 2>&1
+            SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2242 \
+            SLSK_SOAK_SECONDS=5 \
+            SLSKR_SOAK_SKIP_BUILD=1 \
+            SLSKR_MATRIX_BINARY="$repo_root/target/debug/slskr" \
+            timeout 15 "$soak_script" /dev/null 2>&1
             status=$?
             set -e
             t1="$(date +%s%N)"
@@ -1545,49 +1657,51 @@ EOF
     log info "  Log:      $log_file"
 }
 
-# --- Main ---
-log info "slskr certification runner starting"
-log info "phases: $phases"
-log info "log_format: $log_format"
-log info "output: $output_dir"
+if [[ "${SLSKR_CERTIFICATION_LIBRARY_ONLY:-0}" != "1" ]]; then
+    # --- Main ---
+    log info "slskr certification runner starting"
+    log info "phases: $phases"
+    log info "log_format: $log_format"
+    log info "output: $output_dir"
 
-if [[ "$dry_run" == "true" ]]; then
-    log info "DRY RUN — showing plan without executing"
-    log info "  Phase A: Foundation (login, peer-address, plain/obfuscated/indirect peer)"
-    log info "  Phase B: Transfer Certification (download, upload, resume, rejection)"
-    log info "  Phase C: Social & Discovery (PM, rooms, wishlist, browse)"
-    log info "  Phase D: Distributed Search Tree (parents, branch, forwarding)"
-    log info "  Phase E: NAT-PMP & Network Resilience (claim, renew, collision)"
-    log info "  Phase G: Soak Certification (server, listener, NAT-PMP soak)"
-    log info "  Phase H: Negative & Failure Modes (wrong password, offline peer, etc.)"
-    log info ""
-    log info "Run without --dry-run to execute."
-    exit 0
-fi
-
-IFS=',' read -ra phase_list <<< "$phases"
-first_phase=true
-for phase in "${phase_list[@]}"; do
-    phase="$(echo "$phase" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
-    # Add delay between live phases to avoid server rate-limiting
-    if [[ "$first_phase" != "true" ]]; then
-        sleep "${SLSKR_CERTIFY_INTER_PHASE_DELAY:-3}"
+    if [[ "$dry_run" == "true" ]]; then
+        log info "DRY RUN — showing plan without executing"
+        log info "  Phase A: Foundation (login, peer-address, plain/obfuscated/indirect peer)"
+        log info "  Phase B: Transfer Certification (download, upload, resume, rejection)"
+        log info "  Phase C: Social & Discovery (PM, rooms, wishlist, browse)"
+        log info "  Phase D: Distributed Search Tree (parents, branch, forwarding)"
+        log info "  Phase E: NAT-PMP & Network Resilience (claim, renew, collision)"
+        log info "  Phase G: Soak Certification (server, listener, NAT-PMP soak)"
+        log info "  Phase H: Negative & Failure Modes (wrong password, offline peer, etc.)"
+        log info ""
+        log info "Run without --dry-run to execute."
+        exit 0
     fi
-    first_phase=false
-    case "$phase" in
-        A) run_phase_a ;;
-        B) run_phase_b ;;
-        C) run_phase_c ;;
-        D) run_phase_d ;;
-        E) run_phase_e ;;
-        G) run_phase_g ;;
-        H) run_phase_h ;;
-        *) log warn "unknown phase: $phase — skipping" ;;
-    esac
-done
 
-generate_report
+    IFS=',' read -ra phase_list <<< "$phases"
+    first_phase=true
+    for phase in "${phase_list[@]}"; do
+        phase="$(echo "$phase" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
+        # Add delay between live phases to avoid server rate-limiting
+        if [[ "$first_phase" != "true" ]]; then
+            sleep "${SLSKR_CERTIFY_INTER_PHASE_DELAY:-3}"
+        fi
+        first_phase=false
+        case "$phase" in
+            A) run_phase_a ;;
+            B) run_phase_b ;;
+            C) run_phase_c ;;
+            D) run_phase_d ;;
+            E) run_phase_e ;;
+            G) run_phase_g ;;
+            H) run_phase_h ;;
+            *) log error "unknown phase: $phase"; exit 2 ;;
+        esac
+    done
 
-if [[ $failed_tests -gt 0 ]]; then
-    exit 1
+    generate_report
+
+    if [[ $failed_tests -gt 0 ]]; then
+        exit 1
+    fi
 fi

@@ -118,6 +118,7 @@ const viewports = [
 const skipScreenshots = process.env.SLSKR_REACT_WEB_AUDIT_SKIP_SCREENSHOTS === '1';
 const skipNavigation = process.env.SLSKR_REACT_WEB_AUDIT_SKIP_NAVIGATION === '1';
 const browserExecutablePath = process.env.SLSKR_PLAYWRIGHT_EXECUTABLE_PATH || undefined;
+const axeScriptPath = path.join(webRoot, 'node_modules', 'axe-core', 'axe.min.js');
 const endpointSweep = process.env.SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP
   ? JSON.parse(process.env.SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP)
   : [];
@@ -526,9 +527,17 @@ const fallback = (url, method = 'GET') => {
   }
   if (pathname === '/shares') {
     return json({
-      directories: applicationOptions.shares.directories,
-      fileCount: 128,
-      size: 3_400_000_000,
+      local: [
+        {
+          alias: 'open-fixtures',
+          directories: 1,
+          files: 2,
+          id: 'open-fixtures',
+          isExcluded: false,
+          localPath: '/srv/media/open-fixtures',
+          remotePath: 'open-fixtures',
+        },
+      ],
     });
   }
   if (pathname === '/shares/contents') {
@@ -576,9 +585,22 @@ const startStaticServer = async () => {
     try {
       const url = new URL(request.url || '/', 'http://127.0.0.1');
       const decodedPath = decodeURIComponent(url.pathname);
-      let filePath = path.join(buildDir, decodedPath);
-      if (decodedPath === '/' || !existsSync(filePath)) {
-        filePath = path.join(buildDir, 'index.html');
+      const resolvedBuildDir = path.resolve(buildDir);
+      let filePath = path.resolve(resolvedBuildDir, `.${decodedPath}`);
+      if (filePath !== resolvedBuildDir && !filePath.startsWith(`${resolvedBuildDir}${path.sep}`)) {
+        response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+        response.end('invalid path');
+        return;
+      }
+      if (decodedPath === '/') {
+        filePath = path.join(resolvedBuildDir, 'index.html');
+      } else if (!existsSync(filePath)) {
+        if (path.extname(decodedPath)) {
+          response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+          response.end('asset not found');
+          return;
+        }
+        filePath = path.join(resolvedBuildDir, 'index.html');
       }
       let body = await fs.readFile(filePath);
       if (filePath.endsWith('index.html')) {
@@ -648,6 +670,7 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
         constructor(url) {
           this.url = url;
           this.readyState = 0;
+          this.signalRHandshakeComplete = false;
           setTimeout(() => {
             this.readyState = 1;
             this.onopen?.({});
@@ -685,7 +708,31 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
           this.onclose?.({});
         }
 
-        send() {}
+        send(data) {
+          if (!String(this.url).includes('/hub/')) return;
+
+          const frames = String(data).split('\u001e').filter(Boolean);
+          for (const frame of frames) {
+            let message;
+            try {
+              message = JSON.parse(frame);
+            } catch {
+              continue;
+            }
+
+            if (!this.signalRHandshakeComplete) {
+              this.signalRHandshakeComplete = true;
+              setTimeout(() => this.onmessage?.({ data: '{}\u001e' }), 0);
+              continue;
+            }
+
+            if (message.type === 1 && message.invocationId) {
+              setTimeout(() => this.onmessage?.({
+                data: `${JSON.stringify({ invocationId: message.invocationId, type: 3 })}\u001e`,
+              }), 0);
+            }
+          }
+        }
       }
 
       FakeWebSocket.CONNECTING = 0;
@@ -871,8 +918,43 @@ const assertNoOverlap = async (page) =>
     return overlaps.slice(0, 5);
   });
 
+const measureHorizontalOverflow = async (page) =>
+  page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const documentWidth = document.documentElement.scrollWidth;
+    const overflowing = Array.from(document.body.querySelectorAll('*'))
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && (rect.right > viewportWidth + 1 || rect.left < -1);
+      })
+      .filter((element) => {
+        let parent = element.parentElement;
+        while (parent && parent !== document.body) {
+          const overflowX = getComputedStyle(parent).overflowX;
+          if (['auto', 'scroll', 'hidden', 'clip'].includes(overflowX)) return false;
+          parent = parent.parentElement;
+        }
+        return true;
+      })
+      .slice(0, 5)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          id: element.id,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          selector: `${element.tagName.toLowerCase()}${element.className && typeof element.className === 'string' ? `.${element.className.trim().replace(/\s+/gu, '.')}` : ''}`,
+        };
+      });
+
+    return { documentWidth, overflowing, viewportWidth };
+  });
+
 if (!existsSync(path.join(buildDir, 'index.html'))) {
   throw new Error('web/build/index.html is missing; run npm --prefix web run build first.');
+}
+if (!existsSync(axeScriptPath)) {
+  throw new Error('axe-core is missing; run npm --prefix web ci before the accessibility audit.');
 }
 
 await fs.mkdir(outputDir, { recursive: true });
@@ -946,7 +1028,19 @@ try {
       const routePage = await routeContext.newPage();
       const pageErrors = [];
       const apiResponses = [];
+      const assetErrors = [];
       routePage.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
+      routePage.on('requestfailed', (request) => {
+        if (new URL(request.url()).pathname.startsWith('/assets/')) {
+          assetErrors.push({ error: request.failure()?.errorText || 'request failed', url: request.url() });
+        }
+      });
+      routePage.on('response', (assetResponse) => {
+        const pathname = new URL(assetResponse.url()).pathname;
+        if (pathname.startsWith('/assets/') && assetResponse.status() >= 400) {
+          assetErrors.push({ status: assetResponse.status(), url: assetResponse.url() });
+        }
+      });
       routePage.on('console', (message) => {
         const text = message.text();
         if (
@@ -1000,6 +1094,11 @@ try {
         .waitForLoadState('networkidle', { timeout: networkIdleTimeoutMs })
         .catch(() => {});
       await routePage.waitForTimeout(auditScenario === 'success' ? 250 : 125);
+      if (auditScenario === 'success') {
+        await routePage.locator('.loader-segment:visible').first()
+          .waitFor({ state: 'detached', timeout: 5_000 })
+          .catch(() => {});
+      }
       if (
         endpointSweep.length > 0
         && route === auditedRoutes[0]
@@ -1024,11 +1123,62 @@ try {
       }
 
       const bodyText = await routePage.locator('body').innerText().catch(() => '');
+      const visiblePageLoaders = await routePage.locator('.loader-segment:visible').count();
+      const visibleErrorState = routePage.locator(
+        '.error-segment:visible, .ui.message.error:visible, .ui.message.negative:visible',
+      );
+      const visibleErrorStates = await visibleErrorState.count();
+      const visibleErrorStateTexts = (await visibleErrorState.allInnerTexts())
+        .map((text) => text.trim().replace(/\s+/gu, ' '))
+        .filter(Boolean);
+      let accessibilityViolations = [];
+      try {
+        await routePage.addScriptTag({ path: axeScriptPath });
+        accessibilityViolations = await routePage.evaluate(async () => {
+          const result = await window.axe.run(document, {
+            runOnly: {
+              type: 'tag',
+              values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'],
+            },
+          });
+          return result.violations.map((violation) => ({
+            help: violation.help,
+            id: violation.id,
+            impact: violation.impact,
+            nodes: violation.nodes.map((node) => ({
+              failureSummary: node.failureSummary?.slice(0, 500),
+              html: node.html.slice(0, 600),
+              target: node.target,
+            })),
+          }));
+        });
+      } catch (error) {
+        audit.errors.push(
+          `${route} ${viewport.name}: accessibility audit failed: ${error?.message || error}`,
+        );
+      }
       const rootChildCount = await routePage.locator('#root > *').count();
       const visibleButtonCount = await routePage.locator('button:visible, .ui.button:visible').count();
       const visibleInputCount = await routePage.locator('input:visible, textarea:visible').count();
+      const visibleSearchResultRows = route === '/searches'
+        ? await routePage.locator('.search-list-card tbody tr:visible').count()
+        : null;
+      const searchResultsVisibleInInitialViewport = route === '/searches'
+        ? await routePage.evaluate(() => {
+          const heading = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6')]
+            .find((element) => element.textContent.trim() === 'Search Results');
+          const firstRow = document.querySelector('.search-list-card tbody tr');
+          const player = document.querySelector('.player-bar');
+          if (!heading || !firstRow) return false;
+          const headingRect = heading.getBoundingClientRect();
+          const rowRect = firstRow.getBoundingClientRect();
+          const playerTop = player?.getBoundingClientRect().top ?? window.innerHeight;
+          return headingRect.top >= 0 && rowRect.bottom <= playerTop;
+        })
+        : null;
       const internalHrefs = await visibleInternalHrefs(routePage);
       const overlaps = await assertNoOverlap(routePage);
+      const horizontalOverflow = await measureHorizontalOverflow(routePage);
       const screenshot = skipScreenshots ? null : `${slugFor(route)}-${viewport.name}.png`;
       if (screenshot) {
         await routePage.screenshot({
@@ -1040,16 +1190,24 @@ try {
       const result = {
         bodyLength: bodyText.length,
         apiResponses,
+        accessibilityViolations,
+        assetErrors,
         internalHrefs: [...new Set(internalHrefs)].sort(),
+        horizontalOverflow,
         overlaps,
+        visiblePageLoaders,
         responseStatus: response?.status(),
         rootChildCount,
         route,
         scenario: auditScenario,
         screenshot,
+        searchResultsVisibleInInitialViewport,
         visibleButtonCount,
+        visibleErrorStates,
+        visibleErrorStateTexts,
         visibleInputCount,
         viewport: viewport.name,
+        visibleSearchResultRows,
       };
       audit.routes.push(result);
 
@@ -1058,6 +1216,30 @@ try {
       }
       if (rootChildCount < 1) audit.errors.push(`${route} ${viewport.name}: React root did not mount`);
       if (bodyText.length < 100) audit.errors.push(`${route} ${viewport.name}: page looks blank`);
+      if (auditScenario === 'success' && visiblePageLoaders > 0) {
+        audit.errors.push(
+          `${route} ${viewport.name}: page still has ${visiblePageLoaders} loading segment(s) after the render deadline`,
+        );
+      }
+      if (auditScenario === 'success' && visibleErrorStates > 0) {
+        audit.errors.push(
+          `${route} ${viewport.name}: success fixture rendered ${visibleErrorStates} error state(s): ${JSON.stringify(visibleErrorStateTexts)}`,
+        );
+      }
+      if (auditScenario === 'success' && accessibilityViolations.length > 0) {
+        audit.errors.push(
+          `${route} ${viewport.name}: Axe found ${accessibilityViolations.length} WCAG A/AA violation type(s): ${accessibilityViolations.map(({ id, impact }) => `${id} (${impact})`).join(', ')}`,
+        );
+      }
+      if (
+        auditScenario === 'success'
+        && route === '/searches'
+        && (visibleSearchResultRows < 1 || !searchResultsVisibleInInitialViewport)
+      ) {
+        audit.errors.push(
+          `${route} ${viewport.name}: healthy mock search results are missing or hidden below the initial viewport`,
+        );
+      }
       // Data-heavy pages legitimately render status text such as "404" from
       // historical logs or remote messages. Treat only a short standalone
       // error document as a navigation failure; API failures are recorded
@@ -1079,6 +1261,14 @@ try {
       }
       if (overlaps.length > 0) {
         audit.errors.push(`${route} ${viewport.name}: overlapping controls ${JSON.stringify(overlaps)}`);
+      }
+      if (assetErrors.length > 0) {
+        audit.errors.push(`${route} ${viewport.name}: browser asset failures ${JSON.stringify(assetErrors)}`);
+      }
+      if (horizontalOverflow.documentWidth > horizontalOverflow.viewportWidth + 1) {
+        audit.errors.push(
+          `${route} ${viewport.name}: document width ${horizontalOverflow.documentWidth}px exceeds viewport ${horizontalOverflow.viewportWidth}px; overflow=${JSON.stringify(horizontalOverflow.overflowing)}`,
+        );
       }
       for (const href of internalHrefs) {
         if (!routes.includes(href) && !href.startsWith('/searches/')) {

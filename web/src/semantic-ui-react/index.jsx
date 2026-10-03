@@ -658,6 +658,10 @@ export const Input = React.forwardRef((props, ref) => {
     onChange,
     ...rest
   } = props;
+  const inputId = rest.id || input?.props?.id;
+  const accessibleLabel = typeof label === 'string' && !rest['aria-label']
+    ? label
+    : undefined;
   const innerInputRef = React.useRef(null);
   React.useImperativeHandle(ref, () => ({
     blur: () => innerInputRef.current?.blur(),
@@ -667,7 +671,13 @@ export const Input = React.forwardRef((props, ref) => {
 
   const hasCustomInput = React.isValidElement(input);
   const wrapperTestId = hasCustomInput ? undefined : rest['data-testid'];
-  const inputProps = cleanInputProps({ ...rest, disabled, onChange }, [
+  const inputProps = cleanInputProps({
+    ...rest,
+    'aria-label': accessibleLabel || rest['aria-label'],
+    disabled,
+    id: inputId,
+    onChange,
+  }, [
     'children',
     'className',
     wrapperTestId ? 'data-testid' : undefined,
@@ -794,6 +804,9 @@ export const Dropdown = React.forwardRef((props, ref) => {
   }, [open]);
 
   const [searchText, setSearchText] = React.useState('');
+  const [activeOptionIndex, setActiveOptionIndex] = React.useState(-1);
+  const dropdownId = React.useId();
+  const listboxId = `dropdown-listbox-${dropdownId}`;
   React.useEffect(() => {
     if (!open) setSearchText('');
   }, [open]);
@@ -816,6 +829,43 @@ export const Dropdown = React.forwardRef((props, ref) => {
       ? options.filter((option) =>
         String(optionLabel(option) ?? '').toLowerCase().includes(searchText.toLowerCase()))
       : options;
+    const firstEnabledOptionIndex = visibleOptions.findIndex((option) => !option.disabled);
+    const lastEnabledOptionIndex = visibleOptions.reduce(
+      (last, option, index) => option.disabled ? last : index,
+      -1,
+    );
+    const selectedVisibleIndex = visibleOptions.findIndex((option) => {
+      const isSelected = isMultiple
+        ? selectedValues.some((entry) => optionValue(entry) === optionValue(option.value))
+        : optionValue(option.value) === optionValue(value);
+      return isSelected && !option.disabled;
+    });
+    const initialActiveIndex = selectedVisibleIndex >= 0
+      ? selectedVisibleIndex
+      : firstEnabledOptionIndex;
+    const activeOption = visibleOptions[activeOptionIndex];
+    const activeOptionId = activeOption && !activeOption.disabled
+      ? `${listboxId}-option-${activeOptionIndex}`
+      : undefined;
+
+    const setOptionsOpen = (nextOpen) => {
+      if (nextOpen && !open) setActiveOptionIndex(initialActiveIndex);
+      setOpen(nextOpen);
+    };
+
+    const moveActiveOption = (direction) => {
+      for (
+        let index = activeOptionIndex + direction;
+        index >= 0 && index < visibleOptions.length;
+        index += direction
+      ) {
+        if (!visibleOptions[index].disabled) {
+          setActiveOptionIndex(index);
+          return;
+        }
+      }
+      setActiveOptionIndex(direction > 0 ? firstEnabledOptionIndex : lastEnabledOptionIndex);
+    };
 
     const emitChange = (nextValue) => {
       if (onChange) onChange({ target: {} }, { ...props, value: nextValue });
@@ -842,20 +892,54 @@ export const Dropdown = React.forwardRef((props, ref) => {
 
     const handleRootClick = () => {
       if (disabled) return;
-      setOpen(!open);
+      setOptionsOpen(!open);
     };
 
     const handleRootKeyDown = (event) => {
       if (disabled) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setOptionsOpen(false);
+        return;
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!open) {
+          setOptionsOpen(true);
+          return;
+        }
+        moveActiveOption(event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+
+      if (event.key === 'Home' || event.key === 'End') {
+        if (!open || search) return;
+        event.preventDefault();
+        const nextIndex = event.key === 'Home'
+          ? firstEnabledOptionIndex
+          : lastEnabledOptionIndex;
+        setActiveOptionIndex(nextIndex);
+        return;
+      }
+
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        setOpen(!open);
+        if (!open) {
+          setOptionsOpen(true);
+          return;
+        }
+
+        const option = visibleOptions[activeOptionIndex];
+        if (option && !option.disabled) selectOption(option);
       }
     };
 
     const handleSearchClick = (event) => {
       event.stopPropagation();
-      if (!disabled) setOpen(true);
+      if (!disabled) setOptionsOpen(true);
     };
 
     const displayLabel = isMultiple
@@ -867,12 +951,20 @@ export const Dropdown = React.forwardRef((props, ref) => {
         .filter((label) => label != null)
         .join(', ')
       : (selectedOption ? optionLabel(selectedOption) : null);
+    const accessibleName = rest['aria-label']
+      || placeholder
+      || text
+      || (displayLabel ? `Select ${displayLabel}` : undefined);
 
     return (
       <div
-        {...cleanProps(rest)}
+        {...cleanProps(search ? { ...rest, 'aria-label': undefined } : rest)}
+        aria-activedescendant={!search && open ? activeOptionId : undefined}
+        aria-label={!search ? accessibleName : undefined}
         aria-disabled={disabled || undefined}
-        aria-expanded={open}
+        aria-controls={!search ? listboxId : undefined}
+        aria-expanded={!search ? open : undefined}
+        aria-haspopup={!search ? 'listbox' : undefined}
         className={cx(
           'ui dropdown',
           commonClasses(props),
@@ -885,15 +977,26 @@ export const Dropdown = React.forwardRef((props, ref) => {
         onClick={handleRootClick}
         onKeyDown={handleRootKeyDown}
         ref={setRootRef}
-        role="listbox"
-        tabIndex={disabled ? undefined : 0}
+        role={!search ? 'combobox' : undefined}
+        tabIndex={!search && !disabled ? 0 : undefined}
       >
         {search ? (
           <input
+            aria-activedescendant={open ? activeOptionId : undefined}
+            aria-autocomplete="list"
+            aria-controls={listboxId}
+            aria-expanded={open}
+            aria-haspopup="listbox"
+            aria-label={rest['aria-label'] || placeholder || accessibleName}
             className="search"
             disabled={disabled}
             onChange={(event) => {
               setSearchText(event.target.value);
+              const nextVisibleOptions = options.filter((option) =>
+                String(optionLabel(option) ?? '').toLowerCase()
+                  .includes(event.target.value.toLowerCase()));
+              const firstEnabledIndex = nextVisibleOptions.findIndex((option) => !option.disabled);
+              setActiveOptionIndex(firstEnabledIndex);
               if (!open) setOpen(true);
             }}
             onClick={handleSearchClick}
@@ -907,6 +1010,8 @@ export const Dropdown = React.forwardRef((props, ref) => {
               padding: 0,
               width: '100%',
             }}
+            placeholder={placeholder}
+            role="combobox"
             value={open ? searchText : (displayLabel || '')}
           />
         ) : (
@@ -915,20 +1020,32 @@ export const Dropdown = React.forwardRef((props, ref) => {
           </div>
         )}
         {clearable && hasValue ? (
-          <Icon
-            name="close"
+          <Button
+            aria-label={`Clear ${rest['aria-label'] || placeholder || 'selection'}`}
+            className="clear"
+            icon="close"
             onClick={handleClear}
+            size="mini"
+            type="button"
           />
         ) : null}
         <Icon name="dropdown" />
-        {open ? (
-          <div
-            className="menu visible transition"
-            role="listbox"
-          >
-            {visibleOptions.length === 0 ? (
-              <div className="item disabled">No results found.</div>
-            ) : visibleOptions.map((option) => {
+        <div
+          className={cx('menu', open && 'visible transition')}
+          hidden={!open}
+          id={listboxId}
+          role="listbox"
+        >
+          {visibleOptions.length === 0 ? (
+            <div
+              aria-disabled="true"
+              aria-selected="false"
+              className="item disabled"
+              role="option"
+            >
+              No results found.
+            </div>
+          ) : visibleOptions.map((option, optionIndex) => {
               const isSelected = isMultiple
                 ? selectedValues.some((entry) => optionValue(entry) === optionValue(option.value))
                 : optionValue(option.value) === optionValue(value);
@@ -936,8 +1053,14 @@ export const Dropdown = React.forwardRef((props, ref) => {
                 <div
                   aria-disabled={option.disabled || undefined}
                   aria-selected={isSelected}
-                  className={cx('item', option.disabled && 'disabled', isSelected && 'active selected')}
+                  className={cx(
+                    'item',
+                    option.disabled && 'disabled',
+                    isSelected && 'selected',
+                    optionIndex === activeOptionIndex && !option.disabled && 'active',
+                  )}
                   data-value={optionValue(option.value)}
+                  id={`${listboxId}-option-${optionIndex}`}
                   key={option.key ?? optionValue(option.value)}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -949,8 +1072,7 @@ export const Dropdown = React.forwardRef((props, ref) => {
                 </div>
               );
             })}
-          </div>
-        ) : null}
+        </div>
       </div>
     );
   }
@@ -983,6 +1105,7 @@ export const Dropdown = React.forwardRef((props, ref) => {
   return (
     <div
       {...cleanProps(rest)}
+      aria-label={rest['aria-label'] || rest.title || placeholder || text}
       aria-disabled={disabled || undefined}
       aria-expanded={open}
       className={cx('ui dropdown', commonClasses(props), open && 'active', className)}
@@ -1060,6 +1183,8 @@ const CheckboxInput = React.forwardRef((props, ref) => {
     value,
     ...rest
   } = props;
+  const generatedId = React.useId();
+  const inputId = rest.id || `ui-checkbox-${generatedId}`;
   const inputType = type || (radio ? 'radio' : 'checkbox');
   const handleChange = (event) => {
     if (onChange) {
@@ -1074,6 +1199,7 @@ const CheckboxInput = React.forwardRef((props, ref) => {
     ...rest,
     checked,
     disabled,
+    id: inputId,
     onChange: handleChange,
     type: inputType,
     value,
@@ -1085,7 +1211,7 @@ const CheckboxInput = React.forwardRef((props, ref) => {
         {...inputProps}
         ref={ref}
       />
-      {label ? <label>{label}</label> : null}
+      {label ? <label htmlFor={inputId}>{label}</label> : null}
     </div>
   );
 });
@@ -1134,6 +1260,31 @@ Form.Field = React.forwardRef((props, ref) => {
     label,
     ...rest
   } = props;
+  const fieldLabel = React.Children.toArray(children).find(
+    (child) => React.isValidElement(child) && child.type === 'label',
+  );
+  const generatedLabelId = React.useId();
+  const fieldLabelId = label
+    ? generatedLabelId
+    : fieldLabel?.props.id || generatedLabelId;
+  const labeledChildren = React.Children.map(children, (child) => {
+    if (!React.isValidElement(child)) return child;
+    if (!label && child.type === 'label' && !child.props.id) {
+      return React.cloneElement(child, { id: fieldLabelId });
+    }
+    const isControl = [
+      Input, TextArea, CheckboxInput, Radio, Dropdown, 'input', 'select', 'textarea',
+    ].includes(child.type);
+    if (
+      isControl &&
+      (label || fieldLabel) &&
+      !child.props['aria-label'] &&
+      !child.props['aria-labelledby']
+    ) {
+      return React.cloneElement(child, { 'aria-labelledby': fieldLabelId });
+    }
+    return child;
+  });
 
   return (
     <Component
@@ -1141,8 +1292,8 @@ Form.Field = React.forwardRef((props, ref) => {
       className={cx('field', commonClasses(props), widthClass(props.width), className)}
       ref={ref}
     >
-      {label ? <label>{label}</label> : null}
-      {childrenOrContent(children, content)}
+      {label ? <label id={fieldLabelId}>{label}</label> : null}
+      {childrenOrContent(labeledChildren, content)}
     </Component>
   );
 });
@@ -1513,10 +1664,13 @@ export const Progress = ({
 }) => {
   const computedPercent = percent || (total ? Math.round((value / total) * 100) : 0);
   const displayProgress = progress === true ? `${computedPercent}%` : progress;
+  const progressLabel = props['aria-label'] || props.title
+    || (typeof children === 'string' ? children : undefined);
 
   return (
     <div
       {...cleanProps(props)}
+      aria-label={progressLabel}
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={computedPercent}
@@ -1584,6 +1738,8 @@ const getMenuItem = (menuItem, index) => {
   }
   if (typeof menuItem === 'object' && menuItem != null) {
     return {
+      action: menuItem.action,
+      ariaLabel: menuItem['aria-label'] || menuItem.ariaLabel,
       content: menuItem.content || menuItem.text || menuItem.name || menuItem.key,
       icon: menuItem.icon,
       key: menuItem.key || menuItem.content || index,
@@ -1624,8 +1780,9 @@ export const Tab = ({
       >
         {panes.map((pane, index) => {
           const item = getMenuItem(pane.menuItem, index);
-          return (
+          const tabItem = (
             <Menu.Item
+              aria-label={item.ariaLabel}
               active={index === selectedIndex}
               icon={item.icon}
               key={item.key}
@@ -1634,6 +1791,12 @@ export const Tab = ({
               {item.content}
             </Menu.Item>
           );
+          return item.action ? (
+            <React.Fragment key={item.key}>
+              {tabItem}
+              {item.action}
+            </React.Fragment>
+          ) : tabItem;
         })}
       </Menu>
       {renderedPanes.map((pane, index) => {

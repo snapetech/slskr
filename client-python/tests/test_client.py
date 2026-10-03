@@ -593,6 +593,38 @@ async def test_websocket_client_cleans_up_when_connect_is_cancelled():
 
 
 @pytest.mark.asyncio
+async def test_websocket_disconnect_cancels_pending_connect():
+    dial_started = asyncio.Event()
+
+    async def blocked_connect(*_args, **_kwargs):
+        dial_started.set()
+        await asyncio.Event().wait()
+
+    session = MagicMock()
+    session.ws_connect = AsyncMock(side_effect=blocked_connect)
+    session.close = AsyncMock()
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient("https://example.test", "token")
+        connecting = asyncio.create_task(client.connect())
+        await dial_started.wait()
+
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=1)
+            with pytest.raises(asyncio.CancelledError):
+                await connecting
+        finally:
+            if not connecting.done():
+                connecting.cancel()
+            await asyncio.gather(connecting, return_exceptions=True)
+
+    assert client.session is None
+    assert client.ws is None
+    assert not client.is_connected()
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_websocket_client_bounds_a_stalled_handshake():
     dial_started = asyncio.Event()
 

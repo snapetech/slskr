@@ -6,15 +6,32 @@ cd "$repo_root"
 
 status=0
 csp_scan_paths=(crates/slskr/src crates/slskr-web/static)
+scan_raw="$(mktemp)"
+scan_filtered="$(mktemp)"
+trap 'rm -f "$scan_raw" "$scan_filtered"' EXIT
+
+rg_allow_no_matches() {
+  local output_file="$1"
+  shift
+  if rg "$@" >"$output_file"; then
+    return 0
+  else
+    local scan_status=$?
+    if [[ "$scan_status" -eq 1 ]]; then
+      return 0
+    fi
+    printf 'csp policy scan failed (rg exit %s)\n' "$scan_status" >&2
+    return "$scan_status"
+  fi
+}
 
 if [[ -f web/build/index.html ]]; then
   csp_scan_paths+=(web/build/index.html)
 fi
 
-unsafe_inline_matches="$(
-  rg --pcre2 -n "(?:script-src|style-src)[[:space:]][^;]*'unsafe-inline'" "${csp_scan_paths[@]}" \
-    | rg -v 'assert!\(!' || true
-)"
+rg_allow_no_matches "$scan_raw" --pcre2 -n "(?:script-src|style-src)[[:space:]][^;]*'unsafe-inline'" "${csp_scan_paths[@]}"
+rg_allow_no_matches "$scan_filtered" -v 'assert!\(!' "$scan_raw"
+unsafe_inline_matches="$(<"$scan_filtered")"
 if [[ -n "$unsafe_inline_matches" ]]; then
   printf '%s\n' "$unsafe_inline_matches"
   printf 'csp policy failed: broad unsafe-inline CSP allowance is present in served source/build files\n' >&2

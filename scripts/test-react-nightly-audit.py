@@ -18,7 +18,13 @@ spec.loader.exec_module(nightly)
 class NightlyTests(unittest.TestCase):
     def audit(self):
         return {'evidenceMode': 'mock', 'scenario': 'success', 'endpointSweepCount': 0,
-                'errors': [], 'routes': [{'viewport': viewport, 'apiResponses': [{'status': 200}]}
+                'errors': [], 'routes': [{'route': '/searches', 'viewport': viewport,
+                                           'visiblePageLoaders': 0,
+                                           'visibleErrorStates': 0,
+                                           'accessibilityViolations': [],
+                                           'visibleSearchResultRows': 2,
+                                           'searchResultsVisibleInInitialViewport': True,
+                                           'apiResponses': [{'status': 200}]}
                                         for viewport in ('desktop', 'mobile')]}
 
     def test_observed_routes(self):
@@ -41,6 +47,37 @@ class NightlyTests(unittest.TestCase):
         for route in audit['routes']:
             route['apiResponses'] = []
         with self.assertRaises(RuntimeError):
+            nightly.validate_audit(audit, 'success')
+
+    def test_rejects_a_success_view_that_is_still_loading(self):
+        audit = self.audit()
+        audit['routes'][0]['visiblePageLoaders'] = 1
+        with self.assertRaisesRegex(RuntimeError, 'still loading'):
+            nightly.validate_audit(audit, 'success')
+
+    def test_rejects_a_success_view_that_displays_an_error_state(self):
+        audit = self.audit()
+        audit['routes'][0]['visibleErrorStates'] = 1
+        with self.assertRaisesRegex(RuntimeError, 'error state'):
+            nightly.validate_audit(audit, 'success')
+
+    def test_rejects_a_success_view_with_accessibility_violations(self):
+        audit = self.audit()
+        audit['routes'][1]['accessibilityViolations'] = [
+            {'id': 'button-name', 'impact': 'critical'},
+        ]
+        with self.assertRaisesRegex(RuntimeError, 'accessibility violation'):
+            nightly.validate_audit(audit, 'success')
+
+    def test_rejects_search_results_missing_from_the_initial_viewports(self):
+        audit = self.audit()
+        audit['routes'][1]['visibleSearchResultRows'] = 0
+        with self.assertRaisesRegex(RuntimeError, 'search results'):
+            nightly.validate_audit(audit, 'success')
+
+        audit = self.audit()
+        audit['routes'][0]['searchResultsVisibleInInitialViewport'] = False
+        with self.assertRaisesRegex(RuntimeError, 'search results'):
             nightly.validate_audit(audit, 'success')
 
     def test_clears_inherited_live_sweep_and_restrictions(self):

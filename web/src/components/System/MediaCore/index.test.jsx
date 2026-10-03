@@ -16,6 +16,7 @@ vi.mock('../../../lib/mediacore', () => ({
   getContentIdStats: vi.fn(),
   getContentOpinions: vi.fn(),
   getChannels: vi.fn(),
+  getContentMetadata: vi.fn(),
   getMessageStorageStats: vi.fn(),
   getConsensusRecommendations: vi.fn(),
   getMemberAffinities: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('../../../lib/mediacore', () => ({
   searchMessages: vi.fn(),
   getSupportedHashAlgorithms: vi.fn(),
   resolveContentId: vi.fn(),
+  validateContentIdForPod: vi.fn(),
 }));
 
 vi.mock('react-toastify', () => ({
@@ -79,6 +81,7 @@ describe('MediaCore', () => {
     });
     mediacore.getChannels.mockResolvedValue([]);
     mediacore.getContentOpinions.mockResolvedValue([]);
+    mediacore.getContentMetadata.mockResolvedValue(null);
     mediacore.getConsensusRecommendations.mockResolvedValue([]);
     mediacore.getMemberAffinities.mockResolvedValue({});
     mediacore.getOpinionStatistics.mockResolvedValue({
@@ -93,6 +96,7 @@ describe('MediaCore', () => {
     mediacore.searchContent.mockResolvedValue([]);
     mediacore.searchMessages.mockResolvedValue([]);
     mediacore.resolveContentId.mockResolvedValue(null);
+    mediacore.validateContentIdForPod.mockResolvedValue({ isValid: true });
   });
 
   const renderOpinionQuery = async () => {
@@ -129,6 +133,36 @@ describe('MediaCore', () => {
       'href',
       '#podcore-dht-publishing',
     );
+  });
+
+  it('labels native controls across pod workflows', async () => {
+    render(<MediaCore />);
+
+    await screen.findByText('MediaCore ContentID Registry');
+
+    expect(
+      screen.getByRole('slider', { name: 'Score (0-10):' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'New channel type' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Content ID (e.g., content:audio:album:mb-release-id)',
+      ),
+      { target: { value: 'content:audio:album:mb-release-id' } },
+    );
+    fireEvent.click(
+      screen
+        .getAllByRole('button', { name: 'Validate' })
+        .find((button) => !button.disabled),
+    );
+
+    await screen.findByText(/Valid Content ID/);
+    expect(
+      screen.getByRole('combobox', { name: 'Visibility:' }),
+    ).toBeInTheDocument();
   });
 
   it('focuses a pod workflow from the index card', async () => {

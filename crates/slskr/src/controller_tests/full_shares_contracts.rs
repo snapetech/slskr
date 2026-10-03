@@ -2,6 +2,34 @@
 
 use super::*;
 
+#[cfg_attr(test, tokio::test)]
+#[cfg(feature = "full-controller-tests")]
+pub(super) async fn shared_file_open_rejects_paths_outside_configured_roots() {
+    let (state, _receiver) = test_state();
+    let dir = std::env::temp_dir().join(format!(
+        "slskr-share-root-boundary-test-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let root = dir.join("share");
+    let outside = dir.join("outside.flac");
+    fs::create_dir_all(&root).expect("share root");
+    fs::write(root.join("inside.flac"), b"inside").expect("in-root file");
+    fs::write(&outside, b"outside").expect("outside file");
+
+    state.share_settings.write().await.roots = vec![root.clone()];
+    let inside = crate::open_shared_local_file(&state, &root.join("inside.flac"))
+        .await
+        .expect("in-root file remains readable");
+    assert_eq!(inside.metadata().unwrap().len(), 6);
+
+    let error = crate::open_shared_local_file(&state, &outside)
+        .await
+        .expect_err("files outside configured share roots must be rejected");
+    assert!(error.contains("outside configured share roots"));
+    fs::remove_dir_all(dir).unwrap();
+}
+
 #[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
 pub(super) fn share_filters_honor_startup_case_mode_against_original_paths() {
