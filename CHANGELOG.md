@@ -18,6 +18,15 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
+## [0.2.43] — 2026-10-03
+
+- Improved search loading and recovery, user profile details, mobile navigation,
+  and keyboard and screen-reader access across the Web UI.
+- Hardened share streaming, listener validation, asynchronous shutdown, Python
+  WebSocket cancellation, and certification setup and failure reporting.
+- Strengthened browser security and audit tooling, and remeasured the aggregate
+  JavaScript gzip budget at 600.60 KiB under the 601 KiB limit.
+
 ## [0.2.42] — 2026-09-30
 
 - Reduced startup share-scan I/O by skipping unsupported media files and using
