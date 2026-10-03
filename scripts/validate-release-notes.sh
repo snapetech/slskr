@@ -17,7 +17,8 @@ grep -Fqx "# slskr $version" "$notes_path" || fail "notes title does not match $
 grep -Fqx '## Highlights' "$notes_path" || fail "notes do not contain a Highlights section"
 grep -Eq '^[[:space:]]*-[[:space:]]+\S' "$notes_path" || fail "release notes contain no highlight bullets"
 
-if grep -Eqi 'TODO|TBD|placeholder|Add release notes here|No recorded changes' "$notes_path"; then
+if grep -Eqi 'TODO|TBD|Add release notes here|No recorded changes' "$notes_path" \
+  || grep -Eqi '^[[:space:]]*(#{1,6}[[:space:]]*)?(-[[:space:]]*)?(\[)?placeholder(\])?[[:space:].!]*$' "$notes_path"; then
   fail "notes contain placeholder or empty-release wording"
 fi
 

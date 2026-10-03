@@ -18,7 +18,7 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
-## [0.2.43] — 2026-10-03
+## [0.2.44] — 2026-10-03
 
 - Improved search loading and recovery, user profile details, mobile navigation,
   and keyboard and screen-reader access across the Web UI.
@@ -26,6 +26,8 @@ the release is prepared. Do not rewrite audited release history.
   WebSocket cancellation, and certification setup and failure reporting.
 - Strengthened browser security and audit checks to reject unsafe code paths
   and surface incomplete scans.
+- Corrected release-note validation and assembly so accurate product wording
+  passes while unsuccessful unpublished tags do not hide pending notes.
 
 ## [0.2.42] — 2026-09-30
 

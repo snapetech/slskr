@@ -24,6 +24,34 @@ Release validation now publishes the same curated summary to GitHub and Discord 
 
 
 class ReleaseNotesTests(unittest.TestCase):
+    def test_release_validator_allows_a_product_placeholder_reference(self) -> None:
+        validator = Path(__file__).with_name("validate-release-notes.sh")
+        notes = """# slskr 1.0.0
+
+## Highlights
+
+- Shared directories now open through a labeled button instead of a placeholder link. Missing directory paths are shown as unavailable and cannot trigger an empty browse action.
+"""
+        with tempfile.TemporaryDirectory(prefix="slskr-release-validator-") as temporary:
+            notes_path = Path(temporary) / "release-notes.md"
+            notes_path.write_text(notes, encoding="utf-8")
+            subprocess.check_call(["bash", str(validator), "1.0.0", str(notes_path)])
+
+            for stub in ("- TODO: write this note", "- [placeholder]", "- placeholder"):
+                with self.subTest(stub=stub):
+                    notes_path.write_text(
+                        f"# slskr 1.0.0\n\n## Highlights\n\n{stub}\n",
+                        encoding="utf-8",
+                    )
+                    result = subprocess.run(
+                        ["bash", str(validator), "1.0.0", str(notes_path)],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("placeholder or empty-release wording", result.stderr)
+
     def test_schema_and_formats(self) -> None:
         note = release_notes.parse_release_note("release-notes/pipeline.md", VALID_NOTE)
         self.assertEqual(note["errors"], [])

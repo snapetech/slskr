@@ -339,6 +339,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
           RELEASE_REPOSITORY: ${{ github.repository }}
           RELEASE_REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # The assembler inserts the ### User-facing changes section from release-notes/.
@@ -363,7 +364,13 @@ jobs:
           - [Release runbook](https://github.com/${RELEASE_REPOSITORY}/blob/${RELEASE_REF_NAME}/docs/release.md) documents the local gates and artifact contract.
           - [Full structured release-note fragments](https://github.com/${RELEASE_REPOSITORY}/releases/download/${RELEASE_REF_NAME}/RELEASE_NOTES_FULL.md) contain the machine-validated detailed change record without making this summary a wall of text.
           EOF
-          previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          previous_tag="$(gh release list \
+            --repo "$RELEASE_REPOSITORY" \
+            --exclude-drafts \
+            --exclude-pre-releases \
+            --limit 1 \
+            --json tagName \
+            --jq '.[0].tagName // empty')"
           release_notes_base="${previous_tag:-$(git hash-object -t tree /dev/null)}"
           python3 scripts/release_notes.py assemble \
             --base "$release_notes_base" \
