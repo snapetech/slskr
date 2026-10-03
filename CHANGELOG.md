@@ -24,8 +24,8 @@ the release is prepared. Do not rewrite audited release history.
   and keyboard and screen-reader access across the Web UI.
 - Hardened share streaming, listener validation, asynchronous shutdown, Python
   WebSocket cancellation, and certification setup and failure reporting.
-- Strengthened browser security and audit tooling, and remeasured the aggregate
-  JavaScript gzip budget at 600.60 KiB under the 601 KiB limit.
+- Strengthened browser security and audit checks to reject unsafe code paths
+  and surface incomplete scans.
 
 ## [0.2.42] — 2026-09-30
 
