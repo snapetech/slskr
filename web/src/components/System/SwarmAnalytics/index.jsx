@@ -151,6 +151,7 @@ const SwarmAnalytics = () => {
           <Grid.Column>
             <label>Time Window</label>
             <Dropdown
+              aria-label="Analytics time window"
               onChange={(e, { value }) => setTimeWindow(value)}
               options={timeWindowOptions}
               selection
@@ -160,6 +161,7 @@ const SwarmAnalytics = () => {
           <Grid.Column>
             <label>Peer Rankings Limit</label>
             <Dropdown
+              aria-label="Peer ranking limit"
               onChange={(e, { value }) => setRankingLimit(value)}
               options={[
                 { key: '10', text: 'Top 10', value: 10 },
@@ -299,6 +301,7 @@ const SwarmAnalytics = () => {
                     <div>
                       <label>Chunk Utilization</label>
                       <Progress
+                        aria-label="Chunk Utilization"
                         indicating
                         percent={efficiencyMetrics.chunkUtilization * 100}
                       />
@@ -308,6 +311,7 @@ const SwarmAnalytics = () => {
                     <div>
                       <label>Peer Utilization</label>
                       <Progress
+                        aria-label="Peer Utilization"
                         indicating
                         percent={efficiencyMetrics.peerUtilization * 100}
                       />

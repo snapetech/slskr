@@ -16,14 +16,23 @@ scan() {
   shift 2
 
   printf '\n## %s\n' "$title"
-  rg -n --with-filename --pcre2 --hidden \
+  if rg -n --with-filename --pcre2 --hidden \
     --glob '!.git/**' \
     --glob '!.council/**' \
     --glob '!target/**' \
     --glob '!**/node_modules/**' \
     --glob '!**/dist/**' \
     --glob '!**/build/**' \
-    "$pattern" "$@" || true
+    "$pattern" "$@"; then
+    return 0
+  else
+    local status=$?
+    if [[ "$status" -eq 1 ]]; then
+      return 0
+    fi
+    printf 'candidate scan failed for %s (rg exit %s)\n' "$title" "$status" >&2
+    return "$status"
+  fi
 }
 
 printf '# Council candidate scan\n'

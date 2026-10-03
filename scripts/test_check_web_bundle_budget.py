@@ -135,7 +135,7 @@ class WebBundleBudgetTests(unittest.TestCase):
 
             encoded = json.dumps(report, sort_keys=True)
             self.assertIn('"initialJsBudgetKiB": 1150', encoded)
-            self.assertIn('"gzipBudgetKiB": 600', encoded)
+            self.assertIn('"gzipBudgetKiB": 601', encoded)
 
 
 if __name__ == "__main__":

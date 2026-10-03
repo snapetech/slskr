@@ -1,35 +1,42 @@
 import React from 'react';
 import { isSearchComplete } from '../../../lib/searchState';
-import { Icon } from 'semantic-ui-react';
+import { Button, Icon } from 'semantic-ui-react';
 
-const SearchActionIcon = ({ loading, onRemove, onStop, search, ...props }) => {
+const SearchActionIcon = ({ loading, onRemove, onStop, search }) => {
+  const searchText = search.searchText ?? search.query ?? 'search';
+
   if (loading) {
     return (
       <Icon
         loading
         name="spinner"
-        {...props}
+        aria-label={`Updating search: ${searchText}`}
+        role="status"
       />
     );
   }
 
   if (isSearchComplete(search)) {
     return (
-      <Icon
+      <Button
+        aria-label={`Remove search: ${searchText}`}
         color="red"
-        name="trash alternate"
+        icon="trash alternate"
         onClick={() => onRemove()}
-        style={{ cursor: 'pointer' }}
+        size="small"
+        title={`Remove search: ${searchText}`}
       />
     );
   }
 
   return (
-    <Icon
+    <Button
+      aria-label={`Stop search: ${searchText}`}
       color="red"
-      name="stop circle"
+      icon="stop circle"
       onClick={() => onStop()}
-      style={{ cursor: 'pointer' }}
+      size="small"
+      title={`Stop search: ${searchText}`}
     />
   );
 };

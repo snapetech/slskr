@@ -291,8 +291,10 @@ const MediaServerPanel = () => {
             </Label>
           </div>
           <Table
+            aria-label="Media server synchronization review plan"
             celled
             compact
+            tabIndex={0}
           >
             <Table.Body>
               {syncPreview.checks.map((check) => (
@@ -399,8 +401,10 @@ const MediaServerPanel = () => {
             />
           </div>
           <Table
+            aria-label="Media server automation execution contracts"
             celled
             compact
+            tabIndex={0}
           >
             <Table.Header>
               <Table.Row>

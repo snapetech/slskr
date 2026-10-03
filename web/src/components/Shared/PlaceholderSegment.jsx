@@ -1,7 +1,13 @@
 import React from 'react';
 import { Header, Icon, Segment } from 'semantic-ui-react';
 
-const PlaceholderSegment = ({ caption, icon, size, ...rest }) => {
+const PlaceholderSegment = ({
+  caption,
+  headingAs = 'h3',
+  icon,
+  size,
+  ...rest
+}) => {
   const className =
     size === 'small' ? 'placeholder-segment-small' : 'placeholder-segment';
 
@@ -12,7 +18,10 @@ const PlaceholderSegment = ({ caption, icon, size, ...rest }) => {
       placeholder
       {...rest}
     >
-      <Header icon>
+      <Header
+        as={headingAs}
+        icon
+      >
         <Icon name={icon} />
         {caption}
       </Header>

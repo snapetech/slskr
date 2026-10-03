@@ -71,6 +71,9 @@ const FileList = ({
       >
         <div className="filelist-title">
           <Icon
+            aria-label={locked
+              ? undefined
+              : `${folded ? 'Expand' : 'Collapse'} ${directoryName}`}
             link={!locked}
             name={locked ? 'lock' : folded ? 'folder' : 'folder open'}
             onClick={() => !locked && setFolded(!folded)}
@@ -80,6 +83,7 @@ const FileList = ({
 
           {Boolean(onClose) && (
             <Icon
+              aria-label={`Close file list for ${directoryName}`}
               className="close-button"
               color="red"
               link
@@ -97,6 +101,7 @@ const FileList = ({
                 <Table.Row>
                   <Table.HeaderCell className="filelist-selector">
                     <Checkbox
+                      aria-label={`Select all files in ${directoryName}`}
                       checked={
                         safeFiles.length > 0 &&
                         safeFiles.filter((f) => !f.selected).length === 0
@@ -127,6 +132,7 @@ const FileList = ({
                     <Table.Row key={f.id || f.filename || index}>
                       <Table.Cell className="filelist-selector">
                         <Checkbox
+                          aria-label={`Select ${fileName(f)}`}
                           checked={Boolean(f.selected)}
                           disabled={disabled || locked}
                           fitted

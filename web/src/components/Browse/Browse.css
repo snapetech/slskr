@@ -83,6 +83,24 @@
   margin-bottom: 16px;
 }
 
+.browse-tab-menu.ui.menu {
+  align-items: stretch;
+}
+
+.browse-tab-menu .browse-tab-close-action.ui.button {
+  border-radius: 0;
+  margin: 0;
+  min-height: 40px;
+  min-width: 32px;
+  padding: 0 8px;
+}
+
+.browse-tab-menu .browse-tab-close-action:focus-visible {
+  box-shadow: var(--slskr-focus-ring, 0 0 0 3px rgba(212, 106, 59, 0.32));
+  outline: 2px solid var(--slskr-accent-primary-hover, #e8804f);
+  outline-offset: 2px;
+}
+
 .browse-meta {
   margin-top: 5px;
 }

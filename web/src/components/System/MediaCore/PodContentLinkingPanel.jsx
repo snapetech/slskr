@@ -323,8 +323,14 @@ const PodContentLinkingPanel = ({ contentId, setContentId, visible = true }) => 
                   />
 
                   <div style={{ marginBottom: '1em' }}>
-                    <label style={{ marginRight: '1em' }}>Visibility:</label>
+                    <label
+                      htmlFor="media-core-new-pod-visibility"
+                      style={{ marginRight: '1em' }}
+                    >
+                      Visibility:
+                    </label>
                     <select
+                      id="media-core-new-pod-visibility"
                       onChange={(e) => setNewPodVisibility(e.target.value)}
                       value={newPodVisibility}
                     >

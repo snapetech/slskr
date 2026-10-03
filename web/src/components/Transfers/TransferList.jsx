@@ -92,6 +92,7 @@ class TransferList extends Component {
           size="small"
         >
           <Icon
+            aria-label={`${isFolded ? 'Expand' : 'Collapse'} ${directoryName}`}
             link
             name={isFolded ? 'folder' : 'folder open'}
             onClick={() => this.toggleFolded()}
@@ -106,6 +107,7 @@ class TransferList extends Component {
                   <Table.Row>
                     <Table.HeaderCell className="transferlist-selector">
                       <Checkbox
+                        aria-label={`Select all transfers in ${directoryName}`}
                         checked={
                           files.length > 0 &&
                           files.filter((f) => !f.selected).length === 0
@@ -147,6 +149,7 @@ class TransferList extends Component {
                       <Table.Row key={f.id || f.filename || index}>
                         <Table.Cell className="transferlist-selector">
                           <Checkbox
+                            aria-label={`Select ${getFileName(f.filename)}`}
                             checked={f.selected}
                             fitted
                             onChange={(event, data) =>
@@ -164,6 +167,7 @@ class TransferList extends Component {
                         <Table.Cell className="transferlist-progress">
                           {f.state === 'InProgress' ? (
                             <Progress
+                              aria-label={`${f.direction || 'File'} progress for ${getFileName(f.filename)}`}
                               color={getColor(f.state).color}
                               percent={Math.min(
                                 100,

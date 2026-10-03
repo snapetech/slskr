@@ -1472,8 +1472,11 @@ capture_listener_stage() {
   mkdir -p "$suite"
   curl --fail --silent --max-time 2 "$base_url/api/v0/options" >"$options_file"
   curl --fail --silent --max-time 2 "$base_url/api/v0/application" >"$application_file"
-  local local_old=false local_new=false host_new=false
-  direct_user_info_is_open 127.0.0.1 "$old_port" && local_old=true
+  local local_old=not-checked local_new=false host_new=false
+  if [[ "$old_port" != "__released_port_not_sampled__" ]]; then
+    local_old=false
+    direct_user_info_is_open 127.0.0.1 "$old_port" && local_old=true
+  fi
   direct_user_info_is_open 127.0.0.1 "$new_port" && local_new=true
   direct_user_info_is_open "$host_ip" "$new_port" && host_new=true
   local local_obfuscated=false host_obfuscated=false
@@ -1509,7 +1512,7 @@ print(json.dumps({
     "pendingReconnect": application["pendingReconnect"],
     "pendingRestart": application["pendingRestart"],
     "serverState": application["server"]["state"],
-    "localOldOpen": sys.argv[7] == "true",
+    "localOldOpen": None if sys.argv[7] == "not-checked" else sys.argv[7] == "true",
     "localNewOpen": sys.argv[8] == "true",
     "hostNewOpen": sys.argv[9] == "true",
     "localObfuscatedOpen": sys.argv[10] == "true",
@@ -1743,4 +1746,3 @@ write_obfuscation_runtime_yaml() {
     "$advertise_regular_port" "$prefer_outbound" >"$temporary"
   mv "$temporary" "$path"
 }
-

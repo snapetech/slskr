@@ -272,6 +272,7 @@ class Logs extends Component {
             </Button>
           </ButtonGroup>
           <Dropdown
+            aria-label="Filter logs by severity"
             compact
             disabled={savingLevel}
             loading={savingLevel}

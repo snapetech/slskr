@@ -4,7 +4,10 @@ pub(in crate::cli) fn peer_regular_port(
     address: &slskr_client::protocol::server::PeerAddress,
 ) -> Result<u16, String> {
     if address.port == 0 {
-        return Err("peer did not advertise a plain listener port".to_owned());
+        return Err(format!(
+            "peer did not advertise a plain listener port: port={} obfuscation_type={} obfuscated_port={}",
+            address.port, address.obfuscation_type, address.obfuscated_port
+        ));
     }
 
     u16::try_from(address.port).map_err(|_| {

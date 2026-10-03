@@ -48,6 +48,8 @@ class WebSocketClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._connect_lock = asyncio.Lock()
+        self._disconnect_generation = 0
+        self._connecting_task: Optional[asyncio.Task] = None
         self._message_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
         self._outbound_tasks: Set[asyncio.Task] = set()
@@ -66,17 +68,22 @@ class WebSocketClient:
     async def connect(self):
         """Connect to WebSocket"""
         current_task = asyncio.current_task()
+        disconnect_generation = self._disconnect_generation
         reconnect_task = self._reconnect_task
         if reconnect_task is not None and reconnect_task is not current_task:
             reconnect_task.cancel()
             self._reconnect_task = None
         async with self._connect_lock:
+            if disconnect_generation != self._disconnect_generation:
+                raise asyncio.CancelledError
             if self.is_connected():
                 raise RuntimeError("WebSocket is already connected")
-            self._intentional_disconnect = True
-            await self._close_resources()
-            self._intentional_disconnect = False
+            self._connecting_task = current_task
             try:
+                self._intentional_disconnect = True
+                await self._close_resources()
+                self._intentional_disconnect = False
+
                 websocket_options = {
                     "autoclose": False,
                     "max_msg_size": MAX_WEBSOCKET_MESSAGE_BYTES,
@@ -112,7 +119,6 @@ class WebSocketClient:
 
                 # Start message handler
                 self._message_task = asyncio.create_task(self._handle_messages(self.ws))
-
             except asyncio.CancelledError:
                 await self._close_resources()
                 raise
@@ -120,15 +126,23 @@ class WebSocketClient:
                 await self._close_resources()
                 self._notify_error_listeners(e)
                 raise
+            finally:
+                if self._connecting_task is current_task:
+                    self._connecting_task = None
 
     async def disconnect(self):
         """Disconnect from WebSocket"""
         self._intentional_disconnect = True
+        self._disconnect_generation += 1
         current_task = asyncio.current_task()
         reconnect_task = self._reconnect_task
+        connecting_task = self._connecting_task
         if reconnect_task is not None and reconnect_task is not current_task:
             reconnect_task.cancel()
             self._reconnect_task = None
+        if connecting_task is not None and connecting_task is not current_task:
+            connecting_task.cancel()
+            await asyncio.gather(connecting_task, return_exceptions=True)
         async with self._connect_lock:
             was_connected = self.is_connected()
             await self._close_resources()

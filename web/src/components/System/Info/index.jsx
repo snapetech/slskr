@@ -134,6 +134,7 @@ const Info = ({ runtimeProfile, options, state, theme }) => {
       <Divider />
       <Switch loading={!contents && <LoaderSegment />}>
         <CodeEditor
+          ariaLabel="System information JSON"
           basicSetup={false}
           editable={false}
           theme={theme}

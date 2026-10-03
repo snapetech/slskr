@@ -116,6 +116,7 @@ const TransfersHeader = ({
         hidden={empty}
       >
         <ShrinkableDropdownButton
+          ariaLabel="Filter retryable downloads"
           color="green"
           disabled={working || empty || !server.isConnected}
           hidden={direction === 'upload'}
@@ -134,6 +135,7 @@ const TransfersHeader = ({
         </ShrinkableDropdownButton>
         <Nbsp />
         <ShrinkableDropdownButton
+          ariaLabel="Filter downloads to cancel"
           color="red"
           disabled={working || empty}
           icon="x"
@@ -153,6 +155,7 @@ const TransfersHeader = ({
         </ShrinkableDropdownButton>
         <Nbsp />
         <ShrinkableDropdownButton
+          ariaLabel="Filter downloads to remove"
           disabled={working || empty}
           icon="trash alternate"
           loading={removing}

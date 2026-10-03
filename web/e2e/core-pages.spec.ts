@@ -3,6 +3,7 @@ import { MultiPeerHarness } from './harness/MultiPeerHarness';
 import { clickNav, login, verifySpaFallback, waitForHealth } from './helpers';
 import { T } from './selectors';
 import { expect, test } from '@playwright/test';
+import { resolve } from 'node:path';
 
 test.describe('core pages', () => {
   let harness: MultiPeerHarness | null = null;
@@ -44,6 +45,148 @@ test.describe('core pages', () => {
       timeout: 10_000,
     });
   });
+
+  test(
+    'mobile_navigation_scrolls_and_reveals_active_route',
+    async ({ page, request }) => {
+      const nodeA = harness ? harness.getNode('A').nodeCfg : NODES.A;
+      await page.setViewportSize({ width: 390, height: 844 });
+      await waitForHealth(request, nodeA.baseUrl);
+      await login(page, nodeA);
+      await page.goto(`${nodeA.baseUrl}/searches`, {
+        timeout: 10_000,
+        waitUntil: 'domcontentloaded',
+      });
+
+      const layout = await page.locator('.navigation').evaluate((navigation) => {
+        const primary = navigation.querySelector<HTMLElement>(
+          '.navigation-primary',
+        );
+        const controls = navigation.querySelector<HTMLElement>(
+          '.right.ui.inverted.menu',
+        );
+        if (!primary || !controls) {
+          throw new Error('Navigation rows were not rendered');
+        }
+        return {
+          navigationHeight: navigation.getBoundingClientRect().height,
+          primaryFlexWrap: getComputedStyle(primary).flexWrap,
+          primaryOverflowX: getComputedStyle(primary).overflowX,
+          primaryBottom: primary.getBoundingClientRect().bottom,
+          controlsTop: controls.getBoundingClientRect().top,
+        };
+      });
+
+      expect(layout.navigationHeight).toBeLessThanOrEqual(130);
+      expect(layout.primaryFlexWrap).toBe('nowrap');
+      expect(layout.primaryOverflowX).toBe('auto');
+      expect(layout.controlsTop).toBeGreaterThanOrEqual(layout.primaryBottom);
+
+      await page.addInitScript({
+        path: resolve(process.cwd(), 'node_modules/axe-core/axe.min.js'),
+      });
+      await page.goto(`${nodeA.baseUrl}/users`, {
+        timeout: 10_000,
+        waitUntil: 'domcontentloaded',
+      });
+      await expect(page.getByRole('main')).toBeVisible();
+      await expect(page.getByTestId('users-page-heading')).toBeVisible();
+      await page.waitForTimeout(250);
+      const accessibilityViolations = await page.evaluate(async () => {
+        const result = await (window as any).axe.run(document);
+        return result.violations.map(({ id, impact, nodes }) => ({
+          id,
+          impact,
+          nodes: nodes.map(({ html, failureSummary, target }) => ({
+            html,
+            failureSummary,
+            target,
+          })),
+        }));
+      });
+      expect(accessibilityViolations).toEqual([]);
+
+      const expectFooterToFit = async (width: number, height = 844) => {
+        await page.setViewportSize({ width, height });
+        const footerLayout = await page
+          .locator('.slskr-footer')
+          .evaluate((footer) => {
+            const build = footer.querySelector<HTMLElement>(
+              '.slskr-footer-build',
+            );
+            if (!build) throw new Error('Build link was not rendered');
+            const buildRect = build.getBoundingClientRect();
+            return {
+              footerClientWidth: footer.clientWidth,
+              footerScrollWidth: footer.scrollWidth,
+              documentScrollWidth: document.documentElement.scrollWidth,
+              viewportHeight: window.innerHeight,
+              footerTop: footer.getBoundingClientRect().top,
+              footerBottom: footer.getBoundingClientRect().bottom,
+              buildLeft: buildRect.left,
+              buildRight: buildRect.right,
+              buildTop: buildRect.top,
+              buildBottom: buildRect.bottom,
+            };
+          });
+        expect(footerLayout.footerScrollWidth).toBeLessThanOrEqual(
+          footerLayout.footerClientWidth + 1,
+        );
+        expect(footerLayout.documentScrollWidth).toBeLessThanOrEqual(width);
+        expect(footerLayout.buildLeft).toBeGreaterThanOrEqual(0);
+        expect(footerLayout.buildRight).toBeLessThanOrEqual(width);
+        expect(footerLayout.footerTop).toBeGreaterThanOrEqual(0);
+        expect(footerLayout.footerBottom).toBeLessThanOrEqual(
+          footerLayout.viewportHeight,
+        );
+        expect(footerLayout.buildTop).toBeGreaterThanOrEqual(0);
+        expect(footerLayout.buildBottom).toBeLessThanOrEqual(
+          footerLayout.viewportHeight,
+        );
+      };
+      await expectFooterToFit(320, 568);
+      await expectFooterToFit(360, 640);
+      await expectFooterToFit(390);
+      await expectFooterToFit(768);
+      await expectFooterToFit(320, 568);
+      await expectFooterToFit(390);
+
+      await expect
+        .poll(() =>
+          page.locator('.navigation-primary').evaluate((primary) => {
+            const activeLink = primary.querySelector(
+              'a.active, a[aria-current="page"]',
+            );
+            if (!activeLink) return false;
+            const primaryRect = primary.getBoundingClientRect();
+            const linkRect = activeLink.getBoundingClientRect();
+            return (
+              linkRect.left >= primaryRect.left &&
+              linkRect.right <= primaryRect.right
+            );
+          }),
+        )
+        .toBe(true);
+
+      await page.setViewportSize({ width: 320, height: 568 });
+      await expect
+        .poll(() =>
+          page.locator('.navigation-primary').evaluate((primary) => {
+            const activeLink = primary.querySelector(
+              'a.active, a[aria-current="page"]',
+            );
+            if (!activeLink) return false;
+            const primaryRect = primary.getBoundingClientRect();
+            const linkRect = activeLink.getBoundingClientRect();
+            return (
+              linkRect.left >= primaryRect.left &&
+              linkRect.right <= primaryRect.right
+            );
+          }),
+        )
+        .toBe(true);
+    },
+  );
 
   test('downloads_page_loads', async ({ page, request }) => {
     const nodeA = harness ? harness.getNode('A').nodeCfg : NODES.A;

@@ -501,7 +501,9 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   if (collapsed) {
     return (
       <div
+        aria-label="Audio player"
         className="player-bar player-bar-collapsed player-bar-modern"
+        role="region"
         ref={playerBarRef}
       >
         {audio}
@@ -551,7 +553,9 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
 
   return (
     <div
+      aria-label="Audio player"
       className="player-bar player-bar-modern"
+      role="region"
       ref={playerBarRef}
     >
       {audio}

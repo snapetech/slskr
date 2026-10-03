@@ -6,7 +6,7 @@ import Searches from './Searches';
 import { createSearchHubConnection } from '../../lib/hubFactory';
 import { getCapabilities } from '../../lib/slskr';
 import * as library from '../../lib/searches';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import {
   MemoryRouter,
@@ -46,6 +46,7 @@ vi.mock('./List/SearchList', () => ({
 
     return (
       <>
+        <span data-testid="search-list-search-text">{search.searchText}</span>
         <span data-testid="search-list-file-count">{search.fileCount}</span>
         <button
           onClick={() =>
@@ -68,6 +69,7 @@ vi.mock('./List/SearchList', () => ({
 const callbacks = {};
 
 const renderSearches = async ({
+  hubStart,
   initialEntries = ['/searches'],
   runtimeProfile,
   waitForInput = true,
@@ -80,8 +82,10 @@ const renderSearches = async ({
     onclose: vi.fn(),
     onreconnected: vi.fn(),
     onreconnecting: vi.fn(),
-    start: vi.fn(async () => {
+    start: vi.fn(() => {
+      if (hubStart) return hubStart();
       callbacks.list?.([]);
+      return Promise.resolve();
     }),
     stop: vi.fn(),
   });
@@ -116,7 +120,7 @@ describe('Searches', () => {
     library.getStatus.mockResolvedValue({});
   });
 
-  it('loads existing searches after the update stream connects', async () => {
+  it('loads existing searches from REST', async () => {
     library.getAll.mockResolvedValue([
       {
         id: 'search-1',
@@ -128,6 +132,108 @@ describe('Searches', () => {
     await renderSearches();
 
     await waitFor(() => expect(library.getAll).toHaveBeenCalledTimes(1));
+  });
+
+  it('renders REST results while the search updates hub connection is pending', async () => {
+    let resolveHub;
+    const pendingHubStart = new Promise((resolve) => {
+      resolveHub = resolve;
+    });
+    library.getAll.mockResolvedValue([
+      {
+        id: 'search-1',
+        searchText: 'results before the event stream',
+        startedAt: '2026-05-15T00:00:00Z',
+      },
+    ]);
+
+    await renderSearches({
+      hubStart: () => pendingHubStart,
+      waitForInput: false,
+    });
+
+    expect(await screen.findByTestId('search-list-search-text'))
+      .toBeInTheDocument();
+    expect(screen.getByTestId('search-list-search-text'))
+      .toHaveTextContent('results before the event stream');
+    expect(screen.getByText(/connecting to live search updates/i))
+      .toBeInTheDocument();
+
+    await act(async () => {
+      resolveHub();
+      await pendingHubStart;
+    });
+    await waitFor(() => expect(screen.queryByText(/connecting to live search updates/i))
+      .not.toBeInTheDocument());
+  });
+
+  it('keeps loaded search results visible when the updates hub fails', async () => {
+    library.getAll.mockResolvedValue([
+      {
+        id: 'search-1',
+        searchText: 'last loaded search',
+        startedAt: '2026-05-15T00:00:00Z',
+      },
+    ]);
+
+    await renderSearches({
+      hubStart: () => Promise.reject(new Error('search hub unavailable')),
+      waitForInput: false,
+    });
+
+    expect(await screen.findByTestId('search-list-search-text'))
+      .toHaveTextContent('last loaded search');
+    expect(await screen.findByText(/search hub unavailable/i)).toBeInTheDocument();
+  });
+
+  it('clears a REST load warning when the hub later supplies valid search data', async () => {
+    library.getAll.mockRejectedValue(new Error('REST search list unavailable'));
+
+    await renderSearches({ hubStart: () => Promise.resolve(), waitForInput: false });
+    expect(await screen.findByText(/REST search list unavailable/i))
+      .toBeInTheDocument();
+
+    await act(async () => {
+      callbacks.list?.([
+        {
+          id: 'search-1',
+          searchText: 'live hub recovery',
+          startedAt: '2026-05-15T00:00:00Z',
+        },
+      ]);
+    });
+
+    expect(await screen.findByTestId('search-list-search-text'))
+      .toHaveTextContent('live hub recovery');
+    expect(screen.queryByText(/REST search list unavailable/i))
+      .not.toBeInTheDocument();
+  });
+
+  it('does not report a REST failure when the hub list succeeds first', async () => {
+    let rejectRest;
+    library.getAll.mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectRest = reject;
+    }));
+
+    await renderSearches({ hubStart: () => Promise.resolve(), waitForInput: false });
+    await waitFor(() => expect(rejectRest).toBeTypeOf('function'));
+
+    await act(async () => {
+      callbacks.list?.([
+        {
+          id: 'search-1',
+          searchText: 'hub wins the race',
+          startedAt: '2026-05-15T00:00:00Z',
+        },
+      ]);
+    });
+    await act(async () => {
+      rejectRest(new Error('late REST failure'));
+    });
+
+    expect(await screen.findByTestId('search-list-search-text'))
+      .toHaveTextContent('hub wins the race');
+    expect(screen.queryByText(/late REST failure/i)).not.toBeInTheDocument();
   });
 
   it('hydrates native search state from the REST list instead of relying on hub history', async () => {
@@ -318,6 +424,16 @@ describe('Searches', () => {
 
     expect(screen.getByTestId('songid-panel')).toBeInTheDocument();
     expect(localStorage.getItem('slskr.search.section.songid')).toBe('open');
+  });
+
+  it('places Search Results directly after the search form and before discovery tools', async () => {
+    await renderSearches();
+
+    const headings = screen
+      .getAllByRole('heading', { level: 4 })
+      .map((heading) => heading.textContent);
+
+    expect(headings.slice(0, 3)).toEqual(['Search', 'Search Results', 'SongID']);
   });
 
   it('shows and persists the selected acquisition profile', async () => {

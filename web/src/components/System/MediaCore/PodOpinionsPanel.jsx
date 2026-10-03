@@ -585,8 +585,14 @@ const PodOpinionsPanel = ({ visible = true }) => {
               />
 
               <div style={{ marginBottom: '1em' }}>
-                <label style={{ marginRight: '1em' }}>Score (0-10):</label>
+                <label
+                  htmlFor="media-core-opinion-score"
+                  style={{ marginRight: '1em' }}
+                >
+                  Score (0-10):
+                </label>
                 <input
+                  id="media-core-opinion-score"
                   max="10"
                   min="0"
                   onChange={(e) =>

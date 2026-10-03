@@ -236,6 +236,7 @@ const PodChannelManagementPanel = ({ visible = true }) => {
                 action={
                   <>
                     <select
+                      aria-label="New channel type"
                       onChange={(e) => setNewChannelKind(e.target.value)}
                       style={{
                         border: '1px solid #ccc',

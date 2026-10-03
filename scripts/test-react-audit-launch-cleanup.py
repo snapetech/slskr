@@ -24,6 +24,9 @@ class LaunchCleanup(unittest.TestCase):
             build = root / "web/build"
             build.mkdir()
             (build / "index.html").write_text("<html><head></head><body></body></html>")
+            axe_script = root / "web/node_modules/axe-core/axe.min.js"
+            axe_script.parent.mkdir(parents=True)
+            axe_script.write_text("/* fixture axe script */\n")
             playwright = root / "web/node_modules/@playwright/test"
             playwright.mkdir(parents=True)
             (playwright / "package.json").write_text(json.dumps({

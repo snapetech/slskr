@@ -119,6 +119,7 @@ class TransferGroup extends Component {
         <Card.Content>
           <Card.Header>
             <Icon
+              aria-label={`${isFolded ? 'Expand' : 'Collapse'} transfers for ${user.username}`}
               link
               name={isFolded ? 'chevron right' : 'chevron down'}
               onClick={() => this.toggleFolded()}

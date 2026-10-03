@@ -32,6 +32,11 @@
   margin-right: auto !important;
 }
 
+.search-options-pagesize {
+  min-height: 24px;
+  min-width: 64px;
+}
+
 @media only screen and (min-width: 991px) {
   .search-options-hide-no-slots, .search-options-hide-locked, .search-options-fold-results {
       margin-left: 1rem;

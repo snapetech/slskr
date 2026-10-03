@@ -175,9 +175,13 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Cookie-auth rate-limit bypass | Cookie authentication decoded percent escapes before comparing the API token, while rate-limit identity hashing used the raw cookie text, allowing equivalent encodings of one token to obtain independent request buckets. | Fixed by hashing the same decoded cookie token used for authentication, plus plain/partial/full encoding equivalence regression and gate coverage. |
 | High | Blank API token authentication | Configuration treated empty and whitespace-only API tokens as present; with cookie authentication enabled, an empty or encoded-whitespace session cookie could then satisfy authentication. | Fixed by rejecting blank tokens from both environment and file configuration before auth mode selection, plus regression and gate coverage. |
 
-## Open Burn-Down
+| High | Share streaming | Indexed local file could be replaced after lookup and opened outside configured share roots; the non-Unix path also lacked a root check. | Fixed by BUG-097: revalidate canonical root containment at open time, reject symlink/reparse components when following is disabled, and retain Unix descriptor-relative no-follow opens. The stale outside-symlink and outside-root regressions pass locally. |
 
-| Severity | Area | Finding | Proposed fix |
+## Previously Open Burn-Down (all resolved)
+
+Status reviewed 2026-10-02: every item below has a recorded resolution.
+
+| Severity | Area | Finding | Resolution |
 | --- | --- | --- | --- |
 | Medium | OpenAPI drift | Runtime `/api/openapi.json` and checked-in `docs/openapi.json` could drift because they were generated through separate paths. | Fixed by serving the checked-in OpenAPI spec at runtime, packaging an identical crate-local OpenAPI copy, adding an equality regression test, and strengthening the OpenAPI drift gate. |
 | Medium | Rust dependency hygiene | `cargo tree -d -p slskr` shows reviewed transitive duplicate roots for digest-family crypto crates plus `getrandom` and `hashbrown` in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |

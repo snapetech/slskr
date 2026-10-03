@@ -17,6 +17,7 @@ import {
   Header,
   Icon,
   Input,
+  Message,
   Popup,
   Segment,
 } from 'semantic-ui-react';
@@ -99,6 +100,8 @@ const SearchesListView = ({ actions, inputRef, state }) => {
     connecting,
     creating,
     error,
+    hasSearchData,
+    initialSearchesLoaded,
     normalizedServer,
     providerPod,
     providerScene,
@@ -116,10 +119,17 @@ const SearchesListView = ({ actions, inputRef, state }) => {
     stop,
     updateAcquisitionProfile,
   } = actions;
+  const connectionNotice = connecting && hasSearchData ? (
+    <Message info size="small">
+      <Icon loading name="circle notched" />
+      Connecting to live search updates. Your loaded searches are available below.
+    </Message>
+  ) : null;
 
   if (runtimeProfile === 'legacy') {
     return (
       <>
+        {connectionNotice}
         <Segment className="search-segment">
           <div className="search-segment-icon">
             <Icon
@@ -167,8 +177,8 @@ const SearchesListView = ({ actions, inputRef, state }) => {
           />
         ) : (
           <SearchList
-            connecting={connecting}
-            error={error}
+            connecting={connecting && !initialSearchesLoaded}
+            error={hasSearchData ? undefined : error}
             onRemove={remove}
             onStop={stop}
             searches={searches}
@@ -180,6 +190,7 @@ const SearchesListView = ({ actions, inputRef, state }) => {
 
   return (
     <>
+      {connectionNotice}
       <CollapsibleSection
         storageKey="slskr.search.section.search"
         title="Search"
@@ -331,6 +342,28 @@ const SearchesListView = ({ actions, inputRef, state }) => {
         </Segment>
       </CollapsibleSection>
       <CollapsibleSection
+        defaultOpen
+        storageKey="slskr.search.section.searchResults"
+        title="Search Results"
+      >
+        {Object.keys(searches).length === 0 ? (
+          <PlaceholderSegment
+            caption="No searches to display"
+            icon="search"
+          />
+        ) : (
+          <SearchList
+            connecting={connecting && !initialSearchesLoaded}
+            error={hasSearchData ? undefined : error}
+            onRemove={remove}
+            onRemoveAll={removeAll}
+            onStop={stop}
+            removingAll={removingAll}
+            searches={searches}
+          />
+        )}
+      </CollapsibleSection>
+      <CollapsibleSection
         defaultOpen={false}
         storageKey="slskr.search.section.songid"
         title="SongID"
@@ -388,28 +421,6 @@ const SearchesListView = ({ actions, inputRef, state }) => {
         title="Album Completion"
       >
         <AlbumCompletionPanel disabled={!normalizedServer.isConnected} />
-      </CollapsibleSection>
-      <CollapsibleSection
-        defaultOpen
-        storageKey="slskr.search.section.searchResults"
-        title="Search Results"
-      >
-        {Object.keys(searches).length === 0 ? (
-          <PlaceholderSegment
-            caption="No searches to display"
-            icon="search"
-          />
-        ) : (
-          <SearchList
-            connecting={connecting}
-            error={error}
-            onRemove={remove}
-            onRemoveAll={removeAll}
-            onStop={stop}
-            removingAll={removingAll}
-            searches={searches}
-          />
-        )}
       </CollapsibleSection>
     </>
   );

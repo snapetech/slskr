@@ -142,6 +142,12 @@ describe('SwarmAnalytics', () => {
 
     expect(screen.getByText('Chunk Utilization')).toBeInTheDocument();
     expect(screen.getByText('Peer Utilization')).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Chunk Utilization' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Peer Utilization' }),
+    ).toBeInTheDocument();
   });
 
   it('fetches and displays peer rankings table', async () => {
