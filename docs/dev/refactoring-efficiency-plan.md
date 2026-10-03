@@ -8685,15 +8685,15 @@ ceiling moved from 600 to 601 KiB, the smallest whole-KiB allowance above the
 measured output; that leaves 407 bytes of headroom and continues to count every
 generated JavaScript asset. This is internal-only build policy; no product or
 release-channel behavior changed. The budget, build-output, and route-audit
-gates passed on the updated worktree; the clean-commit React receipt is still
-required.
+gates passed on the updated worktree, followed by the clean-commit React audit
+recorded below.
 
 ## Updated-Base Local Acceptance (2026-10-03 UTC)
 
 The remediation branch is based on `origin/main` at
 `48ac7d3657ac501d79e3fd34116a57882cb60766`. The final council source digest
 for this worktree is
-`13db82c0f9a48857920f8aa24c61eb178ef3c49ccf355dda33df167b20256d53`. After
+`84be311f9b89d494d79f6029aace7ae87f89a032b0630ea6bd1076ced15e5b78`. After
 refreshing the source-bound reports, the complete
 `scripts/check-remediation-baseline.sh` passed. This includes the pinned
 `slskd`/`slskdN` behavior matrix, browser and API security policies, Rust and
@@ -8707,11 +8707,14 @@ Current local product evidence is: 984 Web tests across 152 files; Web lint;
 37 end-to-end tests; a production build and bundle gate at 615,017 aggregate
 JavaScript gzip bytes (600.60 KiB) under the 601 KiB ceiling; build-output and
 Rustymilk compatibility checks; and the Rust workspace test and Clippy runs
-recorded above. The 84-view React browser audit passed with zero page errors,
-visible loading or error states on the success route matrix, asset failures,
-mobile overflow views, or Axe violations. That receipt was generated from a
-dirty worktree with `sourceCommit=48ac7d36`; it is preliminary until the same
-audit is rerun against the committed clean source.
+recorded above. The clean React receipt was generated against product commit
+`b25cbd62cb67d03e8df283e92be50604e4ee9109` with `worktreeDirty=false`. Its
+success matrix completed 84 desktop/mobile views and 2,424 UI responses; the
+three loading/error/reconnect scenarios also passed. The success audit reports
+zero page errors, asset failures, visible loaders, visible error states,
+horizontal overflow views, and Axe violations. The receipt is
+`target/react-final-b25cbd62/receipt.json` with SHA-256
+`90f257cb0d75d2b18986d4f24509b78f29c38731e1dfe569ae459989644b7b16`.
 
 Credentialed public certification remains mixed: Phase B and Phase E passed
 5/5 each. Phase A is unresolved because a later run encountered public-server
@@ -8721,7 +8724,7 @@ code now validates and reports endpoint metadata, but the public service has
 not supplied a stable window to verify the end-to-end path.
 
 This closes the updated-base local acceptance gates only. Exact-source GitHub
-and GitLab results, a clean-commit React receipt, a stable public Phase A run,
-deployed validation, physical-device checks, outstanding RF-042/RF-066 live
-evidence, and release publication remain open. No deployment, merge, or
-release publication is included in this work.
+and GitLab results, a stable public Phase A run, deployed validation,
+physical-device checks, outstanding RF-042/RF-066 live evidence, and release
+publication remain open. No deployment, merge, or release publication is
+included in this work.

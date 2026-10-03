@@ -6,4 +6,4 @@ action: none
 breaking: false
 ---
 
-Certification prepares and verifies its shared fixtures before transfer checks, records setup failures against the affected checks, and builds the NAT-PMP soak binary before entering the VPN namespace. Peer probe failures report advertised endpoint metadata, the address-resolution check requires a usable listener endpoint, and deterministic missing-port failures skip unhelpful retries. Indirect NAT-PMP setup failures retain a sanitized cause.
+Operators get clearer certification results: fixtures are verified before transfer checks; the NAT-PMP soak binary is built before VPN isolation; peer endpoints require valid listener metadata; and setup or missing-port failures are reported without unhelpful retries. NAT-PMP setup errors also retain a sanitized cause.
