@@ -1,9 +1,9 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, with all 73 RF implementation rows marked Verified as of 2026-09-29 UTC. The latest full implementation matrix passed on source 69cf4141: GitHub CI run 36613453093 passed all 11 jobs, including every supported platform and Package and deployment surfaces; GitLab pipeline 162 also passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; the RF-059 route and bundle work is verified and its deployed CSP finding is cleared, with no claim of physical-device performance. Release publication for a version remains a separate operation.
+Status: active whole-project implementation plan, in progress. The 73 RF implementation rows remain marked Verified from 2026-09-29 UTC; that row status does not mean whole-project acceptance is complete. For product source commit `f63ca9bc911c7c5f400472c97efcbf568cd78b98`, GitHub CI run 37141220791 (attempt 2), Windows Smoke run 37141220632, React Nightly Audit run 37141535719, Live Parity run 37141537643, and GitLab pipeline 238 passed. The updated local audit baseline also passed. Phase B and Phase E certification pass 5/5; Phase A remains open after public-server connection resets prevented the latest run from reaching endpoint checks. Deployed validation, physical-device checks, outstanding RF-042/RF-066 acceptance evidence, and release publication remain open. No merge, deployment, or release publication is included.
 
 
-Audit baseline date: 2026-09-15; evidence addenda through 2026-09-29 UTC
+Audit baseline date: 2026-09-15; evidence addenda through 2026-10-03 UTC
 Baseline HEAD: `0dfab48cd16e6e7910759fa7d60e5d21b7b28be1` (local evidence; the
 working tree contains the implementation batch described in the status column).
 
@@ -8728,3 +8728,43 @@ and GitLab results, a stable public Phase A run, deployed validation,
 physical-device checks, outstanding RF-042/RF-066 live evidence, and release
 publication remain open. No deployment, merge, or release publication is
 included in this work.
+
+## Exact-Source Hosted Acceptance (2026-10-03 UTC)
+
+The product source at `f63ca9bc911c7c5f400472c97efcbf568cd78b98` passed the
+complete GitHub CI matrix in run
+[`37141220791`](https://github.com/snapetech/slskr/actions/runs/37141220791),
+attempt 2. All 11 jobs passed, including Linux GNU and musl x64/ARM64, macOS
+Intel and Apple Silicon, Windows x64, Linux AArch64, Rust tests, production Web
+assets, and Package and deployment surfaces. The first macOS Intel artifact
+download failed with a transient DNS error; the targeted retry downloaded the
+artifact, passed native workspace tests, built and verified the release
+archive, and completed successfully. Windows Smoke run
+[`37141220632`](https://github.com/snapetech/slskr/actions/runs/37141220632)
+also passed. CodeQL, the release-note contract, local identity checks, and
+GitGuardian checks passed on the same source.
+
+React Nightly Audit run
+[`37141535719`](https://github.com/snapetech/slskr/actions/runs/37141535719)
+passed on this exact commit with a clean worktree. Its success scenario covered
+84 desktop/mobile views and 2,553 observed UI responses, with zero page errors,
+asset errors, loading states, visible error states, overflow views, or Axe
+violations. The rendered-loading/empty, validation/server-error, and
+authorization/reconnect/restart scenarios also passed.
+
+Live Parity run
+[`37141537643`](https://github.com/snapetech/slskr/actions/runs/37141537643)
+passed both the Rust UI and slskd API parity job and the credentialed public
+live interop job. Its sanitized peer, login, private-message, and room-message
+smokes all reported success. GitLab pipeline
+[`238`](https://gitlab.home/keith/slskR/-/pipelines/238) passed its Web,
+dashboard, TypeScript client, Go client, and Rust jobs.
+
+These results close exact-source repository CI and hosted browser/live-parity
+acceptance for this source commit. They do not close the separate public Phase
+A foundation proof: the latest local credentialed rerun passed 3/8 checks, then
+the public server reset connections for A1.2 and A2-A5 before endpoint metadata
+could be evaluated. Phase B and Phase E remain 5/5. A stable Phase A login
+window, deployed behavior, physical-device validation, outstanding RF-042 and
+RF-066 live/deployed evidence, and release publication remain open. No merge,
+deployment, or release publication was performed.
