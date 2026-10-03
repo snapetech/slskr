@@ -1,7 +1,7 @@
 # Council Scan Inventory
 
-Scan date: 2026-10-01
-Source digest: 24d95621c1bdf93e82f1caa91355abc3e5170423bd13ef95fc12e2538989f136
+Scan date: 2026-10-03
+Source digest: 84be311f9b89d494d79f6029aace7ae87f89a032b0630ea6bd1076ced15e5b78
 
 > Council process upgrades (mirrored from slskNet.Runtime, 2026-05-06): see `bug-council-severity-schema.md`, `bug-council-sibling-search.md`, `bug-council-negative-space.md`, `bug-council-behavior-pinning.md`, and `bug-council-phases.md`. Future sweep rows on this file should adopt the severity/confidence schema; the wire-frame trust boundary is now declared and enforced by `scripts/check-council-negative-space.sh`.
 
@@ -71,8 +71,8 @@ adversarial corpus pass.
 | Constructor/mutable collection candidates | 10 |
 | Protocol count/length candidates | 163 |
 | Protocol scalar emission candidates | 310 |
-| Resolver/raw stream candidates | 1082 |
-| Task/cancellation/lifecycle candidates | 1448 |
+| Resolver/raw stream candidates | 1083 |
+| Task/cancellation/lifecycle candidates | 1447 |
 | Example Web API candidates | 321 |
 
 ### Constructor/mutable collection candidates
@@ -119,6 +119,15 @@ adversarial corpus pass.
 
 ### Resolver/raw stream candidates
 
+The refreshed 2026-10-03 source scan reports 1,083 candidate lines, three fewer
+than the previous 1,086 count. The Rust cancellation regression no longer probes
+a released ephemeral port with fresh connect/rebind calls; its owning close
+guard drops the listener before signaling completion. This is a
+pattern-match count, not a confirmed defect count; the reviewed class remains
+covered by the accepted raw-frame and connect-timeout regressions and the
+runtime boundary gates. New direct socket, resolver, read, or write paths still
+require individual review.
+
 | Candidate | Scope | Classification | Severity | Confidence | Evidence | Follow-up |
 | --- | --- | --- | --- | --- | --- | --- |
 | `read_raw_frame(reader, length)` caller-supplied allocation | Client SDKs + Network Runtime | Fixed | Medium | High | BUG-035: raw frame reads now reject lengths over `DEFAULT_MAX_FRAME_LEN` by default and expose `read_raw_frame_with_max` for stricter callers. | `oversized_raw_frame_is_rejected_before_payload_read`; `cargo test -p slskr-client`. |
@@ -156,3 +165,47 @@ adversarial corpus pass.
 | Browser `localStorage` hits | Frontend/API Handling | Existing Guard | Low | High | Token storage regressions are covered by `scripts/check-browser-token-persistence.sh`; remaining production uses are non-secret UI preferences/caches or documented migration fallbacks, with token mentions in tests. | Browser token persistence gate. |
 | `_blank` links and `window.open` | Frontend/API Handling | Existing Guard | Low | High | Links include `rel="noopener noreferrer"` and programmatic opens use `safeOpenBlank` with `noopener,noreferrer` plus `opener = null`. | `scripts/check-unsafe-blank-opens.sh`. |
 | SDK `WebSocketClient` examples | Client SDKs | Existing Guard | Low | High | SDK examples route through `WebSocketClient`, whose implementation applies `websocketAuthProtocols(token)`. | TypeScript SDK build/test and WebSocket auth coverage gate. |
+
+### Active bughunt section review
+
+Counts below are raw pattern-matching lines from the timestamped active
+bughunt report. They are discovery candidates, not confirmed bug counts.
+
+| Section | Candidate lines | Status | Evidence and next action |
+| --- | ---: | --- | --- |
+| `Protocol-controlled allocations and lengths` | 175 | Guarded | Whole-class review grouped frame/reader lengths, count-sized collections, transfer/mesh chunks, and persisted input files. Reader-derived byte slices are checked against available input; object counts use `read_bounded_count` or are walked without count-sized allocation; transport/state limits are enforced by the taint lens, adversarial corpus, and runtime boundary gate. No unresolved production allocation path remained. |
+| `Proxy, redirect, SSRF, and outbound trust boundaries` | 138 | Guarded | Whole-class review grouped fixed provider endpoints, user-supplied source/webhook URLs, operator-configured integrations, telemetry, and forwarded headers. User-supplied network targets validate scheme/authority, resolve and pin addresses, disable ambient proxies and redirects, and bound time/body; forwarded identity is trusted only behind configured proxy CIDRs. Evidence includes outbound-policy and trusted-proxy gates. |
+| `Filesystem and persistent-state boundaries` | 365 | Guarded | Whole-class review grouped credential files, persisted JSON/SQLite state, download/share paths, relay and mesh manifests, and test fixtures. Sensitive/state reads are size bounded and reject non-regular or symlink paths where required; generated credentials use a same-directory private temporary file and atomic replacement; user download paths remain scoped under the configured root. Evidence includes credential, storage-listing, transfer-state, and runtime-boundary checks. |
+| `Async task and channel lifecycle boundaries` | 463 | Guarded | Whole-class review grouped fixed daemon supervisors, connection handlers, request-triggered jobs, bounded channels, and test/CLI workers. Production code has no unbounded Tokio channels; HTTP handlers share a 256-task cap and service work uses bounded admission or managed ownership. Review found one legacy multisource task outside `ManagedTaskRegistry`; BUG-093 moves it to `spawn_managed`. Runtime boundary and lifecycle regressions cover cancellation and shutdown. |
+| `Browser injection, token storage, and opener boundaries` | 43 | Guarded | The current scan finds zero direct HTML/code-execution sinks, 33 storage references, and 10 opener references. Runtime token and UI storage paths have existing behavior tests; opener paths have `safeOpen` tests and `scripts/check-unsafe-blank-opens.sh`. `scripts/check-browser-injection-sinks.sh` now guards direct execution sinks. Reclassify on any fresh finding. |
+| `Go SDK transport, decoding, and filesystem boundaries` | 22 | Guarded | The Go SDK validates absolute HTTP(S) URLs without credentials, applies request and WebSocket handshake deadlines, refuses redirects, bounds response reads, and validates decoded response contracts. Evidence: `client-go/client_test.go` URL, redirect, body-limit, timeout, JSON, and response-contract cases; `client-go/websocket_test.go` invalid-URL, handshake-timeout, disconnect, and listener-lifecycle cases. |
+| `Python SDK transport, decoding, and filesystem boundaries` | 23 | Fixed | The SDK validates base URLs, refuses redirects, bounds HTTP response bodies, caps WebSocket messages, cleans up owned tasks/sessions, and bounds reconnects. Review found disconnect waited behind an in-flight handshake; BUG-070 now cancels that connection and prevents a queued pre-disconnect connect from starting. Evidence: the Python WebSocket cancellation/reconnect/message-bound tests and the full SDK gate. |
+| `Suppressed CI and script failures` | 457 | Guarded | Whole-class review grouped cleanup/diagnostic fallbacks, optional external probes, status-capture blocks, and release workflow exceptions. Required scan, certification, and interop failures now propagate: BUG-071, BUG-092, BUG-094, BUG-095, and BUG-096 fix the confirmed gaps. The four new certification matches were reviewed: command failures are explicitly captured and turned into failed rows/retry decisions, while absent peer metadata becomes a failing A2 result; `scripts/test-certification-phases.sh` exercises setup-failure propagation and endpoint metadata classification. Remaining `continue-on-error` is the documented optional Docker Hub mirror. |
+
+### Active bughunt classification evidence
+
+The raw counts above are matcher hits, not confirmed bug counts or unique
+functions. Review excluded inline tests, benchmarks, and local fixtures from
+production-risk conclusions and grouped production hits by the boundary where
+input or work is admitted. A section is marked `Guarded` only when the current
+source family has concrete limit/ownership evidence and a registered check, or
+when each confirmed gap has a ledger entry and regression.
+
+| Section | Source families reviewed | Confirmed gaps in this pass | Durable evidence |
+| --- | --- | --- | --- |
+| Protocol allocations and lengths | Frame decoding, peer/server list decoders, raw stream frames, file transfer, QUIC, mesh chunks, HTTP/WebSocket frames, persisted discovery/index inputs | None beyond previously tracked protocol fixes | `scripts/check-rust-protocol-taint-lens.sh`; `scripts/check-rust-protocol-adversarial-corpus.sh`; `scripts/check-runtime-boundary-hardening.sh` |
+| Outbound trust | Webhooks, ActivityPub key fetch, multisource/source feeds, Lidarr/MusicBrainz, Spotify/provider APIs, relay controllers, telemetry, VPN integration, forwarded client identity | None | `scripts/check-webhook-outbound-policy.sh`; `scripts/check-rate-limit-proxy-policy.sh`; outbound resolver and redirect tests in the owning modules |
+| Filesystem and persistent state | Credential stores, daemon state stores, transfer state, mesh/content indexes, relay manifests, generated VPN account files, scoped downloads and shared-file opens | Account regeneration now fails closed and replaces files atomically (BUG-095); share streaming revalidates root containment after lookup and rejects outside symlink targets (BUG-097) | `scripts/test-generated-account-file-safety.sh`; `scripts/check-storage-listing-pressure.sh`; `scripts/check-transfer-event-growth.sh`; `scripts/check-runtime-boundary-hardening.sh` |
+| Async tasks and channels | Daemon supervisors, HTTP/WebSocket handlers, search/transfer workers, webhook deliveries, listener handshakes, multisource jobs, blocking file operations | Legacy asynchronous multisource execution now uses managed shutdown ownership (BUG-093) | `scripts/check-runtime-boundary-hardening.sh`; managed shutdown and listener lifecycle regressions |
+| Suppressed failures | Policy scans, broad scanners, certification phases, interop result logs, optional probes, cleanup and diagnostics, release mirror step | Scanner errors (BUG-071), required interop failure reporting (BUG-092), policy-scan errors (BUG-094), VPN account read failures (BUG-095), and invalid certification phases (BUG-096) | `scripts/test-council-scan-errors.sh`; `scripts/test-cross-client-validation-result.sh`; `scripts/test-generated-account-file-safety.sh`; `scripts/test-certification-phases.sh`; remediation baseline |
+
+### Red-team abuse-lens review
+
+The active source scanner does not generate a meaningful aggregate red-team
+count. Attacker hypotheses are instead classified by trust boundary in the
+[red-team abuse review](red-team-abuse-review.md), with source paths, behavior
+evidence, confidence, and explicit reopen triggers. That review found BUG-097:
+the shared-file stream open did not revalidate a stale path after share lookup.
+It is fixed and covered by a swap regression plus the runtime-boundary gate.
+The review is local source evidence; it does not claim hosted, deployed, or
+concurrent non-Unix filesystem-race proof.

@@ -36,7 +36,61 @@
   opacity: .125;
 }
 
+.users-profile-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.25rem;
+  margin-top: 0.4rem;
+}
+
+.users-profile-status-item,
+.users-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.users-profile-status-label {
+  opacity: 0.75;
+}
+
+.users-network-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 1.5rem;
+  max-width: 640px;
+  margin: 0.8rem 0 0;
+}
+
+.users-network-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.users-network-detail dt {
+  font-size: 0.8rem;
+  opacity: 0.72;
+}
+
+.users-network-detail dd {
+  margin: 0.1rem 0 0;
+  font-weight: 600;
+}
+
+.users-network-details-empty {
+  margin: 0.8rem 0 0;
+  opacity: 0.72;
+}
+
 .ui.items > .item > .content > .description {
   white-space: pre-wrap;
   margin-top: 15px;
+}
+
+@media (max-width: 480px) {
+  .users-network-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
 }

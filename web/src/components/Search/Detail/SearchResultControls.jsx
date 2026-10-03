@@ -80,6 +80,7 @@ const SearchResultControls = ({ actions, state }) => {
             raised
           >
             <Dropdown
+              aria-label="Sort search results"
               button
               className="search-options-sort icon"
               floating
@@ -93,6 +94,7 @@ const SearchResultControls = ({ actions, state }) => {
               }
             />
             <Dropdown
+              aria-label="Search results per page"
               button
               className="search-options-pagesize"
               floating

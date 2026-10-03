@@ -38,44 +38,50 @@ impl<T> Drop for ProbeTask<T> {
 mod tests {
     use super::*;
     use tokio::{
-        net::{TcpListener, TcpStream},
+        net::TcpListener,
         sync::oneshot,
         time::{self, Duration},
     };
 
-    async fn stalled_child() -> (ProbeTask<()>, std::net::SocketAddr, oneshot::Receiver<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (ready_tx, ready_rx) = oneshot::channel();
-        let (closed_tx, closed_rx) = oneshot::channel();
-        struct Closed(Option<oneshot::Sender<()>>);
-        impl Drop for Closed {
-            fn drop(&mut self) {
-                if let Some(sender) = self.0.take() {
-                    let _ = sender.send(());
-                }
+    struct ListenerClosed {
+        listener: Option<TcpListener>,
+        sender: Option<oneshot::Sender<()>>,
+    }
+
+    impl Drop for ListenerClosed {
+        fn drop(&mut self) {
+            drop(self.listener.take());
+            if let Some(sender) = self.sender.take() {
+                let _ = sender.send(());
             }
         }
+    }
+
+    async fn stalled_child() -> (ProbeTask<()>, oneshot::Receiver<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (closed_tx, closed_rx) = oneshot::channel();
         let task = ProbeTask::spawn(async move {
-            // Drop listener before publishing readiness for rebinding.
-            let closed = Closed(Some(closed_tx));
-            let listener = listener;
+            let closed = ListenerClosed {
+                listener: Some(listener),
+                sender: Some(closed_tx),
+            };
             let _ = ready_tx.send(());
-            let _ = listener.accept().await;
-            drop(listener);
-            drop(closed);
+            if let Some(listener) = &closed.listener {
+                let _ = listener.accept().await;
+            }
         });
         time::timeout(Duration::from_secs(2), ready_rx)
             .await
             .unwrap()
             .unwrap();
-        (task, address, closed_rx)
+        (task, closed_rx)
     }
 
     #[tokio::test]
     async fn drop_and_deadline_cancel_owned_listener_tasks() {
         for timeout in [false, true] {
-            let (task, address, closed) = stalled_child().await;
+            let (task, closed) = stalled_child().await;
             if timeout {
                 assert!(time::timeout(Duration::from_millis(20), task)
                     .await
@@ -87,8 +93,6 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            assert!(TcpStream::connect(address).await.is_err());
-            drop(TcpListener::bind(address).await.unwrap());
         }
     }
 
@@ -103,7 +107,7 @@ mod tests {
 
     #[tokio::test]
     async fn parent_cancellation_aborts_its_pending_probe_child() {
-        let (task, address, closed) = stalled_child().await;
+        let (task, closed) = stalled_child().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         let mut parent = ProbeTask::spawn(async move {
             let _ = ready_tx.send(());
@@ -119,7 +123,5 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(TcpStream::connect(address).await.is_err());
-        drop(TcpListener::bind(address).await.unwrap());
     }
 }

@@ -8,6 +8,17 @@ out_dir="${COUNCIL_OUT_DIR:-.council}"
 mkdir -p "$out_dir"
 scan_out="$out_dir/latest-candidate-counts.md"
 
+printf '==> Fresh active bughunt report\n'
+scripts/test-council-active-bughunt.sh
+scripts/test-council-scan-errors.sh
+scripts/test-cross-client-validation-result.sh
+scripts/check-bug-ledger-ids.py
+scripts/test-bug-ledger-ids.py
+scripts/test-generated-account-file-safety.sh
+scripts/test-certification-phases.sh
+scripts/run-council-active-bughunt.sh
+scripts/check-council-active-bughunt.sh
+
 printf '==> Fresh candidate inventory\n'
 scripts/run-council-scan.sh | tee "$scan_out"
 scripts/check-council-freshness.sh

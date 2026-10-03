@@ -212,6 +212,7 @@ const EditModal = ({ onClose, open, theme }) => {
             }}
           >
             <CodeEditor
+              ariaLabel="Edit server options YAML"
               onChange={(value) => update(value)}
               style={{ minHeight: 500 }}
               theme={theme}

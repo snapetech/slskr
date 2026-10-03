@@ -8,7 +8,7 @@ import {
 } from '../../lib/tabStorage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Icon, Menu, Tab } from 'semantic-ui-react';
+import { Button, Icon, Tab } from 'semantic-ui-react';
 
 let tabCounter = 0;
 
@@ -151,22 +151,28 @@ const Browse = () => {
   };
 
   const panes = tabs.map((tab) => ({
-    menuItem: (
-      <Menu.Item key={tab.key}>
-        <Icon name={tab.username ? 'folder open' : 'search'} />
-        {tab.label}
-        {tabs.length > 1 && (
-          <Icon
-            name="close"
-            onClick={(event) => {
-              event.stopPropagation();
-              closeTabRef.current?.(tab.key);
-            }}
-            style={{ marginLeft: '8px', opacity: 0.7 }}
+    menuItem: {
+      content: (
+        <>
+          <Icon name={tab.username ? 'folder open' : 'search'} />
+          {tab.label}
+        </>
+      ),
+      key: tab.key,
+      ...(tabs.length > 1 ? {
+        action: (
+          <Button
+            aria-label={`Close browse tab ${tab.label}`}
+            className="browse-tab-close-action item"
+            icon="close"
+            key={`${tab.key}-close`}
+            onClick={() => closeTabRef.current?.(tab.key)}
+            size="mini"
+            type="button"
           />
-        )}
-      </Menu.Item>
-    ),
+        ),
+      } : {}),
+    },
     render: () => (
       <Tab.Pane
         attached={false}
@@ -190,6 +196,7 @@ const Browse = () => {
         activeIndex={activeIndex}
         menu={{
           attached: false,
+          className: 'browse-tab-menu',
           inverted: true,
           secondary: true,
           tabular: false,
@@ -200,16 +207,11 @@ const Browse = () => {
         panes={[
           ...panes,
           {
-            menuItem: (
-              <Menu.Item
-                aria-label="Open a new browse tab"
-                key="add-tab"
-                onClick={handleAddTab}
-                title="Open a new browse tab"
-              >
-                <Icon name="plus" />
-              </Menu.Item>
-            ),
+            menuItem: {
+              'aria-label': 'Open a new browse tab',
+              content: <Icon name="plus" />,
+              key: 'add-tab',
+            },
             render: () => null,
           },
         ]}

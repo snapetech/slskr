@@ -345,6 +345,7 @@ const Chat = ({ runtimeProfile, state }) => {
           />
         </div>
         <Input
+          aria-label="Username to start a chat with"
           action={{
             'aria-label': 'Start chat with user',
             icon: 'chat',

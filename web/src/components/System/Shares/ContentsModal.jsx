@@ -104,6 +104,7 @@ const ContentsModal = ({ onClose, share, theme }) => {
           loading={loading && <LoaderSegment className="modal-loader" />}
         >
           <CodeEditor
+            ariaLabel="Shared directory contents JSON"
             basicSetup={false}
             editable={false}
             style={{ minHeight: 500 }}

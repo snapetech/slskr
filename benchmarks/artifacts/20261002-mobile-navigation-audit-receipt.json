@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "evidenceMode": "real Chromium against deterministic mock responses",
+  "sourceCommit": "748e0a469d80708634e374769552e569f11d574b",
+  "worktreeDirty": true,
+  "startedUtc": "2026-10-02T20:42:39.580385+00:00",
+  "harnessSha256": "2f1d1b9395c648cb15e0517009786c8a6e87524945eed1a594c6ff91f33e9243",
+  "scenarios": [
+    {
+      "scenario": "success",
+      "renderChecks": 84,
+      "observedUiResponses": 2342,
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "auditSha256": "652ccd7a24037362a7ac09aabc78ac7558211e14f2e40b2bb12590e86d256506"
+    },
+    {
+      "scenario": "rendered-loading-and-empty",
+      "renderChecks": 1,
+      "observedUiResponses": 10,
+      "viewports": [
+        "desktop"
+      ],
+      "auditSha256": "31ed09000ed95e3122c3a6ef2b5fe1dbea0c136b18abdd0d962be135738ed500"
+    },
+    {
+      "scenario": "rendered-validation-and-server-error",
+      "renderChecks": 1,
+      "observedUiResponses": 15,
+      "viewports": [
+        "desktop"
+      ],
+      "auditSha256": "a7f6a02ca5105d355dc136272187397c27f5c0ca639145c1d95785c57b3d3f9c"
+    },
+    {
+      "scenario": "authorization-reconnect-and-restart",
+      "renderChecks": 1,
+      "observedUiResponses": 39,
+      "viewports": [
+        "desktop"
+      ],
+      "auditSha256": "c0feeb7134b29b706fad14feb70b7b426140a0d42a0aabbd5b681be737661794"
+    }
+  ],
+  "success": true
+}

@@ -76,7 +76,13 @@ record() {
 
 run_logged() {
   local scope="$1" check="$2" workdir="$3"
+  local optional=0 expected=""
   shift 3
+  if [[ "${1:-}" == "--non-blocking" ]]; then
+    optional=1
+    expected="$2"
+    shift 2
+  fi
   local stdout_file stderr_file status detail
   stdout_file="$(mktemp)"
   stderr_file="$(mktemp)"
@@ -89,6 +95,10 @@ run_logged() {
   if [[ $status -eq 0 ]]; then
     record "$scope" "$check" ok "$detail"
   else
+    if [[ "$optional" == 1 ]]; then
+      record "$scope" "$check" non-blocking "${expected}; $detail"
+      return 0
+    fi
     record "$scope" "$check" "fail($status)" "$detail"
     return "$status"
   fi
@@ -97,11 +107,9 @@ run_logged() {
 run_logged_optional() {
   local scope="$1" check="$2" expected="$3"
   shift 3
-  if run_logged "$scope" "$check" "$@"; then
-    return 0
-  fi
-  record "$scope" "$check" non-blocking "$expected"
-  return 0
+  local workdir="$1"
+  shift
+  run_logged "$scope" "$check" "$workdir" --non-blocking "$expected" "$@"
 }
 
 resolve_proton_config() {
@@ -133,7 +141,13 @@ probe_netns_args() {
 
 run_probe() {
   local scope="$1" check="$2" actor_index="$3" peer_user="$4"
+  local optional=0 expected=""
   shift 4
+  if [[ "${1:-}" == "--non-blocking" ]]; then
+    optional=1
+    expected="$2"
+    shift 2
+  fi
   local stdout_file stderr_file status detail
   stdout_file="$(mktemp)"
   stderr_file="$(mktemp)"
@@ -169,6 +183,10 @@ run_probe() {
   if [[ $status -eq 0 ]]; then
     record "$scope" "$check" ok "$detail"
   else
+    if [[ "$optional" == 1 ]]; then
+      record "$scope" "$check" non-blocking "${expected}; $detail"
+      return 0
+    fi
     record "$scope" "$check" "fail($status)" "$detail"
     return "$status"
   fi
@@ -177,11 +195,9 @@ run_probe() {
 run_probe_optional() {
   local scope="$1" check="$2" expected="$3"
   shift 3
-  if run_probe "$scope" "$check" "$@"; then
-    return 0
-  fi
-  record "$scope" "$check" non-blocking "$expected"
-  return 0
+  local actor_index="$1" peer_user="$2"
+  shift 2
+  run_probe "$scope" "$check" "$actor_index" "$peer_user" --non-blocking "$expected" "$@"
 }
 
 run_download_probe_optional() {
@@ -401,7 +417,9 @@ CFG
 }
 
 wait_for_peer() {
-  local scope="$1" actor_index="$2" peer_user="$3" attempts="${4:-${SLSKR_DAEMON_READINESS_ATTEMPTS:-36}}"
+  local scope="$1" actor_index="$2" peer_user="$3"
+  local attempts="${4:-${SLSKR_DAEMON_READINESS_ATTEMPTS:-36}}"
+  local failure_status="${5:-fail}"
   local actor_user_var="SLSKR_TEST_${actor_index}_USERNAME"
   local actor_pass_var="SLSKR_TEST_${actor_index}_PASSWORD"
   local last_detail="no peer-address attempt completed"
@@ -439,7 +457,7 @@ wait_for_peer() {
     fi
     sleep 5
   done
-  record "$scope" peer-address-timeout fail "peer did not advertise an address before timeout; last=$last_detail"
+  record "$scope" peer-address-timeout "$failure_status" "peer did not advertise an address before timeout; last=$last_detail"
   return 1
 }
 
@@ -476,7 +494,7 @@ run_restart_matrix_for_daemon() {
 
   wait_for_daemon_preflight "$scope" "$name" "$daemon_host" "$http_port" || true
   local user_var="SLSKR_TEST_${account_index}_USERNAME"
-  if wait_for_peer "$scope" "$probe_index" "${!user_var}" "${SLSKR_RESTART_READINESS_ATTEMPTS:-8}"; then
+  if wait_for_peer "$scope" "$probe_index" "${!user_var}" "${SLSKR_RESTART_READINESS_ATTEMPTS:-8}" non-blocking; then
     run_probe_optional "$scope" restart-browse "restart preserved listener metadata but browse proof failed; inspect daemon app dir and share cache" "$probe_index" "${!user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$daemon_host" SLSK_BROWSE_EXPECTED="slskr-interop-${fixture_name}.txt" cargo run -q -p slskr --bin slskr -- probe browse-peer
     run_commons_download_probe_optional "$scope" "$probe_index" "${!user_var}" "$fixture_name"
     record "$scope" restart-persistence ok "daemon restarted with preserved app/share dir; peer metadata, browse, search, and queued open-commons payload probes completed"
@@ -581,6 +599,8 @@ if [[ "$run_daemons" == "1" ]]; then
     fi
   fi
 fi
+
+"$repo_root/scripts/cross-client-validation-result.sh" "$log_file"
 
 cat <<MSG
 

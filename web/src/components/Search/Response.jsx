@@ -684,6 +684,7 @@ class Response extends Component {
           <Card.Header className="result-card-header">
             <div className="result-card-identity">
               <Icon
+                aria-label={`${isFolded ? 'Expand' : 'Collapse'} search results from ${response.username}`}
                 className="result-card-fold"
                 link
                 name={isFolded ? 'chevron right' : 'chevron down'}
@@ -919,6 +920,7 @@ class Response extends Component {
                 }
               />
               <Icon
+                aria-label={`Hide search result from ${response.username}`}
                 className="close-button"
                 color="red"
                 link

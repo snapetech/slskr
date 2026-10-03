@@ -6,6 +6,7 @@ const ShrinkableDropdownButton = ({
   children,
   color,
   disabled,
+  ariaLabel,
   hidden,
   icon,
   loading,
@@ -30,6 +31,7 @@ const ShrinkableDropdownButton = ({
         {children}
       </ShrinkableButton>
       <Dropdown
+        aria-label={ariaLabel}
         className="button icon"
         disabled={disabled}
         onChange={onChange}

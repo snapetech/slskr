@@ -186,9 +186,13 @@ for anchor in \
   'storage directory confined open failed' \
   'scoped_storage_listing_rejects_symlinked_parent' \
   'open_shared_local_file_unix' \
+  'validate_shared_local_file_path' \
+  'shared_path_metadata_is_link_or_reparse_point' \
   'open_shared_local_file(state, &path)' \
   'shared directory confined open failed' \
   'shared_file_confined_open_rejects_symlinked_parent' \
+  'opening_a_previously_valid_share_rejects_a_swapped_outside_symlink' \
+  'shared_file_open_rejects_paths_outside_configured_roots' \
   'read_file_chunk(file, offset, length, indexed_size)' \
   'mesh_sync_chunk_reads_remain_confined_to_share_roots' \
   'scan_share_root_unix' \
@@ -710,5 +714,16 @@ route = Path('crates/slskr/src/private_gateway_owners/shared_quic_runtime.rs').r
 if 'first_alpn(' in route:
     raise SystemExit('runtime boundary hardening failed: native QUIC must negotiate ALPN after reassembly')
 PYCODE
+
+# Legacy asynchronous multisource routes share managed daemon shutdown ownership.
+python3 - <<'PYMULTISOURCE'
+from pathlib import Path
+
+source = Path('crates/slskr/src/legacy_route_dispatch_group_09.rs').read_text()
+if 'tokio::spawn(multisource::execute(' in source:
+    raise SystemExit('runtime boundary hardening failed: detached legacy multisource execution')
+if 'multisource::spawn_managed(' not in source:
+    raise SystemExit('runtime boundary hardening failed: legacy multisource route bypasses managed shutdown')
+PYMULTISOURCE
 
 printf 'runtime boundary hardening check passed\n'

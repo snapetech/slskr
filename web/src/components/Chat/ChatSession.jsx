@@ -453,6 +453,7 @@ class ChatSession extends Component {
                 <Segment className="chat-input">
                   <Input
                     action={{
+                      'aria-label': `Send message to ${username}`,
                       className: 'chat-message-button',
                       disabled: !this.validInput() || sending,
                       icon: (
@@ -468,6 +469,7 @@ class ChatSession extends Component {
                     input={
                       <input
                         autoComplete="off"
+                        aria-label={`Message ${username}`}
                         data-lpignore="true"
                         id="chat-message-input"
                         type="text"

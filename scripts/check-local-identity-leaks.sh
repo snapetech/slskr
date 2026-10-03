@@ -77,13 +77,41 @@ check_file() {
   local path="$2"
   local display_path="${3:-$path}"
   local matches=""
+  local raw_matches parsed_matches
+  raw_matches="$(mktemp)"
+  parsed_matches="$(mktemp)"
 
-  [[ -f "$path" ]] || return 0
-  matches="$(
-    rg --json --fixed-strings --ignore-case --file "$tmp_tokens" "$path" |
-      jq -r --arg label "$label" --arg display_path "$display_path" 'select(.type == "match") | "\($label): \($display_path):\(.data.line_number)"' |
-      sort -u || true
-  )"
+  if [[ ! -f "$path" ]]; then
+    rm -f "$raw_matches" "$parsed_matches"
+    return 0
+  fi
+  if rg --json --fixed-strings --ignore-case --file "$tmp_tokens" "$path" >"$raw_matches"; then
+    :
+  else
+    local scan_status=$?
+    if [[ "$scan_status" -ne 1 ]]; then
+      printf 'identity scan failed for %s (rg exit %s)\n' "$display_path" "$scan_status" >&2
+      failed=1
+      rm -f "$raw_matches" "$parsed_matches"
+      return 0
+    fi
+  fi
+  if ! jq -r --arg label "$label" --arg display_path "$display_path" \
+    'select(.type == "match") | "\($label): \($display_path):\(.data.line_number)"' \
+    "$raw_matches" >"$parsed_matches"; then
+    printf 'identity scan could not parse ripgrep output for %s\n' "$display_path" >&2
+    failed=1
+    rm -f "$raw_matches" "$parsed_matches"
+    return 0
+  fi
+  if ! sort -u "$parsed_matches" -o "$parsed_matches"; then
+    printf 'identity scan could not sort matches for %s\n' "$display_path" >&2
+    failed=1
+    rm -f "$raw_matches" "$parsed_matches"
+    return 0
+  fi
+  matches="$(<"$parsed_matches")"
+  rm -f "$raw_matches" "$parsed_matches"
 
   if [[ -n "$matches" ]]; then
     printf '%s\n' "$matches" >&2

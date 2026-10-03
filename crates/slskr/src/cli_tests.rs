@@ -1,9 +1,12 @@
 use super::{
     await_fixture_server_task, incoming_connection_name, normalize_command, peer_probe_messages,
-    redact_peer_text, scrub_socket_addr, validated_duration_secs, validated_obfuscated_port,
+    peer_regular_port, redact_peer_text, scrub_socket_addr, validated_duration_secs,
+    validated_obfuscated_port,
 };
 use slskr_client::{
-    listener::IncomingConnection, protocol::server::ServerMessage, stream::PeerMessageConnection,
+    listener::IncomingConnection,
+    protocol::server::{PeerAddress, ServerMessage},
+    stream::PeerMessageConnection,
 };
 use std::ffi::OsString;
 use std::{
@@ -119,6 +122,23 @@ fn obfuscated_port_validation_rejects_unsupported_and_missing_endpoints() {
     assert!(validated_obfuscated_port(1, 0)
         .unwrap_err()
         .contains("did not advertise"));
+}
+
+#[test]
+fn missing_plain_peer_port_reports_all_advertised_endpoint_metadata() {
+    let address = PeerAddress {
+        username: "peer".to_owned(),
+        ip: Ipv4Addr::UNSPECIFIED,
+        port: 0,
+        obfuscation_type: 1,
+        obfuscated_port: 2235,
+    };
+
+    let error = peer_regular_port(&address).expect_err("zero regular port is not reachable");
+    assert!(
+        error.contains("port=0 obfuscation_type=1 obfuscated_port=2235"),
+        "{error}"
+    );
 }
 
 #[test]

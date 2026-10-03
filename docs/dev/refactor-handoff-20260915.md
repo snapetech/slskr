@@ -124,3 +124,14 @@ newly batched persistence paths.
 6. Update statuses in the audit and plan with command/artifact evidence.
 
 No commit or push was made during this work.
+
+## Status Correction (2026-10-03)
+
+This handoff is a historical snapshot. Its RF-058 bullet saying that large
+MediaCore and Integrations ownership boundaries still needed extraction was
+superseded by the later, evidence-backed entries in
+`refactoring-efficiency-plan.md`: Batch 327 completed the Integrations panel
+extraction, and the MediaCore composition root was 369 lines. Do not treat the
+old bullet as current work or repeat those extractions without new profiling
+evidence. Use the later dated plan entries for current RF status. This
+correction does not close the separate hosted and deployed acceptance rows.

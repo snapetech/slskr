@@ -73,7 +73,7 @@ test.describe('multi-peer sharing', () => {
     }
   });
 
-  test('invite_add_friend', async ({ browser, request }) => {
+  test('invite_add_friend', async ({ browser, request }, testInfo) => {
     const nodeA = harness ? harness.getNode('A').nodeCfg : NODES.A;
     const nodeB = harness ? harness.getNode('B').nodeCfg : NODES.B;
 
@@ -275,7 +275,10 @@ test.describe('multi-peer sharing', () => {
     }
 
     // Screenshot and body snippet for debugging
-    await pageA.screenshot({ fullPage: true, path: 'contacts-debug.png' });
+    await pageA.screenshot({
+      fullPage: true,
+      path: testInfo.outputPath('contacts-debug.png'),
+    });
     const bodyText = await pageA.locator('body').innerText();
     console.log(
       '[Contacts Test] body snippet (first 800 chars):',

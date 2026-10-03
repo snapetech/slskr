@@ -66,6 +66,7 @@ const DebugModal = ({ onClose, open, theme }) => {
       >
         <Switch loading={loading && <PlaceholderSegment loading />}>
           <CodeEditor
+            ariaLabel="Server options debug JSON"
             basicSetup={false}
             editable={false}
             style={{ minHeight: 500 }}

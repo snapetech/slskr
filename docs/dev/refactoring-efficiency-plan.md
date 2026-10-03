@@ -1,9 +1,9 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, with all 73 RF implementation rows marked Verified as of 2026-09-29 UTC. The latest full implementation matrix passed on source 69cf4141: GitHub CI run 36613453093 passed all 11 jobs, including every supported platform and Package and deployment surfaces; GitLab pipeline 162 also passed. Live Parity run 36565318189 on 12836668 passed credentialed public interop and the Rust UI/API audit across 30 desktop/mobile route views with zero errors; /collections desktop stayed within its 21-request budget. Commit 69cf4141 adds the bounded RF-006 shutdown proof gate after product-source changes validated by Live Parity. RF-001 retains a documented shared-wire compatibility limit; RF-021 is verified using a current-source isolated test database without a production-cardinality claim; the RF-059 route and bundle work is verified and its deployed CSP finding is cleared, with no claim of physical-device performance. Release publication for a version remains a separate operation.
+Status: active whole-project implementation plan, in progress. The 73 RF implementation rows remain marked Verified from 2026-09-29 UTC; that row status does not mean whole-project acceptance is complete. For product source commit `f63ca9bc911c7c5f400472c97efcbf568cd78b98`, GitHub CI run 37141220791 (attempt 2), Windows Smoke run 37141220632, React Nightly Audit run 37141535719, Live Parity run 37141537643, and GitLab pipeline 238 passed. The updated local audit baseline also passed. Phase B and Phase E certification pass 5/5; Phase A remains open after public-server connection resets prevented the latest run from reaching endpoint checks. Deployed validation, physical-device checks, outstanding RF-042/RF-066 acceptance evidence, and release publication remain open. No merge, deployment, or release publication is included.
 
 
-Audit baseline date: 2026-09-15; evidence addenda through 2026-09-29 UTC
+Audit baseline date: 2026-09-15; evidence addenda through 2026-10-03 UTC
 Baseline HEAD: `0dfab48cd16e6e7910759fa7d60e5d21b7b28be1` (local evidence; the
 working tree contains the implementation batch described in the status column).
 
@@ -8244,3 +8244,527 @@ The parent-source GitHub run 36611455407 had one Package and deployment
 surfaces setup failure: Ubuntu amd64 and arm64 apt repositories offered
 libssl3t64 versions 3.0.13-0ubuntu3.15 and 3.0.13-0ubuntu3.16, respectively.
 The later exact-source run 36613453093 passed the same gate.
+
+## Mobile Navigation and Accessibility Follow-up (2026-10-02 UTC)
+
+The current mobile browser audit found that primary navigation could wrap and
+leave a directly opened route link offscreen. At 390 by 844 pixels, the Web UI
+now keeps primary links in one horizontally scrollable row, places session
+controls below it, and moves the active route into view after direct loads,
+route changes, initialization, and viewport changes. A Playwright regression
+asserts the navigation stays within 130 pixels, has horizontal overflow, and
+fully exposes the active link. The app content now has a `main` landmark; the
+primary navigation and player have named landmarks; transport status is an
+accessible group. Users has a page-level `h1`, and its empty state uses an `h2`
+without changing heading levels for other shared placeholders.
+
+The mobile `/users` Playwright check runs full-page Axe after the initial theme
+transition and reports zero violations. The core-page browser suite passes all
+five tests. The current Web suite passes 962 tests across 149 files; ESLint,
+production build, subpath-safe build-output verification, and the bundle budget
+pass. The final bundle measures 1,087.34 KiB initial JavaScript and 598.18 KiB
+JavaScript gzip against limits of 1,150 and 600 KiB. The release fragment is
+[`the mobile navigation note`](../../release-notes/20261002-mobile-navigation-layout.md).
+
+The deterministic-mock Chromium audit covers 42 Web routes at desktop and
+mobile sizes (84 rendered views). All documents returned HTTP 200, no route
+overlap or browser-audit errors were recorded, and 2,342 mocked UI API responses
+were observed. Loading/empty, validation/server-error, and
+authorization/reconnect/restart scenarios also passed. Machine-readable
+details and the mobile Users screenshot are in
+[`the local mobile audit record`](../../benchmarks/artifacts/20261002-mobile-navigation-audit.md).
+The run used source commit `748e0a469d80708634e374769552e569f11d574b` with a
+dirty worktree; it proves local behavior against deterministic mocks, not
+hosted CI or deployed behavior for the new changes.
+
+The fresh candidate scan retains counts 10/163/310/1,082/1,448/321; the current
+source digest is recorded in the council freshness records. The earlier
+red-team aggregate had no dedicated generator and has been withdrawn. The
+active bughunt now emits six fresh sections containing 1,652 raw candidate
+lines. Raw matches are not confirmed bugs. The browser section is guarded by
+existing storage/opener checks and a direct execution-sink gate; the other five
+sections remain open for whole-class review.
+
+## Responsive Footer Overflow Follow-up (2026-10-02 UTC)
+
+The 390 by 844 mobile Users capture showed the fixed footer clipping its Build
+link at the right edge. `Footer.css` forced all footer content into one
+max-content row below 980 pixels and exposed it through horizontal scrolling.
+Tablet layouts now use separate brand/status and network rows; phone layouts
+wrap the footer into brand, speed, and network bands. The footer's existing
+`ResizeObserver` continues to update the content and player offsets from the
+actual footer height. A mobile Playwright assertion now checks that the footer
+has no horizontal overflow and that the Build link stays within the 390-pixel
+viewport. See `release-notes/20261002-responsive-mobile-footer.md`.
+
+## Active Bughunt Freshness and Browser Sink Gate Follow-up (2026-10-02 UTC)
+
+The active bughunt scanner was described as part of the all-phases process but
+was not invoked by that runner or the remediation baseline. The all-phases
+runner now regenerates the report and checks its UTC generation date, source
+digest, section list, and inventory counts. The digest includes code, scripts,
+CI configuration, docs, and non-ignored untracked files so local implementation
+changes cannot silently reuse an older report. The unsupported aggregate
+red-team count is marked `not generated`; the six scanner sections remain
+visible with five still open.
+
+A scan failure now stops report generation, while a genuine no-match result is
+accepted. A negative regression runs the scanner with both matcher exit states
+and is part of the all-phases runner and remediation baseline. This excludes
+one self-match introduced by the old error-suppression branch; the refreshed
+suppressed-failure section now has 459 raw lines.
+
+The browser subsection has no direct HTML or dynamic-code execution sinks. A
+registered browser-source gate now rejects those sinks in production web,
+dashboard, and TypeScript client code. Existing token-persistence and unsafe
+blank-open gates remain registered. The other active-bughunt categories are
+discovery queues and must not be called reviewed until each has whole-class
+evidence and any accepted findings have regression coverage.
+
+## Responsive Page Overflow Audit Follow-up (2026-10-02 UTC)
+
+The deterministic Chromium audit now measures document scroll width against
+each configured viewport and records missing or failed assets. In the final
+run, all 42 routes rendered at desktop and mobile widths (84 views), with zero
+horizontal page overflows, failed assets, overlapping controls, or audit
+errors. It observed 2,342 mocked UI API responses; loading/empty,
+validation/server-error, and authorization/reconnect/restart scenarios also
+passed. The source-bound route data and receipt are in
+[`the mobile browser audit`](../../benchmarks/artifacts/20261002-mobile-navigation-browser-audit.json)
+and [`its receipt`](../../benchmarks/artifacts/20261002-mobile-navigation-audit-receipt.json).
+
+One earlier full pass showed the reloadable error screen on `/system/events`
+desktop after a CSS preload failure. A focused desktop/mobile rerun and a later
+full 84-view run did not reproduce it. Both the first failed report and the
+error-screen capture are retained with the passing report; the cause remains
+unknown, so the browser audit continues to treat page and asset failures as
+errors. The maintained Playwright regression now checks footer visibility and
+page width at 320 by 568, 360 by 640, 390 by 844, and 768 by 844, and verifies
+the active `/users` link at the narrowest viewport; the focused test passes.
+
+## Go/Python SDK Boundary and Lifecycle Follow-up (2026-10-02 UTC)
+
+The active source-bound bughunt did not include the shipped Go or Python SDK
+implementation trees. It now emits dedicated sections for both SDKs and scans
+their URL/HTTP/WebSocket handling, JSON decoding, response limits, and relevant
+async connection/task calls. Test and example files are excluded from these
+production candidate counts. The refreshed eight sections contain 1,688 raw
+pattern-match lines; that number is not a confirmed-defect count.
+
+Review of the 22 Go matches found existing URL validation, request timeouts,
+redirect refusal, bounded HTTP response reads, response-contract checks, and
+WebSocket handshake cancellation. The 23 Python matches include the same HTTP
+boundary controls and bounded/reconnecting WebSocket lifecycle. They also
+exposed one real gap: Python `disconnect()` waited for the connect lock without
+cancelling the task holding it, so disconnect could wait for the entire
+handshake timeout. BUG-070 now tracks and cancels the in-flight connection and
+invalidates connects that were already queued before disconnect. The SDK suite
+passes, including the new pending-handshake regression, Python quality and
+package checks, Go tests, and TypeScript lifecycle/package checks. The change is
+recorded in [`the Python SDK release note`](../../release-notes/20261002-python-sdk-cancel-connect.md).
+
+Five broad classes remain open in the active report: protocol-controlled
+allocations, proxy/redirect/outbound trust, filesystem/persistent state,
+async task/channel lifecycle, and CI/script failure suppression. These queues
+still require class-by-class review; the passing council runner only verifies
+the registered process gates and fresh candidate counts.
+
+## Candidate Scanner Error Handling Follow-up (2026-10-02 UTC)
+
+Reviewing the suppressed-failure candidate class exposed that `scripts/run-council-scan.sh` used `rg ... || true`. A matcher or filesystem error therefore produced an empty temporary report and a plausible candidate count. BUG-071 changes the scanner to accept only status 1 as an empty match set and fail on every other nonzero result. A regression uses a stub matcher for both statuses and is registered in the all-phases runner and remediation baseline.
+
+The new scan loop and Python SDK fix pass their targeted regressions. The broad suppressed-failure section remains open because this scanner was one confirmed example, not a classification of all 458 candidate lines.
+
+## Whole-Project Candidate-Class Review and Remediation (2026-10-02 UTC)
+
+This continuation finished the whole-class review that the earlier addenda
+explicitly left open. The active source-bound report now covers eight classes:
+protocol-controlled lengths and allocations; outbound/proxy trust; filesystem
+and persisted state; asynchronous ownership; browser injection and storage;
+Go SDK boundaries; Python SDK boundaries; and CI/script failure suppression.
+The current report is generated from the working tree, records its source digest,
+and treats pattern matches as review candidates rather than confirmed defects.
+The inventory records the source families, classification rationale, and
+durable gates for each class. Confidence is high for the reviewed code paths and
+moderate for completeness across every match in these broad pattern queues.
+
+Review found and fixed five additional failures. BUG-092 makes the cross-client
+validator fail when required peer readiness is absent while retaining explicit
+nonblocking treatment for optional probes. BUG-093 moves the legacy async
+multisource route under the daemon's managed task owner. BUG-094 makes policy
+scans fail on matcher, JSON, and sort errors instead of treating them as clean
+results. BUG-095 preserves generated VPN account data on read failures, rejects
+symlink/non-regular destinations, and writes through a private temporary file
+with atomic replacement. BUG-096 rejects unknown certification phase names
+before credentials or test phases are loaded, preventing a mistyped selection
+from returning a zero-test success. The ledger's duplicate BUG-070/BUG-071 IDs
+were corrected; a new uniqueness/order checker is registered in the baseline.
+
+Existing high-risk families were also classified against code and behavior
+evidence: wire-derived reads and counts are bounded before allocation or loops;
+user-controlled outbound URLs are validated, resolved/pinned, and sent without
+ambient proxy or redirect behavior; sensitive/persisted file inputs have
+explicit size, path, or symlink constraints; production async work is bounded or
+owned through shutdown; browser code has no direct HTML/code execution sink;
+and the Go/Python SDK HTTP, WebSocket, decode, and disconnect paths have bounded
+lifecycle behavior. The legacy multisource exception is now covered by the
+runtime boundary gate. Review evidence and follow-up triggers are in
+[`the current candidate inventory`](council-scan-inventory.md).
+
+Focused regressions passed for scanner error handling, generated account file
+safety, cross-client result aggregation, certification phase selection, ledger
+ID uniqueness, and the legacy managed-task boundary. `scripts/check-rust-format.sh`
+and the full `scripts/check-remediation-baseline.sh` passed after the listener
+differential correction; the baseline also completed the full frozen slskd and
+slskdN controller comparison. These local results validate registered source
+and regressions; they do not claim a fresh hosted CI run, a live credentialed
+interop run, deployment, or proof that no other defect exists. The broad audit
+is closed for these eight current scan classes, with each class reopened by
+fresh candidates that lack matching boundary evidence. The RF implementation
+matrix remains subject to its own explicit deployment, live-evidence, and
+hosted-CI acceptance rows.
+
+The first full local baseline exposed an unstable listener differential probe:
+it kept sampling an old TCP port after the daemon had released it, so an
+unrelated listener could be mistaken for the daemon. The scenario now asserts
+that the old port is closed immediately after replacement, then records later
+snapshots as unobserved because ownership has ended. The focused listener
+differential passed for both frozen references. This is a harness reliability
+correction, not a newly confirmed runtime defect. The full local remediation
+baseline passed after this correction.
+
+## Red-Team Abuse-Lens Continuation (2026-10-02 UTC)
+
+The eight broad candidate classes above were previously marked reviewed, but
+the generated active-bughunt report had no explicit attacker-view section even
+though the council registry requires one. `docs/dev/red-team-abuse-review.md`
+now records exploit hypotheses, classifications, source/behavior evidence,
+confidence, and reopen triggers for identity/privilege, delegated capability,
+CSRF/replay, disclosure, SSRF, filesystem, process/config, availability, and
+browser-session boundaries. It deliberately has no aggregate match count: the
+current scanner cannot produce a defensible red-team candidate count.
+
+The attacker-view review found a shared-file path escape. Lookup validated the
+indexed path, but opening later trusted that pathname when symlink following
+was enabled; non-Unix opens also lacked configured-root containment. BUG-097
+now revalidates the resolved target at open time, keeps Unix no-follow opens
+descriptor-relative, and rejects symlink/reparse components when following is
+disabled. Regression coverage reproduces replacement of a previously valid
+file with a symlink to an outside file and checks a path outside configured
+roots. Both focused Rust regressions and `scripts/check-rust-format.sh` pass on
+the local Linux source. Windows execution, hosted CI, and a concurrent
+non-Unix filesystem race are not claimed by that local evidence.
+
+## User-Lookup Status Accuracy (2026-10-02 UTC)
+
+Review of the current mobile Users capture exposed a false-positive status:
+`User.jsx` passed the boolean shorthand `hasFreeUploadSlot` to its icon, so the
+component always received `true` and displayed a green check. The profile view
+now passes the API value and distinguishes Available, Unavailable, and
+Unknown. The username is a level-two heading, and an absent profile description
+no longer claims that all user information is missing. `User.test.jsx` passes
+four focused cases and ESLint passes for both changed source files. BUG-098
+records the issue, and the change has a validated UI release-note fragment.
+
+## User Profile Detail Clarity (2026-10-03 UTC)
+
+The 390 by 844 mobile Users capture showed five missing profile fields rendered
+as a repeated inline `Unknown` sentence, wrapping into several cramped lines;
+the presence state was only a gray dot with no text label. BUG-099 updates the
+profile to label presence and the upload-slot state, render only network
+details actually returned by the peer, and show one concise unavailable-details
+message when none are present. Known values use a responsive definition list.
+Six focused `User.test.jsx` cases and ESLint pass. The before screenshot is
+[`the mobile Users capture`](../../benchmarks/artifacts/20261002-mobile-navigation-users-mobile.png);
+the full post-change Chromium route audit is recorded after validation.
+
+## Search Availability During Realtime Startup (2026-10-03 UTC)
+
+The full mobile route contact sheet showed `/searches` rendering only a
+page-level spinner, while the REST search-list mock was healthy. The UI waited
+for `searchHub.start()` before calling `library.getAll()`, coupling the primary
+search page to the event channel. BUG-100 starts REST hydration and the hub
+independently, renders results while the hub is pending, and keeps loaded rows
+visible with a warning if the hub fails. A deferred-start regression and a hub
+failure regression pass as part of the focused 22-test component run. The
+before screenshot is
+[`the mobile Searches capture`](../../benchmarks/artifacts/20261003-searches-mobile-before-rest-hydration.png);
+the full post-change route audit remains to be recorded.
+
+## Search Results Visibility Follow-up (2026-10-03 UTC)
+
+The real-Chromium desktop and mobile `/searches` captures showed the search
+form followed by eight optional discovery panels, with the default-open Search
+Results section below the first viewport. This made an available search list
+look absent on first view. Search Results now sits directly below the primary
+search form, ahead of SongID and the other optional tools. A component regression
+asserts that first-page order. BUG-102 and a user-facing release fragment record
+the change; final browser evidence is recorded after the complete route matrix.
+
+## Search Data Recovery Warning Follow-up (2026-10-03 UTC)
+
+Reviewing the new REST and realtime state split found that its `restHydrated`
+flag meant only "request settled," although the hub handler used it to mean
+"REST succeeded." A valid hub list arriving after a REST failure was discarded;
+if it arrived before a failing REST request settled, the REST error overrode the
+valid list. The UI now ignores hub lists only after REST success, accepts them
+after REST failure, and suppresses an in-flight REST error when a hub list has
+already supplied usable data. Two `Searches.test.jsx` regressions cover both
+event orderings. BUG-103 and a user-facing release fragment record the fix; final
+route evidence follows the complete Chromium matrix.
+
+## Cross-route Accessibility Follow-up (2026-10-03 UTC)
+
+The rebuilt 42-route desktop/mobile Axe scan cleared every route except
+`/system/mediacore` and `/system/swarm-analytics`, with four failing views in
+total. Findings were one unnamed score slider and an unnamed native selector in
+MediaCore, plus two unnamed efficiency-metric progress bars in Swarm Analytics.
+The score slider is now associated with its visible label, both native
+selectors have accessible names, and the progress bars name their respective
+metrics. New regressions cover the MediaCore controls and Swarm Analytics
+progressbar names; 50 focused tests and Web lint pass. The fresh full matrix
+then passed all 84 desktop/mobile views with zero route errors, visible error
+panels, page loaders, asset failures, mobile horizontal overflow views, or Axe
+violations. The report is
+[`the final browser audit`](../../target/react-a11y-final/audit.json). BUG-107
+and a user-facing release-note fragment record the fix.
+
+## React Audit Success-Fixture Integrity (Internal tooling, 2026-10-03 UTC)
+
+The 42-route mobile contact sheet showed that the prior `success` scenario
+rendered API error panels for Bridge, Security, Source Providers, and Network.
+The mock returned `[]` where those adapters require object responses; the audit checked
+browser errors and HTTP status but not visible error UI. Valid response
+contracts now cover these route fixtures, including empty hash database stats.
+The success audit records visible
+error panels and fails when one appears, and its Python runner rejects reports
+with any route-level error count. The focused System run cleared the first
+three fixtures; the expanded full matrix then found the hash database stats
+mismatch. The `/system/network` desktop/mobile rerun passed after the fixture
+was corrected. A later accessibility audit revealed that the browser runner
+serves `web/build` without building it; its first post-fix attempt therefore
+used stale assets and is not counted as product evidence. A fresh build and
+focused scan have since been used for the accessibility changes. The complete
+42-route desktop/mobile matrix still needs a fresh run. This is internal test
+tooling only and has no product behavior or release-note change. BUG-104
+records the finding and durable regression.
+
+## Search and System Accessibility Follow-up (2026-10-03 UTC)
+
+A fresh production Web build was audited with Axe across Search, System, Info,
+Options, and Shares at desktop and 390 px mobile sizes. The first scan exposed
+four product gaps: unnamed Search stop/remove actions, a Search picker marked
+as a listbox without option children, low-contrast System section labels, and
+read-only CodeMirror content without an accessible name or keyboard focus. The
+shared Search action, Dropdown, System menu styles, and CodeEditor were updated;
+the focused ten-view scan then cleared Search, System, Info, and Options at
+both sizes. It found one more issue in Shares: a placeholder `#` link and a
+malformed `/shares` audit response that rendered a blank path. The table now
+uses a labeled browse button and disabled fallback for missing paths, and the
+audit fixture now returns the API's host-to-share-array shape. Unit regressions
+cover dropdown keyboard selection, Search action names, and share path actions;
+26 focused tests and full Web lint pass. The complete route matrix subsequently
+passed against rebuilt assets; the final report is recorded in the Cross-route
+Accessibility Follow-up. User-facing fixes have validated release-note
+fragments; the fixture correction is internal audit tooling.
+
+## Web Regression and Audit-Fixture Follow-up (2026-10-03 UTC)
+
+The complete Web test suite passes 983 tests across 152 files. One existing
+Mesh Evidence Policy test still tried to interact with the Dropdown's hidden
+closed-state listbox; it now opens the named combobox before selecting the
+visible option, and its focused four-test suite passes. The first comprehensive
+remediation-baseline run then stopped in the audit launch-cleanup fixture
+because the temporary Web tree omitted `axe-core`, so the test never reached
+its mocked browser launch failure. The fixture now supplies a stub axe asset;
+`scripts/check-audit-tooling.sh` and all 10 cases in
+`scripts/test-react-nightly-audit.py` pass after that correction. The full
+remediation baseline now passes against the repaired source and fresh
+candidate reports. It covers frozen controller parity, runtime/security and
+packaging gates, SDK checks, candidate classification/freshness, and the React
+audit runner. The differential output records two known behavior gaps only in
+the frozen `slskdN` reference: API-key rate limiting (draft PR #275) and the
+HTTP 500 request-body limit (draft PR #276); `slskR` passes both differential
+checks. Builds of the frozen comparison projects also emit their existing
+dependency/style warnings.
+
+Full Rust workspace testing then exposed a flaky post-cancellation probe in
+`drop_and_deadline_cancel_owned_listener_tasks`: after the test's listener
+closed, a fresh connection to its released ephemeral port could reach an
+unrelated listener opened by another concurrent test. The test now uses an
+owned close guard that drops its listener before signaling completion, so its
+assertion verifies cleanup directly. The focused case passes; `cargo test
+--workspace --quiet` passes 1,278 tests with one ignored test, and
+`cargo clippy --workspace --all-targets -- -D warnings` passes. This was a test
+determinism fix, not evidence of a production socket leak. Hosted/deployed and
+credentialed public interop evidence remain separate because this audit has
+validated the current local worktree.
+
+## Final Local Audit Acceptance (2026-10-03 UTC)
+
+Internal audit evidence only; this entry does not change user-facing behavior
+or documentation. After the test-probe correction above, the exact current
+worktree passed `scripts/check-remediation-baseline.sh` and the aggregate
+`scripts/run-bug-council-all-phases.sh`. The latter regenerated and validated
+the active inventory: all nine threat paths are classified, all active
+candidate classes are marked Guarded or Fixed, no council phase remains
+pending, the six scan inventories match the current source digest, and the
+adversarial protocol corpus passes. Candidate counts are search results, not
+bug counts or proof that the project has no bugs. The 84-view browser audit,
+full Web suite, Rust workspace suite, Clippy, release-note preview, and plan
+freshness checks also pass on the current local source.
+
+This closes the local audit and remediation work in this initiative. It does
+not close external acceptance: exact-source hosted CI, credentialed public
+interop, physical-device validation, deployed behavior, and release
+publication still require their own runs. No push, merge, deployment, or
+release publication was performed here.
+
+## Whole-Project Continuation Status (2026-10-03 UTC)
+
+The preceding `Final Local Audit Acceptance` entry records completion of its
+local gate set at that point in time. It is not completion of the whole project
+plan. Work continues until repository-actionable findings and authorized
+acceptance evidence are resolved; external device, deployed, and release
+evidence remain individually tracked.
+
+The resumed credentialed certification found a setup-order defect: Phase B
+used the commons fixture in B1-B3 before C6 downloaded it. The runner now
+prepares and verifies the fixture before Phase B, applies the same configured
+fixture path to B1-B3 and C6, and records setup failure against B1-B3 without
+skipping independent B4-B5. Regression coverage passes in
+`scripts/test-certification-phases.sh`; credentialed Phase B passes 5/5 in
+`target/certify/phase-b-final/summary-20261003-080003.json`. Phase E passes
+5/5, including the NAT-PMP soak, after moving its Cargo build outside the VPN
+namespace (`target/certify/phase-e-final/summary-20261003-080438.json`).
+
+The full credentialed matrix passed 38/39 before retry changes. A subsequent
+Phase A check did not reproduce its earlier direct-peer successes: A3 and A4
+received no usable listener-port metadata, and A5 timed out without a relayed
+connect event in the listener log (`target/certify/phase-a-retry/summary-20261003-082250.json`,
+`target/live-soak/live-soak-proton-p1-20261003-082333.log`). The listener did
+obtain and renew both NAT-PMP mappings, so this remains an unresolved
+public-server interoperability failure rather than a proven mapping failure.
+Certification's prior A2 status logic accepted any successfully parsed peer
+address response and did not retain or validate its endpoint fields. A full
+run reported A2 pass before A3/A4 failed on missing listener metadata; the A2
+response values were not retained, so that run alone cannot prove the A2
+response itself was unusable. The local acceptance assertion and error
+diagnostics now expose the endpoint condition. Shell regression cases accept
+regular and type-1 obfuscated endpoints and reject zero-port and malformed
+metadata; Rust coverage checks the CLI error includes the returned endpoint
+fields. The first credentialed run after this assertion change could not reach the metadata
+check: A1.2 and A2-A5 login attempts were reset by the public server, leaving
+3/8 Phase A checks passing. Its receipt is
+`target/certify/phase-a-metadata-assertion/summary-20261003-083241.json` and
+listener evidence is
+`target/live-soak/live-soak-proton-p1-20261003-083359.log`. This run neither
+confirms nor clears the missing-metadata behavior; Phase A remains open pending
+a successful public-server login window.
+
+The saved worktree diff was applied to a new branch based on current
+`origin/main` at `48ac7d36`; the original branch and a safety stash remain
+intact. Three council scan records conflicted during application because both
+sides carried generated dates/counts. The later review notes were preserved,
+and the source-bound reports were regenerated from the updated tree. Local
+validation on that base is recorded in the Updated-Base Local Acceptance
+section below. Exact-source hosted GitHub/GitLab runs remain required before
+source acceptance.
+
+Current state: **in progress**. Do not infer whole-project completion from the
+local-audit checkpoint above.
+
+## Aggregate Web Bundle Budget Rebaseline (2026-10-03 UTC)
+
+The rebuilt `origin/main` baseline measured 612,591 bytes of aggregate JavaScript
+gzip (598.23 KiB). The current remediation branch measures 615,017 bytes
+(600.60 KiB), an increase of 2,426 bytes (0.40%). Its initial JavaScript is
+1,116,579 raw bytes (1,090.41 KiB) and 347,561 gzip bytes (339.42 KiB), within
+the unchanged 1,150 KiB raw initial-load limit. The aggregate all-route gzip
+ceiling moved from 600 to 601 KiB, the smallest whole-KiB allowance above the
+measured output; that leaves 407 bytes of headroom and continues to count every
+generated JavaScript asset. This is internal-only build policy; no product or
+release-channel behavior changed. The budget, build-output, and route-audit
+gates passed on the updated worktree, followed by the clean-commit React audit
+recorded below.
+
+## Updated-Base Local Acceptance (2026-10-03 UTC)
+
+The remediation branch is based on `origin/main` at
+`48ac7d3657ac501d79e3fd34116a57882cb60766`. The final council source digest
+for this worktree is
+`84be311f9b89d494d79f6029aace7ae87f89a032b0630ea6bd1076ced15e5b78`. After
+refreshing the source-bound reports, the complete
+`scripts/check-remediation-baseline.sh` passed. This includes the pinned
+`slskd`/`slskdN` behavior matrix, browser and API security policies, Rust and
+Python SDK checks, package and release metadata checks, council freshness and
+closure, and the React audit harness tests. Differential checks continue to
+classify API-key rate limiting and HTTP 500 request-body limits as defects in
+the frozen `slskdN` reference tracked by draft PRs #275 and #276; `slskR` passes
+both checks.
+
+Current local product evidence is: 984 Web tests across 152 files; Web lint;
+37 end-to-end tests; a production build and bundle gate at 615,017 aggregate
+JavaScript gzip bytes (600.60 KiB) under the 601 KiB ceiling; build-output and
+Rustymilk compatibility checks; and the Rust workspace test and Clippy runs
+recorded above. The clean React receipt was generated against product commit
+`b25cbd62cb67d03e8df283e92be50604e4ee9109` with `worktreeDirty=false`. Its
+success matrix completed 84 desktop/mobile views and 2,424 UI responses; the
+three loading/error/reconnect scenarios also passed. The success audit reports
+zero page errors, asset failures, visible loaders, visible error states,
+horizontal overflow views, and Axe violations. The receipt is
+`target/react-final-b25cbd62/receipt.json` with SHA-256
+`90f257cb0d75d2b18986d4f24509b78f29c38731e1dfe569ae459989644b7b16`.
+
+Credentialed public certification remains mixed: Phase B and Phase E passed
+5/5 each. Phase A is unresolved because a later run encountered public-server
+login resets before endpoint metadata could be checked, following an earlier
+run with missing listener-port metadata and a peer-connect timeout. The local
+code now validates and reports endpoint metadata, but the public service has
+not supplied a stable window to verify the end-to-end path.
+
+This closes the updated-base local acceptance gates only. Exact-source GitHub
+and GitLab results, a stable public Phase A run, deployed validation,
+physical-device checks, outstanding RF-042/RF-066 live evidence, and release
+publication remain open. No deployment, merge, or release publication is
+included in this work.
+
+## Exact-Source Hosted Acceptance (2026-10-03 UTC)
+
+The product source at `f63ca9bc911c7c5f400472c97efcbf568cd78b98` passed the
+complete GitHub CI matrix in run
+[`37141220791`](https://github.com/snapetech/slskr/actions/runs/37141220791),
+attempt 2. All 11 jobs passed, including Linux GNU and musl x64/ARM64, macOS
+Intel and Apple Silicon, Windows x64, Linux AArch64, Rust tests, production Web
+assets, and Package and deployment surfaces. The first macOS Intel artifact
+download failed with a transient DNS error; the targeted retry downloaded the
+artifact, passed native workspace tests, built and verified the release
+archive, and completed successfully. Windows Smoke run
+[`37141220632`](https://github.com/snapetech/slskr/actions/runs/37141220632)
+also passed. CodeQL, the release-note contract, local identity checks, and
+GitGuardian checks passed on the same source.
+
+React Nightly Audit run
+[`37141535719`](https://github.com/snapetech/slskr/actions/runs/37141535719)
+passed on this exact commit with a clean worktree. Its success scenario covered
+84 desktop/mobile views and 2,553 observed UI responses, with zero page errors,
+asset errors, loading states, visible error states, overflow views, or Axe
+violations. The rendered-loading/empty, validation/server-error, and
+authorization/reconnect/restart scenarios also passed.
+
+Live Parity run
+[`37141537643`](https://github.com/snapetech/slskr/actions/runs/37141537643)
+passed both the Rust UI and slskd API parity job and the credentialed public
+live interop job. Its sanitized peer, login, private-message, and room-message
+smokes all reported success. GitLab pipeline
+[`238`](https://gitlab.home/keith/slskR/-/pipelines/238) passed its Web,
+dashboard, TypeScript client, Go client, and Rust jobs.
+
+These results close exact-source repository CI and hosted browser/live-parity
+acceptance for this source commit. They do not close the separate public Phase
+A foundation proof: the latest local credentialed rerun passed 3/8 checks, then
+the public server reset connections for A1.2 and A2-A5 before endpoint metadata
+could be evaluated. Phase B and Phase E remain 5/5. A stable Phase A login
+window, deployed behavior, physical-device validation, outstanding RF-042 and
+RF-066 live/deployed evidence, and release publication remain open. No merge,
+deployment, or release publication was performed.

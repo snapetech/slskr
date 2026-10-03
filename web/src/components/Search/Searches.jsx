@@ -23,6 +23,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
+import { Message } from 'semantic-ui-react';
 import { toast } from 'react-toastify';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -36,9 +37,12 @@ const SEARCH_CREATE_HYDRATION_TIMEOUT_MS = 1_500;
 const Searches = ({ runtimeProfile, server } = {}) => {
   const normalizedServer = server ?? { isConnected: false };
   const [connecting, setConnecting] = useState(true);
-  const [error, setError] = useState(undefined);
+  const [connectionError, setConnectionError] = useState(undefined);
+  const [loadError, setLoadError] = useState(undefined);
+  const error = loadError || connectionError;
   const [searches, setSearches] = useState({});
   const [initialSearchesLoaded, setInitialSearchesLoaded] = useState(false);
+  const [hasSearchData, setHasSearchData] = useState(false);
 
   const [removing, setRemoving] = useState(false);
   const [removingAll, setRemovingAll] = useState(false);
@@ -129,7 +133,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       return;
     }
     setConnecting(false);
-    setError(undefined);
+    setConnectionError(undefined);
   };
 
   const onConnectionError = (connectionError) => {
@@ -137,7 +141,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       return;
     }
     setConnecting(false);
-    setError(toDisplayError(connectionError, 'Disconnected'));
+    setConnectionError(toDisplayError(connectionError, 'Disconnected'));
   };
 
   const onUpdate = (update) => {
@@ -145,12 +149,12 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       return;
     }
     setSearches(update);
-    onConnected();
   };
 
   useEffect(() => {
     let mounted = true;
-    let restHydrated = false;
+    let restHydrationSucceeded = false;
+    let hubListReceived = false;
 
     const loadSearches = async () => {
       const requestId = ++loadRequestIdRef.current;
@@ -163,9 +167,12 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         ) {
           return;
         }
+        restHydrationSucceeded = true;
         const searchRecords = (Array.isArray(records) ? records : []).filter(
           (search) => search && typeof search === 'object' && !Array.isArray(search),
         );
+        setHasSearchData(true);
+        setLoadError(undefined);
         onUpdate(
           searchRecords.reduce((accumulator, search) => {
             const id = searchEventIdentifier(search);
@@ -183,9 +190,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         ) {
           return;
         }
-        onConnectionError(toDisplayError(loadError, 'Failed to load searches'));
+        if (!hubListReceived) {
+          setLoadError(toDisplayError(loadError, 'Failed to load searches'));
+        }
       } finally {
-        restHydrated = true;
         if (
           mounted &&
           mountedRef.current &&
@@ -252,13 +260,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     const searchHub = createSearchHubConnection();
 
     searchHub.on('list', (searchesEvent) => {
-      if (!mountedRef.current || restHydrated) {
+      if (!mountedRef.current || restHydrationSucceeded) {
         return;
       }
       if (!Array.isArray(searchesEvent)) {
         void loadSearches();
         return;
       }
+      hubListReceived = true;
+      setHasSearchData(true);
+      setLoadError(undefined);
       onUpdate(
         searchesEvent.reduce((accumulator, search) => {
           const id = searchEventIdentifier(search);
@@ -303,18 +314,17 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       try {
         onConnecting();
         await searchHub.start();
-        if (mountedRef.current) {
-          await loadSearches();
-        }
+        onConnected();
       } catch (connectionError) {
         if (!mountedRef.current) {
           return;
         }
         toast.error(toDisplayError(connectionError, 'Failed to connect to search updates'));
-        await loadSearches();
+        onConnectionError(connectionError);
       }
     };
 
+    void loadSearches();
     void connect();
 
     // Scene ↔ Pod Bridging is opt-in. Do not infer it from generic capabilities,
@@ -604,18 +614,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   };
 
   useEffect(() => {
-    if (searchId || connecting || error || creating) {
+    if (searchId || creating) {
       return;
     }
 
     inputRef?.current?.inputRef?.current?.focus();
-  }, [connecting, creating, error, runtimeProfile, searchId]);
+  }, [creating, runtimeProfile, searchId]);
 
   useEffect(() => {
     if (
       !searchId ||
-      connecting ||
-      error ||
       creating ||
       !initialSearchesLoaded ||
       searches[searchId]
@@ -660,9 +668,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       controller.abort();
     };
   }, [
-    connecting,
     creating,
-    error,
     initialSearchesLoaded,
     mountedRef,
     routerNavigate,
@@ -670,29 +676,40 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     searches,
   ]);
 
-  if (connecting) {
+  if (!initialSearchesLoaded && !hasSearchData) {
     return <LoaderSegment />;
   }
 
-  if (error) {
+  if (error && !hasSearchData) {
     return <ErrorSegment caption={toDisplayError(error, 'Failed to load searches')} />;
   }
+
+  const searchDataWarning = error && hasSearchData ? (
+    <Message
+      content={`${toDisplayError(error, 'Search updates are unavailable')}. Showing the last successfully loaded search data.`}
+      size="small"
+      warning
+    />
+  ) : null;
 
   // if searchId is not null, there's an id in the route.
   // display the details for the search, if there is one
   if (searchId) {
     if (searches[searchId]) {
       return (
-        <SearchDetail
-          creating={creating}
-          disabled={!normalizedServer.isConnected}
-          onCreate={create}
-          onRemove={remove}
-          onStop={stop}
-          removing={removing}
-          search={searches[searchId]}
-          stopping={stopping}
-        />
+        <>
+          {searchDataWarning}
+          <SearchDetail
+            creating={creating}
+            disabled={!normalizedServer.isConnected}
+            onCreate={create}
+            onRemove={remove}
+            onStop={stop}
+            removing={removing}
+            search={searches[searchId]}
+            stopping={stopping}
+          />
+        </>
       );
     }
 
@@ -706,32 +723,37 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   }
 
   return (
-    <SearchesListView
-      actions={{
-        create,
-        remove,
-        removeAll,
-        setProviderPod,
-        setProviderScene,
-        stop,
-        updateAcquisitionProfile,
-      }}
-      inputRef={inputRef}
-      state={{
-        acquisitionProfile,
-        acquisitionProfileOptions,
-        connecting,
-        creating,
-        error,
-        normalizedServer,
-        providerPod,
-        providerScene,
-        removingAll,
-        runtimeProfile,
-        scenePodBridgeEnabled,
-        searches,
-      }}
-    />
+    <>
+      {searchDataWarning}
+      <SearchesListView
+        actions={{
+          create,
+          remove,
+          removeAll,
+          setProviderPod,
+          setProviderScene,
+          stop,
+          updateAcquisitionProfile,
+        }}
+        inputRef={inputRef}
+        state={{
+          acquisitionProfile,
+          acquisitionProfileOptions,
+          connecting,
+          creating,
+          error: undefined,
+          hasSearchData,
+          initialSearchesLoaded,
+          normalizedServer,
+          providerPod,
+          providerScene,
+          removingAll,
+          runtimeProfile,
+          scenePodBridgeEnabled,
+          searches,
+        }}
+      />
+    </>
   );
 };
 

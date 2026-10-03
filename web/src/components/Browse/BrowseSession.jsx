@@ -826,11 +826,13 @@ class BrowseSession extends Component {
                             onClose={() => this.fetchUserNote(username)}
                             trigger={
                               <Icon
+                                aria-label={`Edit note for ${username}`}
                                 color="grey"
                                 link
                                 name="pencil alternate"
                                 size="small"
                                 style={{ marginLeft: '4px', opacity: 0.5 }}
+                                title={`Edit note for ${username}`}
                               />
                             }
                             username={username}

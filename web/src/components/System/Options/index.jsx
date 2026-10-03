@@ -92,6 +92,7 @@ const Options = ({ options, theme }) => {
       <Divider />
       <Switch loading={!contents && <LoaderSegment />}>
         <CodeEditor
+          ariaLabel="Server options JSON"
           basicSetup={false}
           editable={false}
           theme={theme}

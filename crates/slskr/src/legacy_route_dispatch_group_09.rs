@@ -1417,13 +1417,19 @@ pub(super) async fn legacy_route_dispatch_group_09(
             state.multisource.write().await.insert(job.clone());
             let store = Arc::clone(&state.multisource);
             if normalized_path == "/api/multisource/swarm/async" {
-                tokio::spawn(multisource::execute(
+                if !multisource::spawn_managed(
+                    state,
                     id.clone(),
                     request,
                     output_path,
                     public_output_path,
-                    store,
-                ));
+                )
+                .await
+                {
+                    return Ok(routing::service_unavailable_response(
+                        "daemon is shutting down",
+                    ));
+                }
                 return Ok(routing::accepted_response(
                     serde_json::json!({
                         "id": id,

@@ -482,59 +482,98 @@ html:not(.dark) .slskr-footer-sponsor .icon {
 }
 
 @media (max-width: 980px) {
-    .slskr-footer {
+    .slskr-footer:not(.slskr-footer-minimal) {
+        overflow: visible;
         padding: 7px 10px;
     }
 
-    .slskr-footer-content {
-        display: flex;
+    .slskr-footer:not(.slskr-footer-minimal) .slskr-footer-content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "brand speeds"
+            "network network";
+        align-items: center;
+        gap: 5px 8px;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .slskr-footer:not(.slskr-footer-minimal) .slskr-footer-left {
+        grid-area: brand;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .slskr-footer-brand {
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        white-space: normal;
+    }
+
+    .slskr-footer:not(.slskr-footer-minimal) .slskr-footer-center {
+        grid-area: speeds;
+        width: auto;
+        min-width: 0;
+    }
+
+    .slskr-footer:not(.slskr-footer-minimal) .slskr-footer-right {
+        grid-area: network;
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
         gap: 6px;
-        flex-wrap: nowrap;
-        justify-content: flex-start;
-        min-width: max-content;
-    }
-
-    .slskr-footer {
-        overflow-x: auto;
-        overflow-y: hidden;
-        scrollbar-width: thin;
-    }
-
-    .slskr-footer-left,
-    .slskr-footer-center,
-    .slskr-footer-right {
-        flex: 0 0 auto;
     }
 
     .slskr-footer-speeds,
     .slskr-footer-network {
         justify-content: center;
-        flex-wrap: nowrap;
-        white-space: nowrap;
+        max-width: 100%;
+    }
+
+    .slskr-footer-network {
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        white-space: normal;
     }
 }
 
 @media (max-width: 620px) {
-    .slskr-footer {
-        overflow-x: auto;
-        overflow-y: hidden;
+    .slskr-footer:not(.slskr-footer-minimal) {
         padding: 5px 8px;
-        scrollbar-width: thin;
     }
 
-    .slskr-footer-content {
-        flex-wrap: nowrap;
-        justify-content: flex-start;
-        min-width: max-content;
+    .slskr-footer:not(.slskr-footer-minimal) .slskr-footer-content {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "brand"
+            "speeds"
+            "network";
+        justify-items: center;
+        gap: 4px;
     }
 
     .slskr-footer-brand {
-        flex: 0 0 auto;
-        gap: 8px;
+        width: 100%;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 4px 7px;
+        white-space: normal;
+    }
+
+    .slskr-footer-center {
+        justify-content: center;
     }
 
     .slskr-footer-build {
-        max-width: 260px;
+        max-width: 100%;
+    }
+
+    .slskr-footer-speeds,
+    .slskr-footer-network {
+        flex-wrap: wrap;
+        justify-content: center;
+        white-space: normal;
     }
 
     .slskr-footer-speeds,
@@ -544,11 +583,17 @@ html:not(.dark) .slskr-footer-sponsor .icon {
         padding: 4px 7px;
     }
 
-    .slskr-footer-speeds,
+    .slskr-footer:not(.slskr-footer-minimal) .slskr-footer-right {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 4px;
+    }
+
     .slskr-footer-network {
-        flex: 0 0 auto;
-        flex-wrap: nowrap;
-        white-space: nowrap;
+        width: 100%;
+        min-width: 0;
+        gap: 6px;
     }
 
     .slskr-footer-group-label {

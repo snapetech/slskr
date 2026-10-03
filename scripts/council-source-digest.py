@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hash the tracked inputs read by the candidate scan."""
+"""Hash tracked and untracked, non-ignored inputs read by candidate scans."""
 
 from __future__ import annotations
 
@@ -17,18 +17,34 @@ INPUTS = (
     "client-ts",
     "client-python",
     "client-go",
+    ".github",
+    ".gitlab-ci.yml",
+    "scripts",
     "docs",
     "README.md",
 )
 GENERATED_RECORDS = {
     "docs/dev/council-scan-inventory.md",
     "docs/dev/bug-council-active-backlog.md",
+    # This plan records the resulting digest, so including it would make the
+    # source identity self-referential and unstable after every evidence update.
+    "docs/dev/refactoring-efficiency-plan.md",
 }
 
 
 def main() -> None:
     paths = subprocess.check_output(
-        ["git", "ls-files", "-z", "--", *INPUTS], cwd=ROOT
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            *INPUTS,
+        ],
+        cwd=ROOT,
     ).split(b"\0")
     digest = hashlib.sha256()
     for raw_path in paths:

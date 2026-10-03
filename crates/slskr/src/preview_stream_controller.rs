@@ -424,25 +424,86 @@ fn shared_local_file_metadata(
     local_path: &Path,
 ) -> Option<fs::Metadata> {
     let symlink_metadata = fs::symlink_metadata(local_path).ok()?;
-    if symlink_metadata.file_type().is_symlink() && !settings.follow_symlinks {
+    if shared_path_metadata_is_link_or_reparse_point(&symlink_metadata) && !settings.follow_symlinks
+    {
         return None;
     }
-    let metadata = fs::metadata(local_path).ok()?;
+    let validated_path =
+        validate_shared_local_file_path(&settings.roots, local_path, settings.follow_symlinks)
+            .ok()?;
+    let metadata = fs::metadata(validated_path).ok()?;
     if !metadata.is_file() {
         return None;
     }
-    if !settings.roots.is_empty() {
-        let canonical_path = local_path.canonicalize().ok()?;
-        let inside_share_root = settings
-            .roots
-            .iter()
-            .filter_map(|root| root.canonicalize().ok())
-            .any(|root| canonical_path.starts_with(root));
-        if !inside_share_root {
-            return None;
+    Some(metadata)
+}
+
+fn validate_shared_local_file_path(
+    roots: &[PathBuf],
+    local_path: &Path,
+    follow_symlinks: bool,
+) -> Result<PathBuf, String> {
+    if roots.is_empty() {
+        return Ok(local_path.to_path_buf());
+    }
+
+    let canonical_path = local_path
+        .canonicalize()
+        .map_err(|error| format!("shared file canonicalize failed: {error}"))?;
+    for root in roots {
+        let Ok(canonical_root) = root.canonicalize() else {
+            continue;
+        };
+        if !canonical_path.starts_with(&canonical_root) {
+            continue;
+        }
+
+        if !follow_symlinks {
+            ensure_shared_path_has_no_links(root, local_path)?;
+        }
+        return Ok(canonical_path);
+    }
+
+    Err("local file is outside configured share roots".to_owned())
+}
+
+fn ensure_shared_path_has_no_links(root: &Path, local_path: &Path) -> Result<(), String> {
+    let relative = local_path
+        .strip_prefix(root)
+        .map_err(|_| "local file is outside configured share roots".to_owned())?;
+    let root_metadata = fs::symlink_metadata(root)
+        .map_err(|error| format!("share root metadata failed: {error}"))?;
+    if shared_path_metadata_is_link_or_reparse_point(&root_metadata) {
+        return Err("shared file path contains a symlink or reparse point".to_owned());
+    }
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err("shared file path contains a non-relative component".to_owned());
+        };
+        current.push(component);
+        let metadata = fs::symlink_metadata(&current)
+            .map_err(|error| format!("shared file path metadata failed: {error}"))?;
+        if shared_path_metadata_is_link_or_reparse_point(&metadata) {
+            return Err("shared file path contains a symlink or reparse point".to_owned());
         }
     }
-    Some(metadata)
+    Ok(())
+}
+
+fn shared_path_metadata_is_link_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 pub(super) async fn open_shared_local_file(
@@ -450,6 +511,8 @@ pub(super) async fn open_shared_local_file(
     local_path: &Path,
 ) -> Result<fs::File, String> {
     let settings = state.share_settings.read().await;
+    let validated_path =
+        validate_shared_local_file_path(&settings.roots, local_path, settings.follow_symlinks)?;
     #[cfg(unix)]
     if !settings.follow_symlinks && !settings.roots.is_empty() {
         return open_shared_local_file_unix(&settings.roots, local_path);
@@ -465,7 +528,7 @@ pub(super) async fn open_shared_local_file(
         }
     }
     options
-        .open(local_path)
+        .open(validated_path)
         .map_err(|error| format!("local file open failed: {error}"))
 }
 

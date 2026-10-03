@@ -167,13 +167,24 @@ class App extends Component {
       'visibilitychange',
       this.navigationActivity.handleVisibilityChange,
     );
+    window.addEventListener('resize', this.handleNavigationResize);
     this.startChromeMeasurement();
     this.syncThemeChrome();
   }
 
   componentDidUpdate(previousProps, previousState) {
-    if (previousProps.location?.pathname !== this.props.location?.pathname) {
+    const locationChanged =
+      previousProps.location?.pathname !== this.props.location?.pathname;
+    const navigationAppeared =
+      !previousState.initialized && this.state.initialized;
+    const navigationProfileChanged =
+      previousState.applicationState?.runtimeProfile !==
+      this.state.applicationState?.runtimeProfile;
+    if (locationChanged) {
       this.navigationActivity.refresh();
+    }
+    if (locationChanged || navigationAppeared || navigationProfileChanged) {
+      this.ensureActiveNavigationItemVisible();
     }
     if (
       previousState.initialized !== this.state.initialized ||
@@ -188,6 +199,7 @@ class App extends Component {
   componentWillUnmount() {
     this.isMountedFlag = false;
     this.navigationActivity.stop();
+    window.removeEventListener('resize', this.handleNavigationResize);
     if (this.applicationHub) {
       this.applicationHub.stop().catch(() => {});
       this.applicationHub = undefined;
@@ -223,6 +235,18 @@ class App extends Component {
 
   updateNavigationHeight = () => {
     setNavigationHeightVariable(document.querySelector('.navigation'));
+  };
+
+  handleNavigationResize = () => {
+    this.updateNavigationHeight();
+    this.ensureActiveNavigationItemVisible();
+  };
+
+  ensureActiveNavigationItemVisible = () => {
+    if (!window.matchMedia?.('(max-width: 767px)').matches) return;
+    document
+      .querySelector('.navigation-primary a.active, .navigation-primary a[aria-current="page"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   };
 
   getCurrentPath = () =>
@@ -839,31 +863,34 @@ class App extends Component {
                 navActivity={navActivity}
                 version={version}
               />
-            <AppHeaderMenu
-              connectionWatchdog={connectionWatchdog}
-              controller={controller}
-              current={current}
-              isLoggedIn={session.isLoggedIn()}
-              isUpdateAvailable={isUpdateAvailable}
-              latest={latest}
-              mode={mode}
-              onCloseThemeMenu={this.closeThemeMenu}
-              onConnect={this.handleSoulseekConnect}
-              onLogout={this.logout}
-              onOpenThemeMenu={this.openThemeMenu}
-              onSetTheme={this.setTheme}
-              pendingReconnect={pendingReconnect}
-              pendingRestart={pendingRestart}
-              pendingShareRescan={pendingShareRescan}
-              runtimeProfile={runtimeProfile}
-              server={server}
-              theme={theme}
-              themeMenuOpen={themeMenuOpen}
-              themeOptions={THEME_OPTIONS}
-              user={user}
-            />
+              <AppHeaderMenu
+                connectionWatchdog={connectionWatchdog}
+                controller={controller}
+                current={current}
+                isLoggedIn={session.isLoggedIn()}
+                isUpdateAvailable={isUpdateAvailable}
+                latest={latest}
+                mode={mode}
+                onCloseThemeMenu={this.closeThemeMenu}
+                onConnect={this.handleSoulseekConnect}
+                onLogout={this.logout}
+                onOpenThemeMenu={this.openThemeMenu}
+                onSetTheme={this.setTheme}
+                pendingReconnect={pendingReconnect}
+                pendingRestart={pendingRestart}
+                pendingShareRescan={pendingShareRescan}
+                runtimeProfile={runtimeProfile}
+                server={server}
+                theme={theme}
+                themeMenuOpen={themeMenuOpen}
+                themeOptions={THEME_OPTIONS}
+                user={user}
+              />
             </Sidebar>
-            <Sidebar.Pusher className="app-content">
+            <Sidebar.Pusher
+              as="main"
+              className="app-content"
+            >
               {showVpnPortNotice && (
                 <VpnPortChangeNotice
                   onDismiss={() =>

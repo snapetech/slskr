@@ -68,7 +68,7 @@ describe('MeshEvidencePolicy', () => {
       }),
     );
     fireEvent.click(
-      screen.getByRole('listbox', {
+      screen.getByRole('combobox', {
         name: 'Mesh evidence inbound trust tier',
       }),
     );

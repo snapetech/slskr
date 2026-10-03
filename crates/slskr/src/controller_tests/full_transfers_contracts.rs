@@ -1315,6 +1315,48 @@ pub(super) async fn upload_share_lookup_rejects_swapped_symlink() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[cfg(unix)]
+#[cfg_attr(test, tokio::test)]
+#[cfg(feature = "full-controller-tests")]
+pub(super) async fn opening_a_previously_valid_share_rejects_a_swapped_outside_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let (state, _receiver) = test_state();
+    let dir = std::env::temp_dir().join(format!(
+        "slskr-share-follow-symlink-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    let root = dir.join("share");
+    std::fs::create_dir_all(&root).expect("share root");
+    let shared_path = root.join("Song.flac");
+    let outside_path = dir.join("outside.flac");
+    std::fs::write(&shared_path, [1_u8, 2, 3, 4]).expect("shared file");
+    std::fs::write(&outside_path, [5_u8, 6, 7, 8]).expect("outside file");
+
+    {
+        let mut settings = state.share_settings.write().await;
+        settings.roots = vec![root.clone()];
+        settings.follow_symlinks = true;
+    }
+    add_test_share(&state, "Remote/Song.flac", &shared_path, 4).await;
+    let indexed = crate::find_shared_local_file(&state, "Remote/Song.flac")
+        .await
+        .expect("initial regular share file");
+
+    std::fs::remove_file(&shared_path).expect("remove indexed file");
+    symlink(&outside_path, &shared_path).expect("swap in outside symlink");
+    let error = crate::open_shared_local_file(&state, &indexed.local_path)
+        .await
+        .expect_err("opening a stale share path must not follow an outside symlink");
+    assert!(error.contains("outside configured share roots"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
 pub(super) async fn transfer_start_with_peer_requests_peer_address() {
