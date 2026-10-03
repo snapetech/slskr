@@ -1,6 +1,6 @@
 # Whole-Project Refactor Audit
 
-Status: active whole-project implementation plan, in progress. The 73 RF implementation rows remain marked Verified from 2026-09-29 UTC; that row status does not mean whole-project acceptance is complete. For product source commit `f63ca9bc911c7c5f400472c97efcbf568cd78b98`, GitHub CI run 37141220791 (attempt 2), Windows Smoke run 37141220632, React Nightly Audit run 37141535719, Live Parity run 37141537643, and GitLab pipeline 238 passed. The updated local audit baseline also passed. Phase B and Phase E certification pass 5/5; Phase A remains open after public-server connection resets prevented the latest run from reaching endpoint checks. Deployed validation, physical-device checks, outstanding RF-042/RF-066 acceptance evidence, and release publication remain open. No merge, deployment, or release publication is included.
+Status: active whole-project implementation plan, in progress. The 73 RF implementation rows remain marked Verified from 2026-09-29 UTC; that row status does not mean whole-project acceptance is complete. For product source commit `f63ca9bc911c7c5f400472c97efcbf568cd78b98`, GitHub CI run 37141220791 (attempt 2), Windows Smoke run 37141220632, React Nightly Audit run 37141535719, Live Parity run 37141537643, and GitLab pipeline 238 passed. The updated local audit baseline also passed. Phase B and Phase E certification pass 5/5; the latest cooled-down Phase A run remains 3/8 after public-server resets prevented endpoint checks. Deployed validation, physical-device checks, outstanding RF-042/RF-066 acceptance evidence, and release publication remain open. No merge, deployment, or release publication is included.
 
 
 Audit baseline date: 2026-09-15; evidence addenda through 2026-10-03 UTC
@@ -8768,3 +8768,17 @@ could be evaluated. Phase B and Phase E remain 5/5. A stable Phase A login
 window, deployed behavior, physical-device validation, outstanding RF-042 and
 RF-066 live/deployed evidence, and release publication remain open. No merge,
 deployment, or release publication was performed.
+
+## Phase A Cooldown Retry (2026-10-03 UTC)
+
+After more than an hour since the preceding reset-dominated Phase A attempt, a
+credentialed rerun with VPN isolation still received public-server resets.
+`A1.1`, `A1.3`, and `A1.4` passed; `A1.2` and `A2` through `A5` failed with
+`Connection reset by peer`. The run therefore passed 3/8 and did not reach
+listener endpoint metadata validation. Its sanitized summary is
+`target/certify/phase-a-cooldown-20261003/summary-20261003-132935.json`; the
+test log is retained locally and is not committed because it contains
+credentialed run details. This confirms that the public login window was still
+unavailable at 2026-10-03 19:32 UTC; it does not establish an endpoint metadata
+regression. Phase A remains open until the public service accepts the required
+logins. Phase B and Phase E remain 5/5. No product or security behavior changed.
