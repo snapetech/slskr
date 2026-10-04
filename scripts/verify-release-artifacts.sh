@@ -46,6 +46,25 @@ verify_sha256_file() {
   echo "$file: OK"
 }
 
+verify_app_version() {
+  local executable="$1"
+  local expected_app_version="$2"
+  local output
+  local actual_app_version
+
+  if ! output="$("$executable" version)"; then
+    echo "failed to run release executable: $executable version" >&2
+    return 1
+  fi
+  actual_app_version="${output#* }"
+  actual_app_version="${actual_app_version%% (*}"
+  if [[ "$actual_app_version" != "$expected_app_version" ]]; then
+    echo "application version mismatch: expected $expected_app_version, got $actual_app_version" >&2
+    return 1
+  fi
+  echo "application version verified: $actual_app_version"
+}
+
 if [[ ! -d "$artifact_dir" ]]; then
   echo "missing artifact dir: $artifact_dir" >&2
   exit 2
@@ -57,6 +76,8 @@ if ((${#artifacts[@]} == 0)); then
   echo "no slskr release archives found in $artifact_dir" >&2
   exit 1
 fi
+
+host_target="$(rustc -Vv 2>/dev/null | sed -n 's/^host: //p' | head -n 1 || true)"
 
 for artifact in "${artifacts[@]}"; do
   echo "==> $artifact"
@@ -173,6 +194,16 @@ PY
 
   root="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
   test -n "$root"
+  test -f "$root/RUN.txt"
+  run_metadata="$(sed -nE 's/^slskr (.*) \(([^()]*)\)$/\1|\2/p' "$root/RUN.txt")"
+  if [[ -z "$run_metadata" ]]; then
+    echo "release archive is missing valid version and target metadata: $artifact" >&2
+    exit 1
+  fi
+  IFS='|' read -r archive_version artifact_target <<< "$run_metadata"
+  expected_app_version="${archive_version#release-v}"
+  expected_app_version="${expected_app_version#v}"
+  expected_app_version="$(printf '%s' "$expected_app_version" | tr '/ :' '---')"
   test -f "$root/README.md"
   test -f "$root/LICENSE"
   test -f "$root/NOTICE"
@@ -184,9 +215,17 @@ PY
   find "$root/web/build/assets" -type f -name '*.css' | grep -q .
   if [[ -f "$root/slskr" ]]; then
     chmod +x "$root/slskr"
-    "$root/slskr" version
+    if [[ -n "$host_target" && "$artifact_target" == "$host_target" ]]; then
+      verify_app_version "$root/slskr" "$expected_app_version"
+    else
+      echo "release executable present; skipped running target $artifact_target on host ${host_target:-unknown}"
+    fi
   elif [[ -f "$root/slskr.exe" ]]; then
-    echo "Windows executable present: $root/slskr.exe"
+    if [[ -n "$host_target" && "$artifact_target" == "$host_target" ]]; then
+      verify_app_version "$root/slskr.exe" "$expected_app_version"
+    else
+      echo "Windows executable present; skipped running target $artifact_target on host ${host_target:-unknown}"
+    fi
   else
     echo "archive does not contain slskr executable" >&2
     exit 1

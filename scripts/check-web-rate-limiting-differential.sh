@@ -16,15 +16,7 @@ keep_artifacts="${SLSKR_RATE_LIMIT_DIFFERENTIAL_KEEP:-0}"
 daemon_pid=""
 
 pick_free_port() {
-  python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    # The daemon's Soulseek listener binds on 0.0.0.0. Probe the same address
-    # space so a loopback-only bind or TIME_WAIT socket on another local IP
-    # cannot make the selected port look free when the wildcard bind is not.
-    sock.bind(("0.0.0.0", 0))
-    print(sock.getsockname()[1])
-PY
+  python3 "$repo_root/scripts/allocate-test-port.py" "$work_dir/.allocated-test-ports"
 }
 
 stop_daemon() {

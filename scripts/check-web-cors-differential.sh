@@ -12,21 +12,7 @@ request_auth_header="X-API-Key: $api_key"
 daemon_base_url=""
 
 pick_free_port() {
-  python3 - "$@" <<'PY'
-import socket
-import sys
-
-excluded = {int(value) for value in sys.argv[1:]}
-for _ in range(20):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    if port not in excluded:
-        print(port)
-        break
-else:
-    raise SystemExit("unable to find a free TCP port outside the excluded set")
-PY
+  python3 "$repo_root/scripts/allocate-test-port.py" "$work_dir/.allocated-test-ports" "$@"
 }
 
 stop_daemon() {

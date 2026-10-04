@@ -1,5 +1,5 @@
 use crate::probe_output::{emit_and_result, ProbeContext};
-use crate::{config::TrustedMeshPeer, mesh_dht};
+use crate::{config::TrustedMeshPeer, mesh_dht, APP_VERSION};
 use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
 use slskr_client::protocol::{
@@ -93,7 +93,7 @@ where
         Some("live-soak") => live_soak().await,
         Some("login-smoke") => login_smoke().await,
         Some("version") => {
-            println!("{CLIENT_NAME} {CLIENT_MAJOR_VERSION}.{CLIENT_MINOR_VERSION}");
+            println!("{}", version_output());
             Ok(())
         }
         Some("help") | Some("--help") | Some("-h") | None => {
@@ -102,6 +102,12 @@ where
         }
         Some(command) => Err(format!("unknown command: {command}\n\n{}", usage())),
     }
+}
+
+fn version_output() -> String {
+    format!(
+        "{CLIENT_NAME} {APP_VERSION} (Soulseek protocol {CLIENT_MAJOR_VERSION}.{CLIENT_MINOR_VERSION})"
+    )
 }
 
 fn normalize_command<I>(args: I) -> Result<Vec<String>, String>

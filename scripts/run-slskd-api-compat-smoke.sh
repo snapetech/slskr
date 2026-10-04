@@ -48,19 +48,7 @@ printf 'download fixture\n' >"$state_dir/downloads/foo.mp3"
 printf 'incomplete fixture\n' >"$state_dir/incomplete/foo.mp3"
 
 pick_free_port() {
-  "$python_bin" - "$@" <<'PY'
-import socket
-import sys
-
-excluded = {int(value) for value in sys.argv[1:]}
-while True:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    if port not in excluded:
-        print(port)
-        break
-PY
+  "$python_bin" "$repo_root/scripts/allocate-test-port.py" "$work_dir/.allocated-test-ports" "$@"
 }
 
 http_port="${SLSKR_SLSKD_API_SMOKE_PORT:-$(pick_free_port)}"

@@ -21,12 +21,7 @@ slskd_root="$work_dir/upstream-slskd"
 slskdn_root="$work_dir/upstream-slskdn"
 
 pick_free_port() {
-  "$python_bin" - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
+  "$python_bin" "$repo_root/scripts/allocate-test-port.py" "$work_dir/.allocated-test-ports"
 }
 
 cleanup() {

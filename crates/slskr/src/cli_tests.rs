@@ -15,6 +15,20 @@ use std::{
 };
 use tokio::io::duplex;
 
+#[test]
+fn version_output_reports_app_and_soulseek_protocol_versions() {
+    assert_eq!(
+        super::version_output(),
+        format!(
+            "{} {} (Soulseek protocol {}.{})",
+            crate::CLIENT_NAME,
+            crate::APP_VERSION,
+            crate::CLIENT_MAJOR_VERSION,
+            crate::CLIENT_MINOR_VERSION
+        )
+    );
+}
+
 fn normalize(args: &[&str]) -> Vec<String> {
     normalize_command(args.iter().map(OsString::from)).unwrap()
 }

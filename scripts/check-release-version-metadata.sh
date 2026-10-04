@@ -22,8 +22,21 @@ if ! rg -n -F 'SLSKR_RELEASE_VERSION' scripts/build-release-archive.sh .github/w
   status=1
 fi
 
+if ! rg -n -F 'SLSKR_APP_VERSION="$app_version" cargo' scripts/build-release-archive.sh >/dev/null \
+  || ! rg -n -F 'cargo:rustc-env=SLSKR_APP_VERSION=' crates/slskr/build.rs >/dev/null \
+  || ! rg -n -F 'option_env!("SLSKR_APP_VERSION")' crates/slskr/src/lib.rs >/dev/null \
+  || ! rg -n -F 'SLSKR_APP_VERSION="$pkgver" cargo build' packaging/aur/PKGBUILD >/dev/null; then
+  printf 'release version metadata check failed: release and source-package builds must embed SLSKR_APP_VERSION in the daemon\n' >&2
+  status=1
+fi
+
 if ! rg -n -F 'slskr-$safe_version-$target' scripts/build-release-archive.sh >/dev/null; then
   printf 'release version metadata check failed: release archive root must include sanitized release version and target\n' >&2
+  status=1
+fi
+
+if ! rg -n -F 'application version verified:' scripts/verify-release-artifacts.sh >/dev/null; then
+  printf 'release version metadata check failed: archive verification must check the application version\n' >&2
   status=1
 fi
 

@@ -13,14 +13,10 @@ pub(super) async fn build_info_uses_app_version_not_protocol_version() {
     assert_eq!(response.status, "200 OK");
     let body: serde_json::Value = serde_json::from_str(&response.body).unwrap();
 
-    assert_eq!(body["current"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["current"], crate::APP_VERSION);
     assert_eq!(
         body["full"],
-        format!(
-            "{} ({})",
-            env!("CARGO_PKG_VERSION"),
-            env!("CARGO_PKG_VERSION")
-        )
+        format!("{} ({})", crate::APP_VERSION, crate::APP_VERSION)
     );
     assert_eq!(body["latestTag"], "");
     assert_eq!(

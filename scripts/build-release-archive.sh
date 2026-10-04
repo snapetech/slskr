@@ -75,6 +75,15 @@ if [[ -z "$version" ]]; then
   version="$(git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD)"
 fi
 safe_version="$(printf '%s' "$version" | tr '/ :' '---')"
+app_version="${version#release-v}"
+app_version="${app_version#v}"
+app_version="$(printf '%s' "$app_version" | tr '/ :' '---')"
+case "$app_version" in
+  ''|*[!A-Za-z0-9.+_-]*)
+    echo "release version cannot be embedded in the application: $version" >&2
+    exit 2
+    ;;
+esac
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct HEAD)}"
 if ! [[ "$source_date_epoch" =~ ^[0-9]+$ ]]; then
@@ -112,7 +121,7 @@ cargo_args=(build --locked --release -p slskr)
 if [[ -n "$target" ]]; then
   cargo_args+=(--target "$target")
 fi
-cargo "${cargo_args[@]}"
+SLSKR_APP_VERSION="$app_version" cargo "${cargo_args[@]}"
 
 binary_path="target/$target/$profile/$binary_name"
 if [[ ! -f "$binary_path" ]]; then

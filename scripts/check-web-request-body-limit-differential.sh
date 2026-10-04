@@ -11,12 +11,7 @@ daemon_pid=""
 request_auth_header="X-API-Key: $api_key"
 
 pick_free_port() {
-  python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
+  python3 "$repo_root/scripts/allocate-test-port.py" "$work_dir/.allocated-test-ports"
 }
 
 stop_daemon() {

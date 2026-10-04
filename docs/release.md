@@ -93,6 +93,11 @@ The archive includes:
 - `docs/slskr.config.example.toml`
 - `RUN.txt`
 
+Release archive builds normalize `SLSKR_RELEASE_VERSION` and embed it as the
+application version while internal Cargo crates remain at `0.0.0`. The archive
+verifier checks `slskr version` on a matching host platform and verifies the
+archive contents without attempting to execute a foreign-platform binary.
+
 ## Release notes and changelog
 
 User-facing, security, operational, and user-facing documentation changes add

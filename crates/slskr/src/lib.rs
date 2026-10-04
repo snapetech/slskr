@@ -1055,7 +1055,10 @@ use self::utils::{
     unix_timestamp, unix_timestamp_millis,
 };
 
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const APP_VERSION: &str = match option_env!("SLSKR_APP_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 const MANAGED_BACKGROUND_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const SHARE_SCAN_CANCELLED_ERROR: &str = "share scan cancelled because settings changed";

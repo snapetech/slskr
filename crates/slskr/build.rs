@@ -9,6 +9,18 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SLSKR_APP_VERSION");
+    if let Ok(app_version) = std::env::var("SLSKR_APP_VERSION") {
+        if app_version.is_empty()
+            || !app_version.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '+' | '-' | '_')
+            })
+        {
+            panic!("SLSKR_APP_VERSION contains unsupported characters");
+        }
+        println!("cargo:rustc-env=SLSKR_APP_VERSION={app_version}");
+    }
+
     // Track webui source changes
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let Some(repo_root) = manifest_dir.parent().and_then(|path| path.parent()) else {

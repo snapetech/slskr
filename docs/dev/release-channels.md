@@ -12,7 +12,7 @@ slskdN release system, with slskR-specific package and project names.
 | Docker Hub | `snapetech/slskr` | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` |
 | AUR source package | `slskr` | `AUR_SSH_KEY` |
 | AUR binary package | `slskr-bin` | `AUR_SSH_KEY` |
-| COPR | `slskdn/slskr` (x86_64 and aarch64) | Preferred: `COPR_KERBEROS_PRINCIPAL`, `COPR_KERBEROS_KEYTAB_B64`; fallback: `COPR_LOGIN`, `COPR_TOKEN` |
+| COPR | `slskdn/slskr` (x86_64 and aarch64) | Preferred: `COPR_KERBEROS_PRINCIPAL`, `COPR_KERBEROS_KEYTAB_B64`; then Fedora username/password/TOTP; last fallback: `COPR_LOGIN`, `COPR_TOKEN` |
 | Launchpad PPA | `~keefshape/ubuntu/slskdn` (amd64; arm64 source-ready) | `GPG_PRIVATE_KEY`, optional `LAUNCHPAD_SFTP_KEY`, optional `LAUNCHPAD_SFTP_USER` |
 | Homebrew tap | `snapetech/homebrew-slskdn` (compatibility tap) | `TAP_GITHUB_TOKEN` |
 | Snap | `slskr` (amd64 and arm64) | Snap Store credentials managed outside this workflow |
@@ -56,7 +56,9 @@ unless the corresponding workflow explicitly performs that upload.
 
 ## COPR Authentication
 
-COPR publishing prefers Fedora Kerberos/GSSAPI because Copr API tokens expire.
+COPR publishing prefers a keytab-backed Kerberos/GSSAPI principal because Copr
+API tokens expire. If no keytab is configured, the workflow tries Fedora
+username/password/TOTP credentials before falling back to the Copr API token.
 Store a keytab-backed principal in OpenBao, then let `github:sync-secrets`
 propagate it to GitHub Actions:
 
@@ -66,9 +68,9 @@ scripts/store-copr-kerberos-openbao.sh \
   --keytab /path/to/copr.keytab
 ```
 
-Keep `COPR_LOGIN` and `COPR_TOKEN` configured until the Kerberos path has
-completed a release-publish run. If Kerberos secrets are absent, the workflow
-continues to use the token fallback.
+Keep `COPR_LOGIN` and `COPR_TOKEN` configured only as a last fallback while the
+preferred Kerberos or Fedora password+TOTP path is being validated. The
+workflow uses the token only when the other credential sets are incomplete.
 
 ## Dynamic Hashes
 
