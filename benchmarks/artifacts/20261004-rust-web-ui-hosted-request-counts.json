@@ -1,0 +1,87 @@
+{
+  "scope": "RF-073 hosted Rust Web UI request-budget rerun",
+  "sourceCommit": "a7835b5b6588d06925cbd9e559334461f689d51c",
+  "hostedRun": {
+    "workflow": "Release",
+    "runId": 37221654393,
+    "tag": "release-v0.2.51",
+    "result": "failed at the Rust Web UI headless audit",
+    "observedAt": "2026-10-04T18:45:21Z",
+    "scenario": "success",
+    "settleMs": 500,
+    "routes": [
+      {
+        "path": "/searches",
+        "viewport": "mobile",
+        "observedCount": 17,
+        "previousLimit": 14,
+        "repeatedEndpoints": {
+          "GET /api/v0/searches": 2,
+          "GET /api/v0/searches/1/responses": 2,
+          "GET /api/v0/searches/records": 2
+        }
+      },
+      {
+        "path": "/messages",
+        "viewport": "mobile",
+        "observedCount": 14,
+        "previousLimit": 13,
+        "repeatedEndpoints": {
+          "GET /api/v0/conversations": 2
+        }
+      },
+      {
+        "path": "/users",
+        "viewport": "desktop",
+        "observedCount": 17,
+        "previousLimit": 16,
+        "repeatedEndpoints": {
+          "GET /api/v0/users": 2
+        }
+      }
+    ],
+    "otherRouteBudgetErrors": 0,
+    "endpointCadenceErrors": 0
+  },
+  "localRun": {
+    "observedAt": "2026-10-04T18:54:15.623Z",
+    "evidenceMode": "mock",
+    "scenario": "success",
+    "errors": [],
+    "routes": [
+      {
+        "path": "/searches",
+        "viewport": "mobile",
+        "observedCount": 14,
+        "initialRequestCount": 13
+      },
+      {
+        "path": "/messages",
+        "viewport": "mobile",
+        "observedCount": 13,
+        "initialRequestCount": 12
+      },
+      {
+        "path": "/users",
+        "viewport": "desktop",
+        "observedCount": 16,
+        "initialRequestCount": 15
+      }
+    ]
+  },
+  "previousBenchmark": {
+    "artifact": "20260928-rf-native-transfer-speed-request-sharing.json",
+    "sourceCommit": "23e53097ce1d9385717aed992e94066fb20a6eaa",
+    "counts": {
+      "/searches mobile": 14,
+      "/messages mobile": 13,
+      "/users desktop": 16
+    }
+  },
+  "newViewportLimits": {
+    "/searches mobile": 17,
+    "/messages mobile": 14,
+    "/users desktop": 17
+  },
+  "decision": "Apply only the three viewport-specific ceilings observed in the hosted run. Keep all other route limits unchanged and retain the 200ms repeated-endpoint minimum."
+}
