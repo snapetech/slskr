@@ -34,7 +34,7 @@ const PodMembershipVerificationPanel = React.memo(({
   verifyingMembership,
   visible,
 }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {

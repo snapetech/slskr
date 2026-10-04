@@ -19,7 +19,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const PodMessageMaintenanceActions = ({ size = 'tiny' }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

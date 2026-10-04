@@ -27,7 +27,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const MediaCoreStatisticsDashboardPanel = () => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

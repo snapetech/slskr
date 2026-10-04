@@ -58,7 +58,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const MediaCore = () => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

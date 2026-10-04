@@ -33,7 +33,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const MediaCoreContentRegistryPanel = ({ setContentId, setError, setStats }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
   const resolveExternalIdPanelRef = useRef(null);
 
   useEffect(() => {

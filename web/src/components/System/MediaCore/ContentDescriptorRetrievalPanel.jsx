@@ -33,7 +33,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const ContentDescriptorRetrievalPanel = ({ setVerificationResult }) => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;

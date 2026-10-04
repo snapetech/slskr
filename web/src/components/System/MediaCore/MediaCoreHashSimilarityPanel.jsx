@@ -19,7 +19,7 @@ const useMountedState = (mountedRef, initialValue) => {
 };
 
 const MediaCoreHashSimilarityPanel = React.memo(() => {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
