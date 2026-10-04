@@ -18,10 +18,11 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
-## [0.2.44] — 2026-10-03
+## [0.2.45] — 2026-10-04
 
 - Improved search loading and recovery, user profile details, mobile navigation,
   and keyboard and screen-reader access across the Web UI.
+- Removed donation links from the README and both Web UI shells.
 - Hardened share streaming, listener validation, asynchronous shutdown, Python
   WebSocket cancellation, and certification setup and failure reporting.
 - Strengthened browser security and audit checks to reject unsafe code paths
