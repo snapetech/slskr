@@ -25,7 +25,7 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span><span class="slskr-appbar-support"><b>Keep the node moving</b><a href="https://www.paypal.com/donate/?business=donations%40snape.tech" target="_blank" rel="noopener noreferrer">PayPal</a><a href="https://ko-fi.com/snapetech" target="_blank" rel="noopener noreferrer">Ko-fi</a></span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{rustymilk}{player}</div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{rustymilk}{player}</div>"#,
         route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
         rustymilk = rustymilk_panel_html(),

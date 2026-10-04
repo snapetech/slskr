@@ -2,8 +2,6 @@
 
 [![Discord](https://img.shields.io/badge/Discord-join%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/5PyXBfvS6T)
 
-Support slskr development through [PayPal](https://www.paypal.com/donate/?business=donations%40snape.tech) or [Ko-fi](https://ko-fi.com/snapetech).
-
 `slskr` is a self-hosted Rust daemon, HTTP API, and browser UI for the
 [Soulseek](https://www.slsknet.org/news/) network.
 
@@ -551,9 +549,6 @@ https://github.com/snapetech/slskr
 Community support and migration discussion can be found on Discord:
 [discord.gg/5PyXBfvS6T](https://discord.gg/5PyXBfvS6T).
 
-Development and infrastructure tips are accepted through
-[PayPal](https://www.paypal.com/donate/?business=donations%40snape.tech) and
-[Ko-fi](https://ko-fi.com/snapetech).
 
 ## License
 

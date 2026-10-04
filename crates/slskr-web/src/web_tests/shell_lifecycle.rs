@@ -7,8 +7,6 @@ fn shell_contains_primary_routes() {
         assert!(html.contains(item.label), "missing {}", item.label);
     }
     assert!(html.contains("Search, transfers, messages"));
-    assert!(html.contains("donations%40snape.tech"));
-    assert!(html.contains("https://ko-fi.com/snapetech"));
     assert!(html.contains("slskr-player"));
     assert!(html.contains("data-slskr-player"));
     assert!(html.contains("slskr-player-audio"));

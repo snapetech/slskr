@@ -336,29 +336,7 @@ class Footer extends Component {
                 <span>GitHub</span>
               </a>
 
-              <span
-                aria-label="Support slskr development"
-                className="slskr-footer-support"
-              >
-                <a
-                  className="slskr-footer-sponsor paypal"
-                  href="https://www.paypal.com/donate/?business=donations%40snape.tech"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                  title="Support slskr development with PayPal"
-                >
-                  <Icon name="paypal" /> PayPal
-                </a>
-                <a
-                  className="slskr-footer-sponsor kofi"
-                  href="https://ko-fi.com/snapetech"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                  title="Support slskr development on Ko-fi"
-                >
-                  <Icon name="coffee" /> Ko-fi
-                </a>
-              </span>
+
 
               <span className="slskr-footer-copyright">
                 © {year}{' '}

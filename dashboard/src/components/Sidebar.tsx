@@ -9,8 +9,6 @@ import {
   Activity,
   Settings,
   LogOut,
-  HeartHandshake,
-  Coffee,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -58,33 +56,6 @@ export default function Sidebar() {
       </nav>
 
       <div className="absolute bottom-0 w-full border-t border-gray-700 p-2 sm:w-64 sm:p-6">
-        <p className="mb-3 hidden text-xs font-semibold uppercase tracking-widest text-gray-400 sm:block">
-          Keep the node moving
-        </p>
-        <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <a
-            aria-label="Support slskr development with PayPal"
-            className="flex min-h-8 items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-1 py-2 text-xs font-semibold text-sky-300 transition-colors hover:border-sky-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-400 sm:px-3"
-            href="https://www.paypal.com/donate/?business=donations%40snape.tech"
-            rel="noopener noreferrer"
-            target="_blank"
-            title="Support slskr development with PayPal"
-          >
-            <HeartHandshake aria-hidden="true" className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">PayPal</span>
-          </a>
-          <a
-            aria-label="Support slskr development on Ko-fi"
-            className="flex min-h-8 items-center justify-center gap-2 rounded-full border border-rose-400/40 bg-rose-400/10 px-1 py-2 text-xs font-semibold text-rose-300 transition-colors hover:border-rose-200 hover:text-white focus:outline-none focus:ring-2 focus:ring-rose-300 sm:px-3"
-            href="https://ko-fi.com/snapetech"
-            rel="noopener noreferrer"
-            target="_blank"
-            title="Support slskr development on Ko-fi"
-          >
-            <Coffee aria-hidden="true" className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Ko-fi</span>
-          </a>
-        </div>
         <button
           className="flex min-h-10 w-full items-center justify-center text-gray-300 transition-colors hover:text-white sm:justify-start"
           onClick={handleLogout}

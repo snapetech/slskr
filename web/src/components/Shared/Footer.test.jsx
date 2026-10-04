@@ -81,14 +81,6 @@ describe('Footer', () => {
     expect(screen.getByText('1 swarm')).toBeInTheDocument();
     expect(screen.getByText('backfill')).toBeInTheDocument();
     expect(screen.getByText('+2')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /paypal/i })).toHaveAttribute(
-      'href',
-      'https://www.paypal.com/donate/?business=donations%40snape.tech',
-    );
-    expect(screen.getByRole('link', { name: /ko-fi/i })).toHaveAttribute(
-      'href',
-      'https://ko-fi.com/snapetech',
-    );
   });
 
   it('shows only attribution when logged out — no build badge, donation links, or telemetry', async () => {
