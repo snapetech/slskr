@@ -18,7 +18,7 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
-## [0.2.45] — 2026-10-04
+## [0.2.46] — 2026-10-04
 
 - Improved search loading and recovery, user profile details, mobile navigation,
   and keyboard and screen-reader access across the Web UI.
