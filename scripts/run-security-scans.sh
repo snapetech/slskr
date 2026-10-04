@@ -101,6 +101,9 @@ run_trivy() {
   local ignore_args=()
   local docker_ignore_args=()
   local trivy_skip_args=()
+  # The release gate writes Cargo outputs and frozen upstream checkouts here.
+  # They are build/reference data, not slskR's dependency or release surface.
+  trivy_skip_args+=(--skip-dirs ./target)
   if [[ -f "$repo_root/.trivyignore" ]]; then
     ignore_args+=(--ignorefile "$repo_root/.trivyignore")
     docker_ignore_args+=(--ignorefile /src/.trivyignore)
