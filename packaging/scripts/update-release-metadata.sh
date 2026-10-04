@@ -275,10 +275,10 @@ done
 for values in \
   packaging/helm/slskr/values.yaml \
   packaging/truenas-scale/charts/slskr/values.yaml; do
-  sed -i "s|^  tag: .*|  tag: \"${pkgver}\"|" "$values"
+  sed -i "s|^  tag: .*|  tag: \"${release_version}\"|" "$values"
 done
 
-sed -i "s|^  <Repository>.*</Repository>|  <Repository>ghcr.io/snapetech/slskr:${pkgver}</Repository>|" \
+sed -i "s|^  <Repository>.*</Repository>|  <Repository>ghcr.io/snapetech/slskr:${release_version}</Repository>|" \
   packaging/unraid/slskr.xml
 sed -i "s|^version=\".*\"|version=\"${pkgver}\"|" \
   packaging/synology-spk/INFO

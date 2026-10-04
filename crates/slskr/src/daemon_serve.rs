@@ -134,6 +134,7 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 format!("failed to reconcile interrupted webhook deliveries: {error}")
             })?;
     }
+    let mut initial_share_scan_required = false;
     let share_index = if config.controller_no_share_scan {
         ShareIndexSnapshot::uninitialized(&config)
     } else if let Some(db) = db.as_ref() {
@@ -164,22 +165,24 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     unix_timestamp().saturating_sub(updated_at) <= retention.as_secs()
                 })
             });
+        let cache_matches_roots = configured_aliases == persisted_aliases;
         if config.controller_force_share_scan
             || records.is_empty()
-            || configured_aliases != persisted_aliases
+            || !cache_matches_roots
             || !cache_is_fresh
         {
-            let scanned_share_index = build_share_index(&config);
-            let records = persisted_share_file_records(&scanned_share_index);
-            db.replace_share_files(&records)
-                .await
-                .map_err(|error| format!("failed to persist share index: {error}"))?;
-            scanned_share_index
+            initial_share_scan_required = true;
+            if !config.controller_force_share_scan && cache_matches_roots && !records.is_empty() {
+                ShareIndexSnapshot::from_persisted(&config, records)
+            } else {
+                ShareIndexSnapshot::uninitialized(&config)
+            }
         } else {
             ShareIndexSnapshot::from_persisted(&config, records)
         }
     } else {
-        build_share_index(&config)
+        initial_share_scan_required = true;
+        ShareIndexSnapshot::uninitialized(&config)
     };
     let search_store = if let Some(db) = db.as_ref() {
         let records = db
@@ -657,11 +660,14 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     let capability_signing_key = load_or_create_capability_signing_key(&config.state_dir)?;
     let spotify_connection =
         load_spotify_connection_store(&config.state_dir, &capability_signing_key);
-    let share_lifecycle = if config.controller_no_share_scan {
+    let mut share_lifecycle = if config.controller_no_share_scan {
         ShareLifecycleState::uninitialized()
     } else {
         ShareLifecycleState::from_snapshot(&share_index)
     };
+    if initial_share_scan_required {
+        share_lifecycle.scanning = true;
+    }
     let share_settings = config.share_settings.clone();
     let search_request_filters = compile_controller_regexes(
         &config.controller_search_request_filters,
@@ -1103,6 +1109,22 @@ pub(super) async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     }
     for address in &state.config.http_binds {
         println!("slskr listening on http://{address}");
+    }
+    if initial_share_scan_required {
+        let scan_state = Arc::clone(&state);
+        state.spawn_managed_task(async move {
+            if let Err(error) = rebuild_share_index(&scan_state).await {
+                if error != SHARE_SCAN_CANCELLED_ERROR {
+                    record_daemon_log(
+                        &scan_state,
+                        logging::LogLevel::Error,
+                        "shares",
+                        format!("initial share scan failed: {error}"),
+                    )
+                    .await;
+                }
+            }
+        });
     }
     if auth_disabled_on_non_loopback(&state.config) {
         eprintln!(

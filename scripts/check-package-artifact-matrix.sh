@@ -86,6 +86,15 @@ for expected in \
 done
 
 for expected in \
+  'tag: \"${release_version}\"' \
+  'ghcr.io/snapetech/slskr:${release_version}'; do
+  if ! rg -n -F -- "$expected" packaging/scripts/update-release-metadata.sh >/dev/null; then
+    printf 'package artifact matrix check failed: container consumers must use the published image tag: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in \
   'Architecture: amd64 arm64' \
   'DEB_HOST_ARCH' \
   'aarch64-unknown-linux-gnu' \
