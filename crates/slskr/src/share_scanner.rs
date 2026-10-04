@@ -434,6 +434,7 @@ pub(super) struct ShareScanRequest<'a> {
     pub(super) cancellation: Arc<AtomicBool>,
 }
 
+#[cfg(any(test, feature = "full-controller-tests"))]
 pub(super) fn build_share_index(config: &AppConfig) -> ShareIndexSnapshot {
     build_share_index_with_cancellation(config, Arc::new(AtomicBool::new(false)))
         .expect("share scan without cancellation cannot fail")

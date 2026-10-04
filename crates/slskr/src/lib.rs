@@ -868,9 +868,10 @@ use self::share_scanner::extension_for;
 use self::share_scanner::reserve_share_scan_entry;
 #[cfg(test)]
 use self::share_scanner::{ShareScanRequest, scan_share_dirs_with_cancellation};
+#[cfg(any(test, feature = "full-controller-tests"))]
+use self::share_scanner::build_share_index;
 use self::share_scanner::{
-    build_share_index, build_share_index_with_cancellation, scan_share_dirs, summarize_extensions,
-    virtual_share_path,
+    build_share_index_with_cancellation, scan_share_dirs, summarize_extensions, virtual_share_path,
 };
 use self::songid_controller::{
     songid_capabilities_json, songid_evidence_package_json, songid_runs_value, songid_source_type,
